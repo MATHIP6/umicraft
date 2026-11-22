@@ -8,6 +8,7 @@ use umicraft_ui::{FontAtlas, Ui};
 
 use super::layout::{Gui, BUTTON_H, HALF_W};
 use super::{option_label, OptionsScreen, Outcome, Page};
+use crate::options::video_spec::VideoPage;
 use crate::options::{Options, FOV};
 
 impl OptionsScreen {
@@ -93,7 +94,7 @@ impl OptionsScreen {
             let rect = gui.rect(x, h6 + row - 6.0, HALF_W, BUTTON_H);
             if self.button(ui, atlas, id, rect, lang.tr(key), true, None) {
                 let page = match id {
-                    "nav:video" => Page::Video,
+                    "nav:video" => Page::Video(VideoPage::Root),
                     "nav:controls" => Page::Controls,
                     "nav:chat" => Page::Chat,
                     "skin" => Page::Skin,

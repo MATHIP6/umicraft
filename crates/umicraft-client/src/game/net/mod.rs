@@ -201,10 +201,9 @@ fn apply_net_event(
             game.hud_dirty = true;
         }
         PlayEvent::TimeUpdate(packet) => {
-            // The signed value is kept as-is: a negative time means the
-            // server froze the cycle. The client never advances the clock
-            // between packets (ADR-0008 §4).
-            game.world_time = packet.time_of_day;
+            // A negative time means the server froze the cycle; the
+            // client ticks the clock between packets (ADR-0008 §4).
+            game.clock.sync(packet.time_of_day);
         }
         PlayEvent::OpenWindow(packet) => inventory::open_window(game, packet, frames),
         PlayEvent::CloseWindow { window_id } => inventory::close_window(game, window_id, frames),

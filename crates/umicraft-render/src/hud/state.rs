@@ -62,6 +62,11 @@ pub struct HudState {
     pub now: Option<Instant>,
     /// The vanilla F3 screen (P9-g), `None` while F3 is off.
     pub debug_f3: Option<DebugF3View>,
+    /// The compact "fps, chunks, entities, updates" line of the Show FPS
+    /// option; drawn only while the F3 screen is off.
+    pub fps_line: Option<String>,
+    /// The timer graph of the Lagometer option, drawn under the F3 screen.
+    pub lagometer: Option<LagometerView>,
     /// The action bar text and its opacity, when a message is displayed.
     pub action_bar: Option<ActionBarView>,
     /// The title and subtitle, when displayed.
@@ -103,6 +108,20 @@ pub struct DebugF3View {
     pub left: Vec<String>,
     /// The right column; may carry the `\u{a7}a` / `\u{a7}c` colour prefixes.
     pub right: Vec<String>,
+}
+
+/// The timers the Lagometer graphs, in microseconds, oldest sample first.
+///
+/// The client keeps the vectors between frames, so refreshing them does not
+/// allocate once they have grown to the ring size.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LagometerView {
+    /// The whole frame.
+    pub frame: Vec<u32>,
+    /// The world sync: events, meshing hand-over and uploads.
+    pub sync: Vec<u32>,
+    /// The chunk mesh uploads alone.
+    pub upload: Vec<u32>,
 }
 
 /// The chat options that shape the log (`GameSettings.chat*`), as the
@@ -233,6 +252,8 @@ impl Default for HudState {
             chat_style: ChatStyle::default(),
             now: None,
             debug_f3: None,
+            fps_line: None,
+            lagometer: None,
             action_bar: None,
             title: None,
             sidebar: None,

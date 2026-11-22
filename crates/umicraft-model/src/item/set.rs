@@ -66,6 +66,9 @@ pub type SpriteLookup<'a> = &'a dyn Fn(&str) -> Option<SpriteMask>;
 #[derive(Debug, Default)]
 pub struct ItemModelSet {
     by_name: HashMap<&'static str, Arc<ItemModel>>,
+    /// The models a resource pack adds beyond the name table
+    /// ([`Self::add_named`]).
+    extra: HashMap<String, Arc<ItemModel>>,
     texture_keys: BTreeSet<String>,
     frame: Vec<ModelQuad>,
     map_frame: Vec<ModelQuad>,
@@ -167,6 +170,25 @@ impl ItemModelSet {
         )
     }
 
+    /// Bakes the model `models/item/<name>.json` of `source`, which is not in
+    /// the name table, and keeps it under `name` for [`Self::model_by_name`].
+    /// Resource packs use this for the item models of Custom Items.
+    ///
+    /// # Errors
+    /// [`crate::ModelError`] for an unreadable or malformed model, an
+    /// unresolved texture or a parent cycle. The set is unchanged then.
+    pub fn add_named(
+        &mut self,
+        source: &dyn ResourceSource,
+        sprites: SpriteLookup<'_>,
+        name: &str,
+    ) -> ModelResult<()> {
+        let mut loader = ModelLoader::new(source);
+        let model = self.bake(&mut loader, name, sprites)?;
+        self.extra.insert(name.to_string(), Arc::new(model));
+        Ok(())
+    }
+
     /// The model registered for an item and its damage value.
     ///
     /// Applies the mesher's rules: a damageable item ignores its damage
@@ -195,7 +217,10 @@ impl ItemModelSet {
     /// The model with a given name, e.g. the in-use `bow_pulling_1`.
     #[must_use]
     pub fn model_by_name(&self, name: &str) -> Option<&ItemModel> {
-        self.by_name.get(name).map(Arc::as_ref)
+        self.by_name
+            .get(name)
+            .or_else(|| self.extra.get(name))
+            .map(Arc::as_ref)
     }
 
     /// Concrete texture keys referenced by any baked quad.
@@ -204,10 +229,10 @@ impl ItemModelSet {
         &self.texture_keys
     }
 
-    /// Number of distinct baked models.
+    /// Number of distinct baked models, the pack-added ones included.
     #[must_use]
     pub fn model_count(&self) -> usize {
-        self.by_name.len()
+        self.by_name.len() + self.extra.len()
     }
 }
 

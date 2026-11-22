@@ -10,7 +10,6 @@
 
 use umicraft_game::entity::meta::Variant;
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
-use umicraft_model::entity::child::scale_mesh;
 use umicraft_model::entity::{BipedStyle, CapeModel, HumanoidModel, ModelVertex, TextureSlot};
 
 use umicraft_game::entity::wrap_degrees;
@@ -19,6 +18,7 @@ use super::animals::animal_layers;
 use super::armor::armor_layers;
 use super::arrows::arrow_layers;
 use super::creatures::{creature_layers, creeper_layers};
+use super::custom_models::{mesh_with_custom, CustomModels, Meshes};
 use super::glow::Glow;
 use super::player::posed_player;
 use super::pose::humanoid_pose;
@@ -28,7 +28,7 @@ use super::Viewer;
 
 /// The animation inputs every model's `set_angles` takes.
 #[derive(Clone, Copy)]
-pub(super) struct Pose {
+pub(super) struct Pose<'a> {
     pub(super) swing: f32,
     pub(super) amount: f32,
     /// Head yaw relative to the body, in degrees.
@@ -37,16 +37,19 @@ pub(super) struct Pose {
     /// Ticks lived plus the partial tick (MCP `ageInTicks`): drives the
     /// idle motion of the models that move without walking.
     pub(super) age: f32,
+    /// The custom entity models of the packs, when the mob may use one.
+    pub(super) custom: Option<&'a CustomModels>,
 }
 
-impl Pose {
-    fn of(ent: &EntityRenderSnapshot) -> Self {
+impl<'a> Pose<'a> {
+    pub(super) fn of(ent: &EntityRenderSnapshot, custom: Option<&'a CustomModels>) -> Self {
         Self {
             swing: ent.limb_swing,
             amount: ent.limb_swing_amount,
             head_yaw: wrap_degrees(ent.head_yaw - ent.body_yaw),
             head_pitch: ent.pitch,
             age: ent.age,
+            custom,
         }
     }
 }
@@ -112,7 +115,7 @@ pub(super) fn build_entity_layers_for(
     skins: &dyn SkinLookup,
     viewer: Viewer,
 ) -> Vec<EntityLayer> {
-    let pose = Pose::of(ent);
+    let pose = Pose::of(ent, skins.custom_models());
     let mut layers = if ent.kind == EntityKind::Creeper {
         creeper_layers(ent, pose)
     } else {
@@ -138,6 +141,9 @@ pub(super) fn build_entity_layers_for(
     layers.extend(skull_layers(ent, skins));
     // Arrows in the body are drawn on an invisible player too.
     layers.extend(arrow_layers(ent, viewer.style));
+    if let Some(random) = skins.random_entities() {
+        random.retarget(ent, &mut layers);
+    }
     layers
 }
 
@@ -155,16 +161,61 @@ fn humanoid_layers(
         layers.extend(cape_layer(ent, skins));
         return Some(layers);
     }
-    let HumanoidMob { model, slot, scale } = posed_humanoid_mob(ent)?;
-    let mut vertices = if ent.meta.baby {
+    let HumanoidMob {
+        mut model,
+        slot,
+        scale,
+    } = posed_humanoid_mob(ent)?;
+    let mut meshes = match custom_humanoid(ent) {
+        Some((name, rest)) => mesh_with_custom(
+            skins.custom_models(),
+            ent,
+            name,
+            slot,
+            &mut model,
+            &rest,
+            |model| humanoid_mesh(model, ent.meta.baby),
+        ),
+        None => Meshes {
+            vanilla: humanoid_mesh(&model, ent.meta.baby),
+            custom: None,
+        },
+    };
+    meshes.scale(scale);
+    let mut layers = meshes.into_layers(slot);
+    layers.extend(armor_layers(ent, scale, BipedStyle::V1_8));
+    Some(layers)
+}
+
+/// The body mesh of a humanoid mob, in its baby proportions when young.
+fn humanoid_mesh(model: &HumanoidModel, baby: bool) -> Vec<ModelVertex> {
+    if baby {
         model.emit_child_mesh()
     } else {
         model.emit_mesh()
-    };
-    scale_mesh(&mut vertices, scale);
-    let mut layers = one(slot, vertices);
-    layers.extend(armor_layers(ent, scale, BipedStyle::V1_8));
-    Some(layers)
+    }
+}
+
+/// The CEM entity name of a humanoid mob that custom models cover, with its
+/// unposed model (zombie, zombie pigman, skeleton and wither skeleton; the
+/// zombie villager and the giant have no covered part table).
+fn custom_humanoid(ent: &EntityRenderSnapshot) -> Option<(&'static str, HumanoidModel)> {
+    let wither = matches!(ent.meta.variant, Variant::Skeleton { wither: true });
+    match ent.kind {
+        EntityKind::Zombie if !ent.meta.is_zombie_villager() => {
+            Some(("zombie", HumanoidModel::zombie()))
+        }
+        EntityKind::ZombiePigman => Some(("zombie_pigman", HumanoidModel::zombie())),
+        EntityKind::Skeleton => Some((
+            if wither {
+                "wither_skeleton"
+            } else {
+                "skeleton"
+            },
+            HumanoidModel::skeleton(),
+        )),
+        _ => None,
+    }
 }
 
 /// The posed model of a zombie-like or skeleton-like mob.

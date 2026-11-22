@@ -20,6 +20,7 @@ use super::{App, CARET_BLINK_MS};
 use crate::game::GameEvent;
 use crate::options::{Action, Binding};
 use crate::screens::anvil_field::Edit;
+use crate::screens::inventory::custom_gui::custom_region;
 use crate::screens::inventory::draw::{screen_input, ScreenFacts};
 use crate::screens::inventory::input::{
     Button, ContainerAction, Context, InventoryAction, InventoryKey,
@@ -80,6 +81,11 @@ impl App {
                 .world
                 .as_ref()
                 .map_or_else(Vec::new, |world| world.hud().effects.clone()),
+            custom_texture: custom_region(
+                self.assets.files.custom_guis(),
+                view,
+                self.camera.position().y.floor() as i32,
+            ),
         }
     }
     /// The facts of the open inventory screen; the default when none is open.

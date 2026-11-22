@@ -115,6 +115,9 @@ pub(crate) struct ScreenFacts {
     pub caret_visible: bool,
     /// The potion effects listed beside the player inventory.
     pub effects: Vec<EffectLine>,
+    /// The atlas region a pack replaces the picture of the screen with
+    /// (Custom GUIs), `None` for the vanilla picture.
+    pub custom_texture: Option<String>,
 }
 
 /// Left edge, top edge and caret height of the anvil name text, in GUI pixels
@@ -368,7 +371,13 @@ pub(crate) fn draw_inventory_overlay(
     ui.draw().rect(viewport, DIMMING);
     let kind = screen_kind(view.container.as_ref());
     let layout = screen_layout(viewport, kind, !facts.effects.is_empty());
-    let region = gui_atlas.and_then(|atlas| atlas.region(layout.spec.texture));
+    let region = gui_atlas.and_then(|atlas| {
+        let custom = facts
+            .custom_texture
+            .as_deref()
+            .and_then(|name| atlas.region(name));
+        custom.or_else(|| atlas.region(layout.spec.texture))
+    });
     let hover = ui.pointer().and_then(|[x, y]| layout.hotspot_at((x, y)));
     let dynamic = kind.dynamic(&screen_state(view, facts, hover));
 

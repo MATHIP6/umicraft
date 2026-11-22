@@ -22,7 +22,7 @@ use umicraft_model::item::pose::{held_pose, legacy_flat_held_pose};
 use umicraft_model::item::ItemModel;
 use umicraft_model::ModelQuad;
 
-use super::{quads_of, sprite_model, world_light, ItemLayers, BOW, FISHING_ROD_CAST};
+use super::{entity_stack_model, quads_of, world_light, ItemLayers, BOW, FISHING_ROD_CAST};
 use crate::resources::item_icons::ItemResources;
 use crate::scene::entity::{
     arm_pose, body_matrix, posed_humanoid_mob, posed_player, x_mirror, WITCH_SCALE,
@@ -108,7 +108,7 @@ fn shown_model<'a>(
     let named = special_model_name(entity, stack)
         .and_then(|name| resources.models().model_by_name(name))
         .and_then(quads_of);
-    named.or_else(|| sprite_model(resources, stack.item_id, stack.damage))
+    named.or_else(|| entity_stack_model(resources, stack))
 }
 
 /// The frame of an item in the hand of `entity`, a player posed in

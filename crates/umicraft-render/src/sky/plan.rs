@@ -11,12 +11,17 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat4, Vec4};
 
 use super::celestial;
+use super::custom;
 use super::dome;
 use super::state::{SkyKind, SkyState};
+use crate::SkyDetails;
+use umicraft_packext::sky::LayerFrame;
 
 /// Maximum layers one frame can hold: dome, fan, sun, moon, stars, black
 /// plane, black box and void plane (the End needs one).
 pub(super) const MAX_LAYERS: usize = 8;
+/// Custom sky layers drawn in one frame; further ones are dropped.
+pub(super) const MAX_CUSTOM_LAYERS: usize = 32;
 /// Bytes between two uniform slots (the dynamic-offset alignment).
 pub(super) const SLOT_STRIDE: usize = 256;
 
@@ -29,6 +34,33 @@ pub(super) enum Blend {
     Alpha,
     /// `SRC_ALPHA, ONE` (`tryBlendFuncSeparate(770, 1, 1, 0)`).
     Additive,
+    /// `ONE_MINUS_DST_COLOR, ZERO` (custom sky `subtract`).
+    Subtract,
+    /// `DST_COLOR, ONE_MINUS_SRC_ALPHA` (custom sky `multiply`).
+    Multiply,
+    /// `ONE, ONE` (custom sky `dodge`).
+    Dodge,
+    /// `ZERO, ONE_MINUS_SRC_COLOR` (custom sky `burn`).
+    Burn,
+    /// `ONE, ONE_MINUS_SRC_COLOR` (custom sky `screen`).
+    Screen,
+    /// `DST_COLOR, SRC_COLOR` (custom sky `overlay`).
+    Overlay,
+}
+
+impl Blend {
+    /// Every mode, in declaration order: the index of its pipeline.
+    pub(super) const ALL: [Self; 9] = [
+        Self::Opaque,
+        Self::Alpha,
+        Self::Additive,
+        Self::Subtract,
+        Self::Multiply,
+        Self::Dodge,
+        Self::Burn,
+        Self::Screen,
+        Self::Overlay,
+    ];
 }
 
 /// The image a layer samples.
@@ -42,6 +74,8 @@ pub(super) enum Image {
     Moon,
     /// `environment/end_sky.png`.
     EndSky,
+    /// The picture of custom sky layer `n` (a flat index over the plan).
+    Custom(u16),
 }
 
 /// The mesh a layer draws.
@@ -61,6 +95,8 @@ pub(super) enum Mesh {
     VoidBox,
     /// The End cube.
     EndCube,
+    /// The cube of a custom sky layer.
+    Cube,
 }
 
 /// One uniform slot, padded to [`SLOT_STRIDE`]; mirrors `Slot` in `sky.wgsl`.
@@ -99,6 +135,13 @@ pub(super) struct PlanInput<'a> {
     pub eye_y: f32,
     /// Whether the world is a superflat one, whose horizon is at `y = 0`.
     pub flat_world: bool,
+    /// Which parts of the sky the user wants drawn.
+    pub details: SkyDetails,
+    /// The custom sky layers to draw this frame, in order.
+    pub custom: &'a [LayerFrame],
+    /// Whether the dimension has custom layers, which replace the stars
+    /// (`!CustomSky.hasSkyLayers`) even while all of them are faded out.
+    pub custom_replaces_stars: bool,
 }
 
 /// Appends the layers of the frame to `layers` (cleared first), in draw order.
@@ -106,7 +149,11 @@ pub(super) fn build(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
     layers.clear();
     match input.kind {
         SkyKind::Nether => {}
-        SkyKind::End => layers.push(end_layer(input)),
+        SkyKind::End => {
+            if input.details.sky {
+                layers.push(end_layer(input));
+            }
+        }
         SkyKind::Overworld => overworld_layers(layers, input),
     }
 }
@@ -128,16 +175,21 @@ fn end_layer(input: &PlanInput<'_>) -> Layer {
 fn overworld_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
     let state = input.state;
     let [r, g, b] = state.sky_color;
-    layers.push(layer(
-        input,
-        Blend::Opaque,
-        Image::White,
-        Mesh::Grid,
-        dome::sky_model(),
-        [r, g, b, 1.0],
-        true,
-    ));
-    if state.sunrise.is_some() {
+    let details = input.details;
+    if details.sky {
+        layers.push(layer(
+            input,
+            Blend::Opaque,
+            Image::White,
+            Mesh::Grid,
+            dome::sky_model(),
+            [r, g, b, 1.0],
+            true,
+        ));
+    }
+    // OptiFine gates the sunrise fan with Sun & Moon, not with Sky
+    // (`RenderGlobal.renderSky`, `isSunMoonEnabled` around the fan).
+    if details.sun_moon && state.sunrise.is_some() {
         let model = celestial::sunrise_model(state.celestial_angle);
         layers.push(layer(
             input,
@@ -149,28 +201,31 @@ fn overworld_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
             false,
         ));
     }
+    custom_layers(layers, input);
     let turn = celestial::sky_turn(state.celestial_angle);
     let dim = [1.0, 1.0, 1.0, state.rain_dim];
-    layers.push(layer(
-        input,
-        Blend::Additive,
-        Image::Sun,
-        Mesh::Sun,
-        turn,
-        dim,
-        false,
-    ));
-    layers.push(layer(
-        input,
-        Blend::Additive,
-        Image::Moon,
-        Mesh::Moon(state.moon_phase),
-        turn,
-        dim,
-        false,
-    ));
+    if details.sun_moon {
+        layers.push(layer(
+            input,
+            Blend::Additive,
+            Image::Sun,
+            Mesh::Sun,
+            turn,
+            dim,
+            false,
+        ));
+        layers.push(layer(
+            input,
+            Blend::Additive,
+            Image::Moon,
+            Mesh::Moon(state.moon_phase),
+            turn,
+            dim,
+            false,
+        ));
+    }
     let stars = state.star_brightness * state.rain_dim;
-    if stars > 0.0 {
+    if details.stars && stars > 0.0 && !input.custom_replaces_stars {
         layers.push(layer(
             input,
             Blend::Additive,
@@ -182,6 +237,31 @@ fn overworld_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
         ));
     }
     void_layers(layers, input);
+}
+
+/// The pack's sky layers, between the sunrise fan and the sun
+/// (`CustomSky.renderSky` runs there). The tint carries the brightness the
+/// way the reference's `GlStateManager.color` does for each blend mode.
+fn custom_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
+    for frame in input.custom.iter().take(MAX_CUSTOM_LAYERS) {
+        let (blend, alpha_test) = custom::blend(frame.blend);
+        let Ok(index) = u16::try_from(frame.index) else {
+            continue;
+        };
+        let mut drawn = layer(
+            input,
+            blend,
+            Image::Custom(index),
+            Mesh::Cube,
+            custom::model(frame.rotation, frame.axis),
+            frame.blend.color(frame.brightness),
+            false,
+        );
+        if alpha_test {
+            drawn.uniform.params[2] = custom::ALPHA_TEST;
+        }
+        layers.push(drawn);
+    }
 }
 
 /// The void below the horizon: the black plane and box while the eye is under
@@ -208,6 +288,16 @@ fn void_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
             black,
             true,
         ));
+    }
+    // Sky off also drops this horizon plane (`glSkyList2` under
+    // `isSkyEnabled`); the black plane and box above stay, as in OptiFine.
+    //
+    // A custom sky drawn this frame drops it too. The OptiFine source draws
+    // it, but in the owner's OptiFine-based client (2026-11-21 screenshots)
+    // the pack's sky shows below the horizon around the terrain, while here
+    // the fogged plane covered it with the flat fog colour.
+    if !input.details.sky || !input.custom.is_empty() {
+        return;
     }
     let [r, g, b] = input.state.sky_color;
     let tint = [r * 0.2 + 0.04, g * 0.2 + 0.04, b * 0.6 + 0.1, 1.0];
@@ -250,7 +340,12 @@ fn layer(
                 0.0,
                 0.0,
             ],
-            fog: [fog_start, fog_end, fog_density, 0.0],
+            fog: [
+                fog_start,
+                fog_end,
+                fog_density,
+                f32::from(u8::from(input.state.fog.planar)),
+            ],
             _pad: [0.0; 16],
         },
     }
@@ -259,7 +354,7 @@ fn layer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::RenderEnvironment;
+    use crate::{RenderEnvironment, SkyDetails};
 
     fn plan(environment: RenderEnvironment, eye_y: f32) -> Vec<Layer> {
         let state = SkyState::at(environment);
@@ -269,6 +364,9 @@ mod tests {
             view_proj: Mat4::IDENTITY,
             eye_y,
             flat_world: environment.flat_world,
+            details: environment.sky_details,
+            custom: &[],
+            custom_replaces_stars: false,
         };
         let mut layers = Vec::new();
         build(&mut layers, &input);
@@ -277,6 +375,106 @@ mod tests {
 
     fn meshes(layers: &[Layer]) -> Vec<Mesh> {
         layers.iter().map(|l| l.mesh).collect()
+    }
+
+    fn plan_with(details: SkyDetails, environment: RenderEnvironment) -> Vec<Mesh> {
+        meshes(&plan(
+            RenderEnvironment {
+                sky_details: details,
+                ..environment
+            },
+            80.0,
+        ))
+    }
+
+    const NIGHT: RenderEnvironment = RenderEnvironment {
+        world_time: 18_000,
+        ..RenderEnvironment::DEFAULT
+    };
+
+    #[test]
+    fn every_part_is_drawn_by_default() {
+        let drawn = plan_with(SkyDetails::ALL, NIGHT);
+        assert!(drawn.contains(&Mesh::Stars));
+        assert!(drawn.contains(&Mesh::Sun));
+        assert!(drawn.iter().any(|mesh| matches!(mesh, Mesh::Moon(_))));
+        assert_eq!(drawn[0], Mesh::Grid);
+    }
+
+    #[test]
+    fn sky_off_skips_the_dome_and_horizon_but_keeps_the_sun_moon_and_stars() {
+        let drawn = plan_with(
+            SkyDetails {
+                sky: false,
+                ..SkyDetails::ALL
+            },
+            NIGHT,
+        );
+        // Above the horizon no grid remains: no dome, no horizon plane.
+        assert_eq!(drawn.iter().filter(|m| **m == Mesh::Grid).count(), 0);
+        assert!(drawn.contains(&Mesh::Stars) && drawn.contains(&Mesh::Sun));
+    }
+
+    #[test]
+    fn stars_off_skips_the_stars() {
+        let drawn = plan_with(
+            SkyDetails {
+                stars: false,
+                ..SkyDetails::ALL
+            },
+            NIGHT,
+        );
+        assert!(!drawn.contains(&Mesh::Stars) && drawn.contains(&Mesh::Sun));
+    }
+
+    #[test]
+    fn sun_and_moon_off_skips_both_quads() {
+        let drawn = plan_with(
+            SkyDetails {
+                sun_moon: false,
+                ..SkyDetails::ALL
+            },
+            NIGHT,
+        );
+        assert!(!drawn.contains(&Mesh::Sun));
+        assert!(!drawn.iter().any(|mesh| matches!(mesh, Mesh::Moon(_))));
+        assert!(drawn.contains(&Mesh::Stars));
+        let sunrise = RenderEnvironment::new(0, 23_000, 0.0, 8);
+        let no_bodies = SkyDetails {
+            sun_moon: false,
+            ..SkyDetails::ALL
+        };
+        assert!(!plan_with(no_bodies, sunrise).contains(&Mesh::Fan));
+    }
+
+    #[test]
+    fn the_end_sky_follows_the_sky_option() {
+        let end = RenderEnvironment {
+            dimension: 1,
+            ..RenderEnvironment::DEFAULT
+        };
+        assert_eq!(plan_with(SkyDetails::ALL, end), [Mesh::EndCube]);
+        let off = SkyDetails {
+            sky: false,
+            ..SkyDetails::ALL
+        };
+        assert!(plan_with(off, end).is_empty());
+    }
+
+    #[test]
+    fn the_fog_mode_reaches_the_slot() {
+        let environment = RenderEnvironment {
+            fog_settings: crate::FogSettings {
+                kind: crate::FogKind::Fast,
+                start: 0.8,
+            },
+            ..RenderEnvironment::DEFAULT
+        };
+        assert_eq!(plan(environment, 80.0)[0].uniform.fog[3], 1.0);
+        assert_eq!(
+            plan(RenderEnvironment::DEFAULT, 80.0)[0].uniform.fog[3],
+            0.0
+        );
     }
 
     #[test]
@@ -354,5 +552,115 @@ mod tests {
         assert_eq!(layers[0].uniform.params[..2], [0.0, 1.0]);
         assert_eq!(layers[1].uniform.params[..2], [1.0, 0.0]);
         assert_eq!(layers[0].uniform.fog[..3], [0.0, 128.0, 0.0]);
+    }
+
+    fn plan_custom(
+        environment: RenderEnvironment,
+        custom: &[LayerFrame],
+        replaces_stars: bool,
+    ) -> Vec<Layer> {
+        let state = SkyState::at(environment);
+        let input = PlanInput {
+            kind: SkyKind::of(environment.dimension),
+            state: &state,
+            view_proj: Mat4::IDENTITY,
+            eye_y: 80.0,
+            flat_world: false,
+            details: environment.sky_details,
+            custom,
+            custom_replaces_stars: replaces_stars,
+        };
+        let mut layers = Vec::new();
+        build(&mut layers, &input);
+        layers
+    }
+
+    fn frame(index: usize, blend: umicraft_packext::sky::Blend) -> LayerFrame {
+        LayerFrame {
+            index,
+            blend,
+            brightness: 0.5,
+            rotation: None,
+            axis: [0.0, 0.0, -1.0],
+        }
+    }
+
+    #[test]
+    fn custom_layers_sit_between_the_fan_and_the_sun_in_order() {
+        use umicraft_packext::sky::Blend as B;
+        let sunrise = RenderEnvironment {
+            world_time: 23_000,
+            ..RenderEnvironment::DEFAULT
+        };
+        let layers = plan_custom(sunrise, &[frame(3, B::Add), frame(4, B::Screen)], true);
+        let order = meshes(&layers);
+        let fan = order.iter().position(|m| *m == Mesh::Fan).expect("fan");
+        assert_eq!(order[fan + 1..fan + 3], [Mesh::Cube, Mesh::Cube]);
+        assert_eq!(order[fan + 3], Mesh::Sun);
+        assert_eq!(layers[fan + 1].image, Image::Custom(3));
+        assert_eq!(layers[fan + 2].blend, Blend::Screen);
+    }
+
+    #[test]
+    fn custom_layers_replace_the_stars_even_when_faded_out() {
+        let night = RenderEnvironment {
+            world_time: 18_000,
+            ..RenderEnvironment::DEFAULT
+        };
+        assert!(meshes(&plan_custom(night, &[], false)).contains(&Mesh::Stars));
+        assert!(!meshes(&plan_custom(night, &[], true)).contains(&Mesh::Stars));
+    }
+
+    #[test]
+    fn the_tint_follows_the_blend_and_replace_alpha_tests() {
+        use umicraft_packext::sky::Blend as B;
+        let layers = plan_custom(
+            RenderEnvironment::DEFAULT,
+            &[
+                frame(0, B::Multiply),
+                frame(1, B::Replace),
+                frame(2, B::Alpha),
+            ],
+            true,
+        );
+        let cubes: Vec<_> = layers.iter().filter(|l| l.mesh == Mesh::Cube).collect();
+        assert_eq!(cubes[0].uniform.tint, [0.5; 4]);
+        assert_eq!(cubes[0].uniform.params[2], 0.0);
+        assert_eq!(cubes[1].blend, Blend::Opaque);
+        assert_eq!(cubes[1].uniform.params[2], 0.1);
+        assert_eq!(cubes[2].uniform.tint, [1.0, 1.0, 1.0, 0.5]);
+        assert_eq!(cubes[2].uniform.params[..2], [1.0, 0.0], "textured, no fog");
+    }
+
+    #[test]
+    fn the_end_draws_no_custom_layers_it_has_none_of() {
+        let end = plan_custom(RenderEnvironment::new(1, 0, 0.0, 8), &[], false);
+        assert_eq!(meshes(&end), [Mesh::EndCube]);
+    }
+
+    #[test]
+    fn a_drawn_custom_sky_shows_below_the_horizon_instead_of_the_void_plane() {
+        // The bug: the fogged horizon plane covered the lower half of a custom
+        // sky with the flat fog colour.
+        use umicraft_packext::sky::Blend as B;
+        let void_planes = |layers: &[Layer]| {
+            layers
+                .iter()
+                .filter(|l| {
+                    l.mesh == Mesh::Grid && l.uniform.model != dome::sky_model().to_cols_array_2d()
+                })
+                .count()
+        };
+        let env = RenderEnvironment::DEFAULT;
+        assert_eq!(void_planes(&plan_custom(env, &[], false)), 1);
+        assert_eq!(
+            void_planes(&plan_custom(env, &[], true)),
+            1,
+            "all layers faded out"
+        );
+        assert_eq!(
+            void_planes(&plan_custom(env, &[frame(0, B::Replace)], true)),
+            0
+        );
     }
 }

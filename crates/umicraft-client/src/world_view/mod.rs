@@ -23,7 +23,7 @@
 
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use umicraft_game::entity::EntityFrameData;
 use umicraft_game::inventory::WindowView;
@@ -38,6 +38,7 @@ use umicraft_render::{HudState, OutlineBox};
 use umicraft_ui::menus::ConnectStage;
 use umicraft_world::{ChunkMap, LightLevel};
 
+use crate::debug::lagometer::Lagometer;
 use crate::error::ClientError;
 use crate::game::{ChunkEvent, GameStatus, RenderEvent, TextScreenRequest};
 use crate::meshing::pool::MeshPool;
@@ -54,6 +55,7 @@ mod meshing;
 mod pacing;
 mod scene;
 mod session;
+mod stillness;
 #[cfg(test)]
 mod tests;
 mod view;
@@ -75,6 +77,14 @@ pub struct WorldView {
     queue: MeshQueue,
     /// The vertex bytes [`WorldView::collect`] uploads per call, at most.
     upload_budget: usize,
+    /// Whether a still player gets a larger budget (Dynamic Updates).
+    dynamic_updates: bool,
+    /// When the camera last moved or turned.
+    stillness: stillness::Stillness,
+    /// The frame, sync and upload timers of the Lagometer.
+    lagometer: Lagometer,
+    /// How many meshes the last sync uploaded.
+    meshes_uploaded: usize,
     /// A fixed limit of jobs in flight, for tests; `None` derives it from the
     /// workers.
     max_in_flight: Option<usize>,
@@ -164,6 +174,10 @@ impl WorldView {
             generation: 0,
             queue: MeshQueue::default(),
             upload_budget: UPLOAD_BUDGET_BYTES,
+            dynamic_updates: false,
+            stillness: stillness::Stillness::default(),
+            lagometer: Lagometer::default(),
+            meshes_uploaded: 0,
             max_in_flight: None,
             faces: ChunkMap::default(),
             block_entities: ChunkMap::default(),
@@ -211,6 +225,7 @@ impl WorldView {
         target: &mut impl MeshTarget,
     ) {
         umicraft_core::profile_scope!("WorldView::sync");
+        let started = Instant::now();
         let mut frame_events = 0;
         while let Ok(event) = frames.try_recv() {
             if matches!(event, RenderEvent::Frame(_)) {
@@ -236,6 +251,12 @@ impl WorldView {
         // in a later one, after any reset this call applied.
         self.collect(target);
         self.dispatch();
+        self.lagometer.sync.push(started.elapsed());
+    }
+
+    /// Records the duration of the frame that just ended for the Lagometer.
+    pub fn note_frame(&mut self, elapsed: Duration) {
+        self.lagometer.frame.push(elapsed);
     }
 
     fn apply(&mut self, event: RenderEvent, target: &mut impl MeshTarget) {
@@ -296,6 +317,18 @@ impl WorldView {
             RenderEvent::Ended(end) => self.ended = Some(end),
             RenderEvent::Reset => self.reset(target),
         }
+    }
+
+    /// Sets how many vertex bytes one frame uploads at most: the Chunk
+    /// Updates option (ADR-0089, phase 3).
+    pub fn set_upload_budget(&mut self, bytes: usize) {
+        self.upload_budget = bytes;
+    }
+
+    /// Turns the Dynamic Updates option on or off: a player who stands still
+    /// gets a larger upload budget.
+    pub fn set_dynamic_updates(&mut self, enabled: bool) {
+        self.dynamic_updates = enabled;
     }
 
     /// Forgets everything of a finished session: the meshes, the camera

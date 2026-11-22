@@ -25,6 +25,7 @@ pub(crate) mod util;
 
 pub mod button;
 pub mod death;
+pub mod hover_delay;
 pub mod item_overlay;
 pub mod list;
 pub mod panel;
@@ -36,6 +37,7 @@ pub mod tooltip;
 pub use crate::screens::gui_scale;
 pub use button::{button, button_enabled, button_tinted};
 pub use death::{death_layout, death_screen, DeathAction, DeathLayout, BUTTON_DELAY_TICKS};
+pub use hover_delay::{HoverDelay, HOVER_DELAY, HOVER_SLOP};
 pub use item_overlay::{draw_item, durability_bar, DurabilityBar};
 pub use list::{list, ListState, ROW_HEIGHT, SCROLLBAR_WIDTH};
 pub use panel::{panel, PANEL_INSET};

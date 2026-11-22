@@ -39,9 +39,14 @@ use umicraft_world::{light_emission, BlockState, ChunkPos};
 use crate::fluid::{self, FluidLayers};
 
 use crate::actual_state;
+use crate::better_grass::{self, SideTexture};
+use crate::better_snow;
+use crate::ctm::{self, CtmTable};
+use crate::custom_colors::CustomColors;
 use crate::legacy::{emit_legacy_faces_with, is_transparent_pass, mesh_sections, occludes};
 use crate::lighting::{quad_light, Lighting};
-use crate::settings::{base_variant, MeshSettings};
+use crate::natural::{self, NaturalTable};
+use crate::settings::{base_variant, ConnectedTextures, Leaves, MeshSettings};
 use crate::{tint, BlockEntityKind, BlockEntityRef, BlockSource, Mesh, Vertex};
 
 /// The baked models and the texture layers the model mesher reads.
@@ -62,6 +67,13 @@ pub struct ModelMeshContext {
     pub atlas: Arc<AtlasLayout>,
     /// Per-biome grass/foliage/water colours, or `None` for untinted output.
     pub tints: Option<Arc<tint::BiomeTints>>,
+    /// The resolved connected-texture rules, or `None` when no pack has any.
+    pub ctm: Option<Arc<CtmTable>>,
+    /// The natural-texture rules, or `None` when no pack has any.
+    pub natural: Option<Arc<NaturalTable>>,
+    /// The custom block colours, or `None` when the packs have none or the
+    /// option is off.
+    pub custom_colors: Option<Arc<CustomColors>>,
 }
 
 /// Builds the mesh for one chunk column from baked block models.
@@ -118,7 +130,7 @@ pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
             }
         }
         if let Some(liquid) = Liquid::of(state) {
-            let tint = tint::state_tint(source, state, wx, wz, context.tints.as_deref());
+            let tint = resolve_tint(source, context, state, position, true, settings);
             let layers = match liquid {
                 Liquid::Water => water,
                 Liquid::Lava => lava,
@@ -136,16 +148,59 @@ pub fn mesh_chunk_with_settings<S: BlockSource + ?Sized>(
             Lighting::Flat
         };
         if let Some(variant) = variant {
-            let placement = Placement::in_world(position).lit(lighting);
+            let placement = Placement::in_world(position, settings).lit(lighting);
             emit_model_quads(mesh, source, context, state, variant, placement);
+            if settings.better_snow && better_snow::needs_layer(source, position, state) {
+                emit_snow_layer(mesh, source, context, placement, settings);
+            }
         } else if state.is_renderable() {
-            let tint = tint::state_tint(source, state, wx, wz, context.tints.as_deref());
+            let tint = resolve_tint(source, context, state, position, true, settings);
             // No model and not a liquid: the checker, never a procedural
             // layer index (ADR-0012).
             let missing = context.atlas.missing_layer();
             emit_legacy_faces_with(mesh, source, position, (state, lighting), tint, |_| missing);
         }
     })
+}
+
+/// The tint of a face of `state`: the custom colours of the packs when they
+/// cover it, else the vanilla biome tint.
+fn resolve_tint<S: BlockSource + ?Sized>(
+    source: &S,
+    context: &ModelMeshContext,
+    state: BlockState,
+    position: [i32; 3],
+    tinted: bool,
+    settings: MeshSettings,
+) -> u32 {
+    let tints = context.tints.as_deref();
+    let mode = settings.tint_mode();
+    let custom = context
+        .custom_colors
+        .as_deref()
+        .and_then(|custom| custom.tint(source, state, position, tinted, (tints, mode)));
+    custom.unwrap_or_else(|| {
+        let [x, _, z] = position;
+        tint::state_tint(source, state, x, z, tints, mode)
+    })
+}
+
+/// Draws the snow layer `Better Snow` adds in the cell of a plant.
+fn emit_snow_layer<S: BlockSource + ?Sized>(
+    mesh: &mut Mesh,
+    source: &S,
+    context: &ModelMeshContext,
+    placement: Placement,
+    settings: MeshSettings,
+) {
+    let state = better_snow::LAYER_STATE;
+    let variant = context
+        .models
+        .model(state)
+        .and_then(|model| pick_variant(model, placement.position, settings.block_alternatives));
+    if let Some(variant) = variant {
+        emit_model_quads(mesh, source, context, state, variant, placement);
+    }
 }
 
 /// The still and flowing layers of a liquid in the atlas
@@ -275,16 +330,19 @@ pub(crate) struct Placement {
     pub(crate) cull: bool,
     /// How the quads are lit.
     pub(crate) lighting: Lighting,
+    /// The options that decide leaf culling, tint and Better Grass.
+    pub(crate) settings: MeshSettings,
 }
 
 impl Placement {
     /// A block standing in the world: no shift, hidden faces culled.
-    fn in_world(position: [i32; 3]) -> Self {
+    fn in_world(position: [i32; 3], settings: MeshSettings) -> Self {
         Self {
             position,
             shift: [0.0; 3],
             cull: true,
             lighting: Lighting::Smooth,
+            settings,
         }
     }
 
@@ -292,6 +350,19 @@ impl Placement {
     fn lit(self, lighting: Lighting) -> Self {
         Self { lighting, ..self }
     }
+}
+
+/// Whether `neighbour` hides the `cullface` quad of `state`.
+///
+/// Leaves follow the Trees option instead of the same-state rule
+/// (`BlockLeavesBase.shouldSideBeRendered`): Fancy draws every face between
+/// leaf blocks, Fast and Smart cull a face against another block of the same
+/// leaf id. An opaque neighbour hides a leaf face in every mode.
+fn hides(neighbour: BlockState, state: BlockState, leaves: Leaves) -> bool {
+    if !matches!(state.id(), 18 | 161) {
+        return occludes(neighbour, state);
+    }
+    neighbour.is_opaque() || (leaves != Leaves::Fancy && neighbour.id() == state.id())
 }
 
 /// Emits every quad of `variant` at the placement's cell, offset by the block
@@ -317,21 +388,55 @@ pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
     ];
     // Tint is constant per block, so compute the 3×3 biome average at most
     // once and reuse it for every tinted quad (grass top + side overlay,
-    // six leaf faces, ...). Untinted quads never sample the colormaps.
-    let mut block_tint = None;
+    // six leaf faces, ...). Untinted quads never sample the colormaps, unless
+    // a custom palette is linked to the block; those get their own cache
+    // slot because a grass side takes the dirt palette.
+    let mut block_tints: [Option<u32>; 2] = [None; 2];
     for quad in &variant.model.quads {
         if let Some(cullface) = quad.cullface.filter(|_| placement.cull) {
             let offset = cullface.offset();
             let neighbour = source.block(x + offset[0], y + offset[1], z + offset[2]);
-            if occludes(neighbour, state) {
+            if hides(neighbour, state, placement.settings.leaves) {
                 continue;
             }
         }
 
-        let layer = context.atlas.layer(&quad.texture).unwrap_or(0);
-        let tint = if quad.tint.is_some() {
-            *block_tint.get_or_insert_with(|| {
-                tint::state_tint(source, state, x, z, context.tints.as_deref())
+        let side = quad.cullface.and_then(|face| {
+            better_grass::side_texture(
+                source,
+                position,
+                state,
+                face,
+                placement.settings.better_grass,
+            )
+        });
+        let (texture, tinted) = match side {
+            Some(side) => match side.replace(&quad.texture) {
+                Some(SideTexture { key, tinted }) => (key, tinted),
+                None => continue,
+            },
+            None => (quad.texture.as_str(), quad.tint.is_some()),
+        };
+        let mut layer = context.atlas.layer(texture).unwrap_or(0);
+        if let Some(table) = context.ctm.as_deref() {
+            let mode = placement.settings.connected_textures;
+            if mode != ConnectedTextures::Off {
+                let fancy = mode == ConnectedTextures::Fancy;
+                let site = ctm::Site {
+                    position,
+                    state,
+                    quad,
+                };
+                layer = ctm::connected_layer(source, context, table, site, layer, fancy);
+            }
+        }
+        let custom_face = context
+            .custom_colors
+            .as_deref()
+            .is_some_and(|custom| custom.tints_face(state.id(), tinted));
+        let tint = if tinted || custom_face {
+            *block_tints[usize::from(tinted)].get_or_insert_with(|| {
+                resolve_tint(source, context, state, position, tinted, placement.settings)
             })
         } else {
             tint::WHITE
@@ -348,6 +453,12 @@ pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
             quad.shade,
             placement.lighting,
         );
+        let uvs = match context.natural.as_deref() {
+            Some(table) if placement.settings.natural_textures => {
+                natural::natural_uvs(table, position, quad, layer)
+            }
+            _ => quad.uvs,
+        };
         let vertices = std::array::from_fn(|index| {
             let corner = quad.positions[index];
             Vertex {
@@ -357,7 +468,7 @@ pub(crate) fn emit_model_quads<S: BlockSource + ?Sized>(
                     z as f32 + corner[2] + oz,
                 ],
                 normal: quad.normal,
-                uv: quad.uvs[index],
+                uv: uvs[index],
                 layer,
                 light: lights[index].pack(),
                 tint,

@@ -7,8 +7,7 @@
 //! with the texture of its material. Leather is multiplied by its dye colour
 //! (`display.color`) and gets a second, undyed overlay pass.
 
-use umicraft_assets::client_jar::ClientJar;
-use umicraft_assets::skin::decode_png_bytes;
+use crate::resources::game_files::GameFiles;
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_game::item_nbt::ItemDisplay;
 use umicraft_model::entity::child::scale_mesh;
@@ -104,20 +103,16 @@ fn path(name: &str, leggings: bool, suffix: &str) -> String {
 }
 
 /// The pixels of the armour texture of `slot`, or `None` for another slot
-/// and when the jar has no such texture (the piece is then not drawn: an
+/// and when neither the packs nor the jar have such a texture (the piece is then not drawn: an
 /// original stand-in cannot reproduce the official art).
-pub(super) fn armor_texture(
-    jar: Option<&ClientJar>,
-    slot: TextureSlot,
-) -> Option<(Vec<u8>, u32, u32)> {
+pub(super) fn armor_texture(files: &GameFiles, slot: TextureSlot) -> Option<(Vec<u8>, u32, u32)> {
     let (name, leggings, suffix, color) = match slot {
         TextureSlot::Armor { material, leggings } => (material.texture_name(), leggings, "", None),
         TextureSlot::LeatherArmor { leggings, color } => ("leather", leggings, "", Some(color)),
         TextureSlot::LeatherOverlay { leggings } => ("leather", leggings, "_overlay", None),
         _ => return None,
     };
-    let bytes = jar?.read_entry(&path(name, leggings, suffix)).ok()?;
-    let (mut rgba, w, h) = decode_png_bytes(&bytes).ok()?;
+    let (mut rgba, w, h) = files.read_png(&path(name, leggings, suffix))?;
     if let Some(color) = color {
         tint(&mut rgba, color);
     }
@@ -221,6 +216,25 @@ mod tests {
         assert_eq!(
             path("leather", true, "_overlay"),
             "assets/minecraft/textures/models/armor/leather_layer_2_overlay.png"
+        );
+    }
+
+    /// Regression: armour textures were read from the jar alone, so a pack
+    /// could not replace them.
+    #[test]
+    fn a_pack_armour_texture_is_used() {
+        use crate::resources::game_files::test_support::{files_with, png};
+        let files = files_with(
+            "assets/minecraft/textures/models/armor/iron_layer_1.png",
+            png(64, 32),
+        );
+        let slot = TextureSlot::Armor {
+            material: ArmorMaterial::Iron,
+            leggings: false,
+        };
+        assert_eq!(
+            armor_texture(&files, slot).map(|(_, w, h)| (w, h)),
+            Some((64, 32))
         );
     }
 }

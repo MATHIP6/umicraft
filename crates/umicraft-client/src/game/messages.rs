@@ -74,6 +74,8 @@ pub enum GameEvent {
     },
     /// The player changed the particle option (`0`, `1` or `2`).
     ParticleSetting(u8),
+    /// The player changed which particle categories may be created.
+    ParticleCategories(umicraft_game::particles::ParticleFilter),
     /// The 1.7 animations the built-in mod selects (ADR-0079).
     LegacyAnimations(umicraft_game::legacy::LegacyAnimations),
     /// A line the client shows in its own chat (the completion list).
@@ -197,6 +199,9 @@ pub struct Frame {
     pub signs: Arc<SignTable>,
     /// Base temperature of the biome at the player, which tints the sky.
     pub sky_temperature: f32,
+    /// The biome id at the player (`None` while the column is not loaded),
+    /// which the custom sky layers filter on.
+    pub sky_biome: Option<u8>,
     /// The medium at the eye and the effects that shape the fog (P7g).
     pub fog: FogContext,
     /// The world border of the dimension (P7g).

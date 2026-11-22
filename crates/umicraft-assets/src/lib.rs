@@ -28,9 +28,12 @@
 //! never copied into the repository; it is only read from the local install or
 //! the verified cache.
 //!
+//! Resource packs are layered by [`ResourceStack`]. [`PackFiles`] keeps the
+//! pack files that are not baked into the atlases (sky, entity textures and
+//! the F6 pack features).
+//!
 //! What is **not** in this crate: the block model parser (it lives in
-//! `umicraft-model`), resource pack support, and the player skins. Those are
-//! later milestones (spec AST-5 to AST-9).
+//! `umicraft-model`).
 //!
 //! # Example
 //!
@@ -78,6 +81,7 @@ pub mod languages;
 pub mod manifest;
 pub mod objects;
 pub mod pack_discovery;
+pub mod pack_files;
 pub mod panorama;
 pub mod profile_textures;
 pub mod progress;
@@ -96,6 +100,7 @@ pub use colormap::{BiomeColormaps, Colormap};
 pub use dial::{DialKind, DialSprite};
 pub use error::{AssetsError, AssetsResult};
 pub use gui_atlas::{DynamicImage, GuiAtlas, GuiRegion, DYNAMIC_PREFIX};
+pub use pack_files::{FeatureFile, PackFiles};
 pub use progress::{Progress, ProgressSnapshot};
 pub use resource_pack::{PackMetadata, ResourcePack, ResourceStack};
 pub use setup::{find_existing_jar, run_setup, SetupStep, TARGET_VERSION};

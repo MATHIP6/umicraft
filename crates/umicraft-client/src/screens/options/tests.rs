@@ -13,11 +13,11 @@ use umicraft_ui::{FontAtlas, InputEvent, PointerButton, Rect, Ui, UiInput};
 use super::controls_page::sensitivity_label;
 use super::main_page::fov_label;
 use super::sounds_page::volume_text;
-use super::video_page::gamma_value;
 use super::*;
 use winit::keyboard::KeyCode;
 
-use crate::options::{Binding, CategoryLabel, SkinPart, SoundCategory};
+use crate::options::video_spec::{gamma_value, VideoPage};
+use crate::options::{Binding, CategoryLabel, SkinPart, SoundCategory, VideoOptions};
 
 const VIEWPORT: Rect = Rect {
     x: 0.0,
@@ -134,18 +134,18 @@ fn the_fov_slider_edits_within_its_range_and_names_the_ends() {
 }
 
 #[test]
-fn the_video_page_lists_the_options_in_vanilla_order() {
+fn the_video_root_lists_the_options_in_optifine_order() {
     let mut screen = OptionsScreen::new();
     let mut options = Options::default();
     click_widget(&mut screen, &mut options, "nav:video");
     frame(&mut screen, &mut options, vec![]);
     // Row 0 starts at top + 4 = 36; Render Distance is the right column.
     assert_eq!(
-        screen.rect_of("video:0"),
+        screen.rect_of("video:graphics"),
         Some(gui_rect(58.0, 36.0, 150.0, 20.0))
     );
     assert_eq!(
-        screen.rect_of("distance"),
+        screen.rect_of("video:renderDistance"),
         Some(gui_rect(218.0, 36.0, 150.0, 20.0))
     );
     assert_eq!(
@@ -160,14 +160,29 @@ fn the_wheel_scrolls_the_video_list() {
     let mut options = Options::default();
     click_widget(&mut screen, &mut options, "nav:video");
     frame(&mut screen, &mut options, vec![]);
-    let before = screen.rect_of("video:0").unwrap();
+    let before = screen.rect_of("video:graphics").unwrap();
     frame(
         &mut screen,
         &mut options,
         vec![InputEvent::Wheel { delta: 1.0 }],
     );
-    let after = screen.rect_of("video:0").unwrap();
+    let after = screen.rect_of("video:graphics").unwrap();
     assert!(after.y < before.y, "the row moved up");
+}
+
+#[test]
+fn a_sub_page_opens_from_the_root_and_done_goes_back_to_it() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    click_widget(&mut screen, &mut options, "nav:video");
+    click_widget(&mut screen, &mut options, "video-nav:details");
+    assert_eq!(screen.page(), Page::Video(VideoPage::Details));
+    click_widget(&mut screen, &mut options, "video:clouds");
+    assert_eq!(options.video.clouds, 0);
+    click_widget(&mut screen, &mut options, "done");
+    assert_eq!(screen.page(), Page::Video(VideoPage::Root));
+    click_widget(&mut screen, &mut options, "done");
+    assert_eq!(screen.page(), Page::Main);
 }
 
 #[test]
@@ -530,27 +545,48 @@ fn the_open_folder_button_raises_its_flag() {
     assert!(click_widget(&mut screen, &mut options, "open_folder").open_packs_folder);
 }
 
+/// Scrolls the list of the page as far down as it goes.
+fn scroll_to_bottom(screen: &mut OptionsScreen, options: &mut Options) {
+    for _ in 0..40 {
+        frame(screen, options, vec![InputEvent::Wheel { delta: 1.0 }]);
+    }
+}
+
+/// Opens the video page `page` (the navigation itself is tested by
+/// `a_sub_page_opens_from_the_root_and_done_goes_back_to_it`).
+fn open_video(screen: &mut OptionsScreen, options: &mut Options, page: VideoPage) {
+    screen.open_page(Page::Video(page), options);
+}
+
 #[test]
 fn the_video_buttons_cycle_and_toggle_their_options() {
     let mut screen = OptionsScreen::new();
     let mut options = Options::default();
-    click_widget(&mut screen, &mut options, "nav:video");
-    click_widget(&mut screen, &mut options, "video:0");
+    open_video(&mut screen, &mut options, VideoPage::Root);
+    click_widget(&mut screen, &mut options, "video:graphics");
     assert!(!options.video.fancy_graphics);
-    click_widget(&mut screen, &mut options, "video:2");
+    click_widget(&mut screen, &mut options, "video:smoothLighting");
     assert_eq!(options.video.smooth_lighting, 0);
-    click_widget(&mut screen, &mut options, "video:4");
+    click_widget(&mut screen, &mut options, "video:viewBobbing");
     assert!(!options.video.view_bobbing);
-    click_widget(&mut screen, &mut options, "video:5");
+    click_widget(&mut screen, &mut options, "video:guiScale");
     assert_eq!(options.video.gui_scale, 1);
-    click_widget(&mut screen, &mut options, "video:7");
-    assert_eq!(options.video.clouds, 0);
-    click_widget(&mut screen, &mut options, "video:8");
-    assert_eq!(options.video.particles, 1);
-    click_widget(&mut screen, &mut options, "video:9");
+
+    open_video(&mut screen, &mut options, VideoPage::Animations);
+    click_widget(&mut screen, &mut options, "video:animatedWater");
+    assert!(!options.video.animations.water);
+
+    open_video(&mut screen, &mut options, VideoPage::Details);
+    click_widget(&mut screen, &mut options, "video:trees");
+    assert_eq!(
+        options.video.details.trees,
+        crate::options::video_sections::TreesChoice::Fancy,
+        "Smart, the default, cycles to Fancy"
+    );
+
+    open_video(&mut screen, &mut options, VideoPage::Other);
+    click_widget(&mut screen, &mut options, "video:fullscreen");
     assert!(options.video.fullscreen);
-    click_widget(&mut screen, &mut options, "video:10");
-    assert!(!options.video.vsync);
 }
 
 #[test]
@@ -558,26 +594,99 @@ fn the_gui_scale_button_wraps_after_large() {
     let mut screen = OptionsScreen::new();
     let mut options = Options::default();
     options.video.gui_scale = 3;
-    click_widget(&mut screen, &mut options, "nav:video");
-    click_widget(&mut screen, &mut options, "video:5");
+    open_video(&mut screen, &mut options, VideoPage::Root);
+    click_widget(&mut screen, &mut options, "video:guiScale");
     assert_eq!(options.video.gui_scale, 0);
 }
 
 #[test]
-fn the_brightness_and_mipmap_sliders_edit_within_their_ranges() {
+fn the_sliders_edit_within_their_ranges() {
     let mut screen = OptionsScreen::new();
     let mut options = Options::default();
-    click_widget(&mut screen, &mut options, "nav:video");
+    open_video(&mut screen, &mut options, VideoPage::Root);
+    frame(&mut screen, &mut options, vec![]);
+    press_slider(&mut screen, &mut options, "video:brightness", true);
+    assert_eq!(options.video.gamma, 1.0);
+    press_slider(&mut screen, &mut options, "video:brightness", false);
+    assert_eq!(options.video.gamma, 0.0);
+    press_slider(&mut screen, &mut options, "video:renderDistance", true);
+    assert_eq!(options.video.render_distance, 32);
+    press_slider(&mut screen, &mut options, "video:maxFramerate", true);
+    assert!(!options.video.vsync);
+    assert_eq!(options.video.max_fps, crate::options::UNLIMITED_FPS);
+    press_slider(&mut screen, &mut options, "video:maxFramerate", false);
+    assert!(
+        options.video.vsync,
+        "the far left of the frame-rate slider is VSync"
+    );
+
+    open_video(&mut screen, &mut options, VideoPage::Quality);
     options.video.mipmap_levels = 0;
     frame(&mut screen, &mut options, vec![]);
-    press_slider(&mut screen, &mut options, "gamma", true);
-    assert_eq!(options.video.gamma, 1.0);
-    press_slider(&mut screen, &mut options, "gamma", false);
-    assert_eq!(options.video.gamma, 0.0);
-    press_slider(&mut screen, &mut options, "mipmap", true);
+    press_slider(&mut screen, &mut options, "video:mipmapLevels", true);
     assert_eq!(options.video.mipmap_levels, 4);
-    press_slider(&mut screen, &mut options, "mipmap", false);
+    press_slider(&mut screen, &mut options, "video:mipmapLevels", false);
     assert_eq!(options.video.mipmap_levels, 0);
+}
+
+#[test]
+fn all_off_and_all_on_set_the_animations() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    open_video(&mut screen, &mut options, VideoPage::Animations);
+    scroll_to_bottom(&mut screen, &mut options);
+    assert!(click_widget(&mut screen, &mut options, "video:allOff").changed);
+    assert_eq!(options.video.particles, 2);
+    click_widget(&mut screen, &mut options, "video:allOn");
+    assert_eq!(options.video.particles, 0);
+}
+
+#[test]
+fn reset_asks_first_and_restores_the_defaults_on_yes() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    options.video.render_distance = 20;
+    options.video.view_bobbing = false;
+    open_video(&mut screen, &mut options, VideoPage::Other);
+    click_widget(&mut screen, &mut options, "video:reset");
+    assert_eq!(
+        options.video.render_distance, 20,
+        "nothing before the answer"
+    );
+    // The dialog lays its buttons out like `GuiYesNo`.
+    let yes = umicraft_ui::menus::confirm_layout(VIEWPORT).yes;
+    assert!(frame(&mut screen, &mut options, click(yes)).changed);
+    assert_eq!(options.video, VideoOptions::default());
+}
+
+#[test]
+fn a_tooltip_waits_for_the_pointer_to_rest() {
+    let mut screen = OptionsScreen::new();
+    let mut options = Options::default();
+    open_video(&mut screen, &mut options, VideoPage::Root);
+    frame(&mut screen, &mut options, vec![]);
+    let rect = screen.rect_of("video:graphics").unwrap();
+    let position = [rect.x + 4.0, rect.y + 4.0];
+    let hover = |screen: &mut OptionsScreen, options: &mut Options, at| {
+        screen.set_clock(at);
+        let mut ui = Ui::new(VIEWPORT);
+        ui.begin_frame(
+            VIEWPORT,
+            UiInput::new(vec![InputEvent::PointerMoved { position }]),
+        );
+        let lang = Lang::from_texts("en_US", None, None)
+            .with_client_layer(umicraft_assets::client_pack::lang("en_US"), None);
+        screen.show(&mut ui, &FontAtlas::fallback(), options, &lang);
+        ui.end_frame().draw_list.len()
+    };
+    let start = std::time::Instant::now();
+    let before = hover(&mut screen, &mut options, start);
+    let rested = hover(
+        &mut screen,
+        &mut options,
+        start + umicraft_ui::widgets::HOVER_DELAY,
+    );
+    assert!(rested > before, "the tooltip box adds draw commands");
 }
 
 #[test]
@@ -664,7 +773,12 @@ fn a_tiny_window_draws_every_page_without_panicking() {
     let tiny = Rect::new(0.0, 0.0, 1.0, 1.0);
     for page in [
         Page::Main,
-        Page::Video,
+        Page::Video(VideoPage::Root),
+        Page::Video(VideoPage::Details),
+        Page::Video(VideoPage::Quality),
+        Page::Video(VideoPage::Performance),
+        Page::Video(VideoPage::Animations),
+        Page::Video(VideoPage::Other),
         Page::Controls,
         Page::Chat,
         Page::Skin,

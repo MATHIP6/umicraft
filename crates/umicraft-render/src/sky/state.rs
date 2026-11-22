@@ -225,10 +225,25 @@ fn darken_toward_grey(color: [f32; 3], strength: f32, grey_scale: f32) -> [f32; 
 /// rain, thunder and lightning.
 fn sky_color(angle: f32, environment: &RenderEnvironment) -> [f32; 3] {
     let daylight = (cos_cycle(angle) * 2.0 + 0.5).clamp(0.0, 1.0);
-    let base = biome_sky_color(environment.sky_temperature).map(|channel| channel * daylight);
+    let mut base = biome_sky_color(environment.sky_temperature).map(|channel| channel * daylight);
+    if let Some(palette) = environment.colors.sky_palette {
+        base = scaled_by_palette(palette, base, SKY_REFERENCE);
+    }
     let rained = darken_toward_grey(base, environment.rain_strength, 0.6);
     let stormed = darken_toward_grey(rained, environment.thunder_strength, 0.2);
     apply_lightning(stormed, environment)
+}
+
+/// The sky colour of a clear plains noon, which a sky palette is relative to
+/// (`CustomColors.getSkyColor`).
+const SKY_REFERENCE: [f32; 3] = [0.5, 0.66275, 1.0];
+/// The fog colour of a clear noon (`CustomColors.getFogColor`).
+const FOG_REFERENCE: [f32; 3] = [0.753, 0.8471, 1.0];
+
+/// `palette * computed / reference`: the palette colour, darkened the way the
+/// computed colour is darkened relative to its clear-noon value.
+fn scaled_by_palette(palette: [f32; 3], computed: [f32; 3], reference: [f32; 3]) -> [f32; 3] {
+    [0, 1, 2].map(|i| palette[i] * computed[i] / reference[i])
 }
 
 /// The lightning flash of `World.getSkyColor`: up to 45 % toward a pale blue.
@@ -243,16 +258,29 @@ fn apply_lightning(color: [f32; 3], environment: &RenderEnvironment) -> [f32; 3]
 }
 
 /// `WorldProvider.getFogColor` of the dimension.
-fn provider_fog_color(kind: SkyKind, angle: f32) -> [f32; 3] {
+fn provider_fog_color(kind: SkyKind, angle: f32, environment: &RenderEnvironment) -> [f32; 3] {
+    let colors = &environment.colors;
+    let fixed = match kind {
+        SkyKind::Nether => colors.nether_fog,
+        SkyKind::End => colors.end_fog,
+        SkyKind::Overworld => None,
+    };
+    if let Some(fixed) = fixed {
+        return fixed;
+    }
     let daylight = (cos_cycle(angle) * 2.0 + 0.5).clamp(0.0, 1.0);
     match kind {
         SkyKind::Overworld => {
             let base = [0.752_941_2, 0.847_058_83, 1.0];
-            [
+            let computed = [
                 base[0] * (daylight * 0.94 + 0.06),
                 base[1] * (daylight * 0.94 + 0.06),
                 base[2] * (daylight * 0.91 + 0.09),
-            ]
+            ];
+            match colors.fog_palette {
+                Some(palette) => scaled_by_palette(palette, computed, FOG_REFERENCE),
+                None => computed,
+            }
         }
         SkyKind::Nether => NETHER_FOG,
         // `daylight * 0 + 0.15`: the End fog does not follow the clock.
@@ -290,9 +318,12 @@ fn sunrise_tint(fog: [f32; 3], input: &FogInput, view_distance: u8) -> [f32; 3] 
 /// distance, then dimmed by rain and thunder. The medium, light, void and
 /// effects follow in [`FogParams`].
 fn final_fog_color(input: FogInput, environment: &RenderEnvironment) -> [f32; 3] {
-    let sky = input.sky;
+    let sky = match (input.kind, environment.colors.end_sky) {
+        (SkyKind::End, Some(end_sky)) => end_sky,
+        _ => input.sky,
+    };
     let fog = sunrise_tint(
-        provider_fog_color(input.kind, input.angle),
+        provider_fog_color(input.kind, input.angle, environment),
         &input,
         environment.view_distance,
     );
@@ -345,6 +376,73 @@ mod tests {
 
     fn near(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-4
+    }
+
+    fn with_colors(dimension: i8, time: i64, colors: crate::ColorOverrides) -> SkyState {
+        SkyState::at(RenderEnvironment {
+            colors,
+            ..RenderEnvironment::new(dimension, time, 0.0, 8)
+        })
+    }
+
+    #[test]
+    fn a_nether_fog_override_replaces_the_fog_colour() {
+        let colors = crate::ColorOverrides {
+            nether_fog: Some([0.1, 0.2, 0.3]),
+            ..crate::ColorOverrides::default()
+        };
+        // The fog mixes toward the sky colour (black in the Nether) by the view distance.
+        let plain = with_colors(-1, 6_000, crate::ColorOverrides::default())
+            .fog
+            .color;
+        let custom = with_colors(-1, 6_000, colors).fog.color;
+        assert_ne!(plain, custom);
+        assert!(custom[2] > custom[0], "{custom:?}");
+    }
+
+    #[test]
+    fn an_end_sky_override_changes_the_end_fog_only() {
+        let colors = crate::ColorOverrides {
+            end_sky: Some([1.0, 0.0, 0.0]),
+            ..crate::ColorOverrides::default()
+        };
+        let end = with_colors(1, 0, colors).fog.color;
+        assert!(
+            end[0]
+                > with_colors(1, 0, crate::ColorOverrides::default())
+                    .fog
+                    .color[0]
+        );
+        assert_eq!(
+            with_colors(0, 6_000, colors).fog.color,
+            with_colors(0, 6_000, crate::ColorOverrides::default())
+                .fog
+                .color
+        );
+    }
+
+    #[test]
+    fn a_sky_palette_scales_with_the_computed_sky() {
+        let colors = crate::ColorOverrides {
+            sky_palette: Some([0.5, 0.66275, 1.0]),
+            ..crate::ColorOverrides::default()
+        };
+        // The reference colour leaves the computed sky unchanged.
+        let plain = with_colors(0, 6_000, crate::ColorOverrides::default()).sky_color;
+        let same = with_colors(0, 6_000, colors).sky_color;
+        for i in 0..3 {
+            assert!(near(plain[i], same[i]));
+        }
+        let red = crate::ColorOverrides {
+            sky_palette: Some([1.0, 0.0, 0.0]),
+            ..crate::ColorOverrides::default()
+        };
+        let night = with_colors(0, 18_000, red).sky_color;
+        assert_eq!(night[1], 0.0);
+        assert!(
+            night[0] < with_colors(0, 6_000, red).sky_color[0],
+            "night stays darker"
+        );
     }
 
     #[test]

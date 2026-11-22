@@ -4,9 +4,11 @@
 //! background and the textures uploaded once they arrive.
 
 use std::collections::HashSet;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use umicraft_assets::PackFiles;
 use umicraft_core::lang::Lang;
 use umicraft_game::chat::{ChatInput, SentHistory};
 use umicraft_render::{Camera, HudState, Overlay, Renderer};
@@ -32,9 +34,13 @@ use crate::mods::runtime::ModsRuntime;
 use crate::mods::zoom::Zoom;
 use crate::options::effects::{pack_paths, packs_folder, VideoApplier};
 use crate::options::Options;
+use crate::resources::custom_animations::{self, CustomAnimation};
+use crate::resources::custom_guis::CustomGuis;
+use crate::resources::custom_items::CustomItems;
 use crate::resources::entity_icons::EntityIcons;
+use crate::resources::game_files::{load_packs, GameFiles, PackFeatures};
 use crate::resources::panorama::load_panorama_faces;
-use crate::resources::sky::{load_border_texture, load_sky_textures};
+use crate::resources::sky::{load_border_texture, load_sky_textures, CustomSky};
 use crate::resources::terrain::TerrainTextures;
 use crate::resources::texture_animator::TextureAnimator;
 use crate::resources::theme_font::FontChoice;
@@ -56,6 +62,42 @@ use crate::world_view::WorldView;
 pub(super) struct AsyncLoadedAssets {
     pub(super) font: LoadedFont,
     pub(super) terrain: TerrainTextures,
+    pub(super) files: GameFiles,
+    pub(super) custom_animations: Vec<CustomAnimation>,
+}
+
+/// Reads the packs at `paths` once and builds from them both the terrain
+/// (atlases and models) and the [`GameFiles`] the other textures are read
+/// from, over the verified jar.
+pub(super) fn load_packs_and_terrain(
+    paths: &[PathBuf],
+    features: PackFeatures,
+) -> (TerrainTextures, GameFiles, Vec<CustomAnimation>) {
+    let mut packs = load_packs(paths);
+    let pack_files = PackFiles::from_pack_refs(&packs);
+    // The pictures of the custom container screens ride in a synthetic pack on
+    // top, so the GUI atlas holds them as regions.
+    let (guis, guis_pack) = CustomGuis::scan(&pack_files, features);
+    packs.extend(guis_pack);
+    // The same for the pictures and generated models of the custom items.
+    let (items, items_pack) = CustomItems::scan(&pack_files, features);
+    packs.extend(items_pack);
+    let terrain = TerrainTextures::from_packs(&packs);
+    if let Some(resources) = terrain.items() {
+        resources.set_custom_items(Arc::new(items));
+    }
+    let jar = crate::resources::official::find_verified_jar().ok();
+    let files = GameFiles::new(pack_files, jar)
+        .with_features(features)
+        .with_custom_guis(guis);
+    let custom = terrain
+        .animation_layout()
+        .map(|(context, layer_size)| {
+            let layer_of = |key: &str| context.atlas.layer(key);
+            custom_animations::load(&files, &packs, &layer_of, layer_size)
+        })
+        .unwrap_or_default();
+    (terrain, files, custom)
 }
 
 /// Starts the thread that pings the saved servers. Without it the list still
@@ -101,12 +143,19 @@ pub(super) fn upload_gui_atlas(
 }
 
 /// Uploads the sun, moon and End sky pictures of the verified jar.
-pub(super) fn upload_sky_textures(renderer: &mut Renderer) {
-    let jar = crate::resources::official::find_verified_jar().ok();
-    renderer.set_sky_textures(&load_sky_textures(jar.as_ref()));
-    if let Some(forcefield) = load_border_texture(jar.as_ref()) {
+pub(super) fn upload_sky_textures(renderer: &mut Renderer, files: &GameFiles) {
+    renderer.set_sky_textures(&load_sky_textures(files));
+    if let Some(forcefield) = load_border_texture(files) {
         renderer.set_border_texture(&forcefield);
     }
+}
+
+/// Loads the pack-defined sky layers and uploads their pictures. Called with
+/// the sky pictures, at startup and on every resource reload.
+pub(super) fn upload_custom_sky(renderer: &mut Renderer, files: &GameFiles) -> CustomSky {
+    let (sky, images) = CustomSky::load(files);
+    renderer.set_custom_sky_textures(&images);
+    sky
 }
 
 /// Uploads the six title panorama faces of the verified jar; `None` keeps the
@@ -160,13 +209,21 @@ impl App {
             packs_folder().as_deref(),
             None,
         );
+        let features = PackFeatures::from_quality(&options.video.quality);
+        // The pack loader reads options that shape the loaded resources.
+        crate::meshing::settings::store(&options.video);
         let (asset_tx, asset_rx) = std::sync::mpsc::channel();
         let loader_thread = std::thread::Builder::new()
             .name("AssetLoader".to_string())
             .spawn(move || {
-                let font = ui_font::load();
-                let terrain = TerrainTextures::load_with_packs(&packs);
-                let _ = asset_tx.send(AsyncLoadedAssets { font, terrain });
+                let (terrain, files, custom_animations) = load_packs_and_terrain(&packs, features);
+                let font = ui_font::load_with(&files);
+                let _ = asset_tx.send(AsyncLoadedAssets {
+                    font,
+                    terrain,
+                    files,
+                    custom_animations,
+                });
             });
         if let Err(error) = loader_thread {
             tracing::error!(%error, "Failed to spawn background asset loader thread");
@@ -236,6 +293,8 @@ impl App {
             assets: Assets {
                 font,
                 receiver: Some(asset_rx),
+                files: GameFiles::default(),
+                leaf_layers: Vec::new(),
                 ui_atlas: None,
                 font_choice: FontChoice::Game,
                 brand_atlas: None,
@@ -245,6 +304,8 @@ impl App {
                 texture_animator: TextureAnimator::default(),
                 entity_textures: None,
                 map_textures: None,
+                custom_sky: CustomSky::default(),
+                world_colors: Default::default(),
             },
             chat: ChatUi {
                 input: ChatInput::new(""),
@@ -260,6 +321,7 @@ impl App {
                 hud_revision: 0,
                 hud_chat: None,
                 entities: Vec::new(),
+                dynamic_lights: Default::default(),
                 particle_sprites: Vec::new(),
                 nametags: Vec::new(),
                 placed_tags: Vec::new(),
@@ -347,13 +409,22 @@ impl App {
         let gui_atlas = crate::resources::official::grow_atlas(terrain.gui_atlas(), &[]);
         upload_gui_atlas(renderer, Some(&gui_atlas));
         upload_glint_texture(renderer, terrain.glint_texture());
-        upload_sky_textures(renderer);
+        self.assets.files = assets.files;
+        upload_sky_textures(renderer, &self.assets.files);
+        self.assets.custom_sky = upload_custom_sky(renderer, &self.assets.files);
+        self.assets.world_colors =
+            crate::resources::custom_colors::WorldColors::upload(renderer, &self.assets.files);
         self.panorama = upload_panorama(renderer);
         self.assets.gui_atlas = Some(gui_atlas);
         self.server_icons_revision = u64::MAX;
         self.assets.items = terrain.items();
         self.dials = DialAnimator::new(terrain.dials());
-        self.assets.texture_animator = TextureAnimator::new(terrain.animations().to_vec());
+        self.assets.leaf_layers = terrain.leaf_layers();
+        self.assets.texture_animator = TextureAnimator::for_terrain(
+            &terrain,
+            super::options_control::animation_filter(&self.options.video.animations),
+        )
+        .with_custom(assets.custom_animations);
 
         match WorldView::new(&terrain, worker_count(self.options.video.mesh_threads)) {
             Ok(world) => self.world = Some(world),
@@ -365,8 +436,9 @@ impl App {
         self.assets.entity_textures = Some(EntityTextures::load_with_font(
             renderer,
             self.assets.ui_atlas.as_ref(),
+            self.assets.files.clone(),
         ));
-        self.assets.map_textures = Some(MapTextures::load(renderer));
+        self.assets.map_textures = Some(MapTextures::load(renderer, &self.assets.files));
 
         if self.screen == Screen::Loading {
             if self.args.server().is_some() {

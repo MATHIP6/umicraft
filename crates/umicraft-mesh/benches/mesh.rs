@@ -7,8 +7,12 @@ use std::hint::black_box;
 use std::sync::Arc;
 
 use criterion::{criterion_group, criterion_main, Criterion};
+use umicraft_mesh::ctm::CtmTable;
 use umicraft_mesh::tint::BiomeTints;
-use umicraft_mesh::{mesh_chunk, mesh_chunk_with_models, ChunkSnapshot, ModelMeshContext};
+use umicraft_mesh::{
+    mesh_chunk, mesh_chunk_with_models, mesh_chunk_with_settings, ChunkSnapshot, ConnectedTextures,
+    Leaves, MeshSettings, ModelMeshContext,
+};
 use umicraft_model::{
     AtlasLayout, BlockDefinition, BlockModelSet, ModelError, ModelResult, ResourceSource, StateDef,
 };
@@ -103,6 +107,9 @@ fn model_context() -> ModelMeshContext {
         models: Arc::new(set),
         atlas: Arc::new(AtlasLayout::from_keys(["blocks/stone"])),
         tints: None,
+        ctm: None,
+        natural: None,
+        custom_colors: None,
     }
 }
 
@@ -280,6 +287,9 @@ fn dense_grass() -> DenseGrass {
                     |_, _| [0x59, 0xAE, 0x30],
                 ))
             }),
+            ctm: None,
+            natural: None,
+            custom_colors: None,
         }
     };
     let plain = model_context(false);
@@ -368,6 +378,268 @@ fn mesh_water_checkerboard(criterion: &mut Criterion) {
     });
 }
 
+/// A dense 16³ block of leaves (id 18) meshed with each Trees mode: Fancy
+/// draws the faces between leaves, Smart and Fast cull them. The bench
+/// prints the emitted quad counts once so the time can be read against them.
+fn mesh_leaves_modes(criterion: &mut Criterion) {
+    const LEAVES_DEFS: &[BlockDefinition] = &[BlockDefinition {
+        id: 18,
+        name: "leaves",
+        states: CUBE_STATES,
+    }];
+    let mut files = BTreeMap::new();
+    files.insert(
+        "assets/minecraft/models/block/cube.json".to_string(),
+        CUBE_MODEL.replace("#all", "blocks/leaves").into_bytes(),
+    );
+    files.insert(
+        "assets/minecraft/blockstates/cube.json".to_string(),
+        CUBE_BLOCKSTATE.as_bytes().to_vec(),
+    );
+    let context = ModelMeshContext {
+        models: Arc::new(
+            BlockModelSet::build(&Memory(files), LEAVES_DEFS)
+                .expect("the synthetic leaves model set must build"),
+        ),
+        atlas: Arc::new(AtlasLayout::from_keys(["blocks/leaves"])),
+        tints: None,
+        ctm: None,
+        natural: None,
+        custom_colors: None,
+    };
+    let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+    for y in 0..16 {
+        for z in 0..16 {
+            for x in 0..16 {
+                column.set_block(x, y, z, BlockState::new(18, 0));
+            }
+        }
+    }
+    let snapshot = ChunkSnapshot::from_columns(ChunkPos::new(0, 0), [Arc::new(column)]);
+    for (name, leaves) in [
+        ("fancy", Leaves::Fancy),
+        ("smart", Leaves::Smart),
+        ("fast", Leaves::Fast),
+    ] {
+        let settings = MeshSettings {
+            leaves,
+            ..MeshSettings::default()
+        };
+        let quads = mesh_chunk_with_settings(ChunkPos::new(0, 0), &snapshot, &context, settings)
+            .face_count();
+        println!("mesh/leaves_{name}: {quads} quads");
+        criterion.bench_function(&format!("mesh/leaves_{name}"), |bencher| {
+            bencher.iter(|| {
+                black_box(mesh_chunk_with_settings(
+                    ChunkPos::new(0, 0),
+                    black_box(&snapshot),
+                    black_box(&context),
+                    settings,
+                ))
+            });
+        });
+    }
+}
+
+/// Phase 6: a column of dirt planes with air between them, so every plane
+/// exposes two full faces. The variants compare the mesher with no connected
+/// textures, a table whose rule is for another block (the fast path), and a
+/// rule that matches every face in Fast and Fancy.
+fn mesh_connected_textures(criterion: &mut Criterion) {
+    let mut files = BTreeMap::new();
+    files.insert(
+        "assets/minecraft/models/block/cube.json".to_string(),
+        CUBE_MODEL.replace("#all", "blocks/dirt").into_bytes(),
+    );
+    files.insert(
+        "assets/minecraft/blockstates/cube.json".to_string(),
+        CUBE_BLOCKSTATE.as_bytes().to_vec(),
+    );
+    let models = Arc::new(
+        BlockModelSet::build(&Memory(files), CUBE_DEFS)
+            .expect("the synthetic connected-texture model set must build"),
+    );
+    let tiles = (0..47).map(|n| format!("blocks/ctm/dirt/{n}"));
+    let atlas = Arc::new(AtlasLayout::from_keys(
+        tiles.chain(["blocks/dirt".to_string()]),
+    ));
+    let table = |block: u16| {
+        let text = format!("matchBlocks={block}\nmethod=ctm\ntiles=0-46\n");
+        let rules = umicraft_packext::ctm::parse_rules(
+            [("ctm/dirt/dirt.properties", text.as_bytes())],
+            &|_| None,
+        );
+        CtmTable::build(&rules, &atlas, &|_| None).map(Arc::new)
+    };
+    let context = |ctm| ModelMeshContext {
+        models: Arc::clone(&models),
+        atlas: Arc::clone(&atlas),
+        tints: None,
+        ctm,
+        natural: None,
+        custom_colors: None,
+    };
+    let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+    for y in (0..16).step_by(2) {
+        for z in 0..16 {
+            for x in 0..16 {
+                column.set_block(x, y, z, BlockState::new(3, 0));
+            }
+        }
+    }
+    let snapshot = ChunkSnapshot::from_columns(ChunkPos::new(0, 0), [Arc::new(column)]);
+    let variants = [
+        ("none", context(None), ConnectedTextures::Fancy),
+        ("off", context(table(3)), ConnectedTextures::Off),
+        ("other_block", context(table(7)), ConnectedTextures::Fancy),
+        ("fast", context(table(3)), ConnectedTextures::Fast),
+        ("fancy", context(table(3)), ConnectedTextures::Fancy),
+    ];
+    for (name, context, mode) in variants {
+        let settings = MeshSettings {
+            connected_textures: mode,
+            ..MeshSettings::default()
+        };
+        criterion.bench_function(&format!("mesh/ctm_{name}"), |bencher| {
+            bencher.iter(|| {
+                black_box(mesh_chunk_with_settings(
+                    ChunkPos::new(0, 0),
+                    black_box(&snapshot),
+                    black_box(&context),
+                    settings,
+                ))
+            });
+        });
+    }
+}
+
+/// Natural textures: a dense dirt section with no table, with a table and the
+/// option off, and with the rule applied to every face.
+fn mesh_natural_textures(criterion: &mut Criterion) {
+    let mut files = BTreeMap::new();
+    files.insert(
+        "assets/minecraft/models/block/cube.json".to_string(),
+        CUBE_MODEL.replace("#all", "blocks/dirt").into_bytes(),
+    );
+    files.insert(
+        "assets/minecraft/blockstates/cube.json".to_string(),
+        CUBE_BLOCKSTATE.as_bytes().to_vec(),
+    );
+    let models = Arc::new(
+        BlockModelSet::build(&Memory(files), CUBE_DEFS)
+            .expect("the synthetic natural-texture model set must build"),
+    );
+    let atlas = Arc::new(AtlasLayout::from_keys(["blocks/dirt"]));
+    let rules = umicraft_packext::natural::NaturalRules::parse(b"dirt=4F")
+        .expect("the synthetic natural rules must parse");
+    let table = umicraft_mesh::natural::NaturalTable::build(&rules, &atlas).map(Arc::new);
+    let context = |natural| ModelMeshContext {
+        models: Arc::clone(&models),
+        atlas: Arc::clone(&atlas),
+        tints: None,
+        ctm: None,
+        natural,
+        custom_colors: None,
+    };
+    let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+    for y in (0..16).step_by(2) {
+        for z in 0..16 {
+            for x in 0..16 {
+                column.set_block(x, y, z, BlockState::new(3, 0));
+            }
+        }
+    }
+    let snapshot = ChunkSnapshot::from_columns(ChunkPos::new(0, 0), [Arc::new(column)]);
+    let variants = [
+        ("none", context(None), true),
+        ("off", context(table.clone()), false),
+        ("on", context(table), true),
+    ];
+    for (name, context, natural_textures) in variants {
+        let settings = MeshSettings {
+            natural_textures,
+            ..MeshSettings::default()
+        };
+        criterion.bench_function(&format!("mesh/natural_{name}"), |bencher| {
+            bencher.iter(|| {
+                black_box(mesh_chunk_with_settings(
+                    ChunkPos::new(0, 0),
+                    black_box(&snapshot),
+                    black_box(&context),
+                    settings,
+                ))
+            });
+        });
+    }
+}
+/// Custom colours: a dense dirt section with no palette and with a fixed palette
+/// on the block, which tints every face.
+fn mesh_custom_colors(criterion: &mut Criterion) {
+    let mut files = BTreeMap::new();
+    files.insert(
+        "assets/minecraft/models/block/cube.json".to_string(),
+        CUBE_MODEL.replace("#all", "blocks/dirt").into_bytes(),
+    );
+    files.insert(
+        "assets/minecraft/blockstates/cube.json".to_string(),
+        CUBE_BLOCKSTATE.as_bytes().to_vec(),
+    );
+    let models = Arc::new(
+        BlockModelSet::build(&Memory(files), CUBE_DEFS)
+            .expect("the synthetic custom-colour model set must build"),
+    );
+    let atlas = Arc::new(AtlasLayout::from_keys(["blocks/dirt"]));
+    let custom = |linked: bool| {
+        let mut colors = umicraft_mesh::custom_colors::CustomColors::default();
+        if linked {
+            let dirt = vec![umicraft_packext::ctm::BlockMatch {
+                id: 3,
+                metadata: None,
+            }];
+            colors.add_block_palette(
+                dirt,
+                &umicraft_packext::colors::Palette::fixed([90, 160, 40]),
+            );
+        }
+        Some(Arc::new(colors))
+    };
+    let context = |custom_colors| ModelMeshContext {
+        models: Arc::clone(&models),
+        atlas: Arc::clone(&atlas),
+        tints: None,
+        ctm: None,
+        natural: None,
+        custom_colors,
+    };
+    let mut column = ChunkColumn::new(ChunkPos::new(0, 0));
+    for y in (0..16).step_by(2) {
+        for z in 0..16 {
+            for x in 0..16 {
+                column.set_block(x, y, z, BlockState::new(3, 0));
+            }
+        }
+    }
+    let snapshot = ChunkSnapshot::from_columns(ChunkPos::new(0, 0), [Arc::new(column)]);
+    let variants = [
+        ("none", context(None)),
+        ("empty", context(custom(false))),
+        ("fixed", context(custom(true))),
+    ];
+    for (name, context) in variants {
+        let settings = MeshSettings::default();
+        criterion.bench_function(&format!("mesh/custom_colors_{name}"), |bencher| {
+            bencher.iter(|| {
+                black_box(mesh_chunk_with_settings(
+                    ChunkPos::new(0, 0),
+                    black_box(&snapshot),
+                    black_box(&context),
+                    settings,
+                ))
+            });
+        });
+    }
+}
+
 criterion_group!(
     benches,
     mesh_flat_chunk,
@@ -377,6 +649,10 @@ criterion_group!(
     mesh_dense_models,
     mesh_dense_tinted_grass,
     mesh_lit_cave,
-    mesh_water_checkerboard
+    mesh_water_checkerboard,
+    mesh_leaves_modes,
+    mesh_connected_textures,
+    mesh_natural_textures,
+    mesh_custom_colors
 );
 criterion_main!(benches);

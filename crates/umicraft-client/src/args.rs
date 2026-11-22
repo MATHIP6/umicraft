@@ -11,6 +11,8 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
+use crate::options::RENDER_DISTANCE;
+
 /// The acceptance camera views for `--block-demo`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DemoView {
@@ -98,7 +100,7 @@ options:
   --username NAME --uuid UUID --accessToken TOKEN
                       launcher session: log in to online-mode servers
                       (also UMICRAFT_USERNAME, UMICRAFT_UUID, UMICRAFT_ACCESS_TOKEN)
-  --view-distance N   requested chunk view distance, 2-16 (default: 8)
+  --view-distance N   requested chunk view distance, 2-32 (default: 8)
   --screenshot PATH   render one offscreen PNG to PATH instead of opening a window
   --collect-secs N    world collection time for screenshots (default: 8)
   --headless          run a scripted session without a window and print a report
@@ -598,9 +600,11 @@ impl Args {
         if port == Some(0) {
             return Err(format!("port must be 1-65535\n{USAGE}"));
         }
-        if !(2..=16).contains(&view_distance) {
+        if !RENDER_DISTANCE.contains(&view_distance) {
             return Err(format!(
-                "--view-distance must be 2-16, got {view_distance}\n{USAGE}"
+                "--view-distance must be {}-{}, got {view_distance}\n{USAGE}",
+                RENDER_DISTANCE.start(),
+                RENDER_DISTANCE.end()
             ));
         }
         if !(0.2..=300.0).contains(&collect_secs) {
@@ -961,10 +965,20 @@ mod tests {
     }
 
     #[test]
+    fn the_usage_names_the_range_of_the_render_distance_option() {
+        let range = format!("{}-{}", RENDER_DISTANCE.start(), RENDER_DISTANCE.end());
+        assert!(USAGE.contains(&format!("chunk view distance, {range}")));
+        let top = RENDER_DISTANCE.end().to_string();
+        assert!(Args::parse(&words(&["host", "25565", "--view-distance", &top])).is_ok());
+    }
+
+    #[test]
     fn rejects_bad_values() {
         assert!(Args::parse(&words(&["host", "0"])).is_err());
         assert!(Args::parse(&words(&["host", "70000"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--view-distance", "1"])).is_err());
+        let past_the_end = (RENDER_DISTANCE.end() + 1).to_string();
+        assert!(Args::parse(&words(&["host", "25565", "--view-distance", &past_the_end])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--width", "0"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--unknown"])).is_err());
         assert!(Args::parse(&words(&["host", "25565", "--name"])).is_err());

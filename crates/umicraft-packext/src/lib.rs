@@ -1,0 +1,49 @@
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
+//! # umicraft-packext
+//!
+//! Parses and evaluates the resource-pack feature formats that OptiFine
+//! established and that packs rely on: custom sky, custom entity models,
+//! connected textures, and the others of milestone F6 (ADR-0089).
+//!
+//! The crate has no GPU, window or world dependency. Each feature turns the
+//! raw files of a pack into a typed plan, which the renderer, the mesher and
+//! the model code consume. Formats can therefore be tested and fuzzed on their
+//! own. A malformed file never panics: it gives a typed error, and the caller
+//! drops that one layer, model or rule.
+//!
+//! Shared building blocks:
+//! - [`properties`]: the `.properties` files most features are written in;
+//! - [`ranges`]: integer range lists such as `0-3 5`;
+//! - [`filters`]: the biome, height and weather conditions.
+//!
+//! Features:
+//! - [`sky`]: custom sky layers;
+//! - [`cem`]: custom entity models (`.jem`/`.jpm`) and their animation
+//!   expressions;
+//! - [`ctm`]: connected textures;
+//! - [`colors`]: custom colours (`color.properties`, colormaps, lightmaps);
+//! - [`natural`]: natural textures (turned and mirrored faces);
+//! - [`anim`]: custom texture animations (`anim/*.properties`).
+//!
+//! Sources: ADR-0088 and `docs/sources.md`, section "OptiFine features".
+
+pub mod anim;
+pub mod cem;
+pub mod cit;
+pub mod colors;
+pub mod ctm;
+pub mod filters;
+pub mod guis;
+pub mod int_list;
+pub mod natural;
+pub mod properties;
+pub mod random_entities;
+pub mod ranges;
+pub mod sky;
+pub mod text_match;
+
+pub use filters::{BiomeFilter, WeatherSet};
+pub use properties::{Properties, PropertiesError};
+pub use ranges::{Range, RangeError, RangeList};
+pub use text_match::{TextMatch, TextMatchError};

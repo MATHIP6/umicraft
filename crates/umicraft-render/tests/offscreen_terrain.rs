@@ -496,3 +496,16 @@ fn rewriting_a_block_layer_changes_the_next_frame() {
     assert!(before[0] > 150 && before[1] < 60, "red before: {before:?}");
     assert!(after[1] > 150 && after[0] < 60, "green after: {after:?}");
 }
+
+/// Regression: with moving blocks but no chunk in view, the opaque pass drew
+/// them with the pipeline left over from the sky pass, and wgpu aborted on the
+/// incompatible bind group ("terrain bind group" vs "sky bind group layout").
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn moving_blocks_without_chunks_draw_with_the_terrain_pipeline() {
+    let mut renderer = Renderer::new_offscreen(WIDTH, HEIGHT).expect("offscreen renderer");
+    renderer.set_moving_blocks(&quad(-120.0, (-20.0, 20.0), (50.0, 110.0), 0, TORCH));
+    let environment = RenderEnvironment::new(0, 6_000, 0.0, 8);
+    let image = render(&mut renderer, &camera(), environment);
+    assert_eq!(image.width, WIDTH);
+}

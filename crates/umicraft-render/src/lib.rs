@@ -22,6 +22,7 @@ mod cave_graph;
 mod chunk_pass;
 mod clouds;
 mod dynamic_blocks;
+mod dynamic_lights;
 pub mod entity_pass;
 mod environment;
 mod error;
@@ -33,6 +34,7 @@ mod hires_blocks;
 pub mod hud;
 pub mod hud_hearts;
 mod items;
+mod layer_set;
 mod lightmap;
 mod mipmap;
 mod motion_blur;
@@ -54,10 +56,14 @@ pub use block_atlas::BlockAtlasError;
 pub use border::{BorderStatus, BorderView};
 pub use camera::{Camera, Frustum};
 pub use clouds::CloudMode;
+pub use dynamic_lights::{DynamicLight, DynamicLightSet, LIGHT_RADIUS, MAX_DYNAMIC_LIGHTS};
 pub use entity_pass::{EntityBatch, EntityRenderer, EntityTexture, EntityVertex};
-pub use environment::RenderEnvironment;
+pub use environment::{ColorOverrides, RenderEnvironment, SkyDetails};
 pub use error::RenderError;
-pub use fog::{light_brightness, FogContext, FogMedium, FogMode, FogParams};
+pub use fog::{
+    light_brightness, FogContext, FogKind, FogMedium, FogMode, FogParams, FogSettings,
+    VANILLA_FOG_START,
+};
 pub use frame_pacing::{FramePacingStats, FramePacingTracker, SurfaceInfo};
 pub use gpu_timer::{DrawCallStats, GpuTimings, VramStats, GROUP_NAMES};
 pub use hud::{
@@ -67,13 +73,14 @@ pub use hud::{
 };
 pub use hud::{
     plain_text, ActionBarView, BossView, ChatInputView, ChatLineView, ChatRunView, ChatStyle,
-    DebugF3View, HudState, SidebarLineView, SidebarView, TabEntryView, TabListView, TabValueStyle,
-    TitleView,
+    DebugF3View, HudState, LagometerView, SidebarLineView, SidebarView, TabEntryView, TabListView,
+    TabValueStyle, TitleView,
 };
 pub use hud_hearts::{HeartsTint, HeartsView};
 pub use items::{
     IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE, PORTRAIT_KEY, PORTRAIT_SIZE,
 };
+pub use layer_set::LayerSet;
 pub use motion_blur::{MotionBlurSettings, MotionBlurVersion};
 pub use nametag::Nametag;
 pub use outline::{edge_vertices, DebugLine, OutlineBox, MAX_DEBUG_LINES, OUTLINE_GROWTH};

@@ -30,13 +30,14 @@ fn camera_uniform_is_pod_and_aligned() {
         fog_end: 128.0,
         gamma: 0.5,
         fog_density: 0.1,
-        _pad: 0.0,
+        fog_planar: 0.0,
         origin: [0.0; 3],
-        _pad_origin: 0.0,
+        light_count: 0,
         lightmap: lightmap::unlit(),
+        lights: [GpuLight::NONE; MAX_DYNAMIC_LIGHTS],
     };
     let bytes = bytemuck::bytes_of(&uniform);
-    assert_eq!(bytes.len(), 128 + 256 * 16);
+    assert_eq!(bytes.len(), 128 + 256 * 16 + 16 * 32);
     assert_eq!(bytes.len() % 16, 0);
     // These offsets must match the WGSL `Camera` struct in terrain.wgsl.
     assert_eq!(std::mem::offset_of!(CameraUniform, camera_pos), 64);
@@ -47,7 +48,9 @@ fn camera_uniform_is_pod_and_aligned() {
     assert_eq!(std::mem::offset_of!(CameraUniform, gamma), 100);
     assert_eq!(std::mem::offset_of!(CameraUniform, fog_density), 104);
     assert_eq!(std::mem::offset_of!(CameraUniform, origin), 112);
+    assert_eq!(std::mem::offset_of!(CameraUniform, light_count), 124);
     assert_eq!(std::mem::offset_of!(CameraUniform, lightmap), 128);
+    assert_eq!(std::mem::offset_of!(CameraUniform, lights), 128 + 256 * 16);
 }
 
 #[test]
@@ -182,5 +185,44 @@ fn the_terrain_shader_is_valid_wgsl() {
             module.entry_points.iter().any(|point| point.name == entry),
             "missing {entry}"
         );
+    }
+}
+
+/// The byte offset of member `name` of the struct `Camera` of `source`.
+fn camera_member_offset(source: &str, name: &str) -> u32 {
+    let module = naga::front::wgsl::parse_str(source).expect("the shader parses");
+    naga::valid::Validator::new(
+        naga::valid::ValidationFlags::all(),
+        naga::valid::Capabilities::all(),
+    )
+    .validate(&module)
+    .expect("the shader validates");
+    let (_, camera) = module
+        .types
+        .iter()
+        .find(|(_, ty)| ty.name.as_deref() == Some("Camera"))
+        .expect("a Camera struct");
+    let naga::TypeInner::Struct { members, .. } = &camera.inner else {
+        panic!("Camera is a struct");
+    };
+    members
+        .iter()
+        .find(|member| member.name.as_deref() == Some(name))
+        .expect("the member exists")
+        .offset
+}
+
+/// The terrain and entity shaders read the dynamic lights from the same
+/// offsets the Rust uniform writes them at.
+#[test]
+fn the_shaders_read_the_dynamic_lights_where_the_uniform_puts_them() {
+    for source in [TERRAIN_WGSL, crate::entity_pass::ENTITY_WGSL] {
+        let count = camera_member_offset(source, "light_count");
+        let lights = camera_member_offset(source, "lights");
+        assert_eq!(
+            count as usize,
+            std::mem::offset_of!(CameraUniform, light_count)
+        );
+        assert_eq!(lights as usize, std::mem::offset_of!(CameraUniform, lights));
     }
 }

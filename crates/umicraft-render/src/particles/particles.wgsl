@@ -14,7 +14,8 @@ struct Camera {
     fog_end: f32,
     gamma: f32,
     fog_density: f32,
-    _pad1: f32,
+    // 1 when the fog is measured by depth instead of distance (`fog_distance`).
+    fog_planar: f32,
     // Integer world offset of the render origin: positions are sent to the
     // GPU relative to it (`view_proj` is built for that origin), so f32
     // keeps its precision far from the world origin.
@@ -79,7 +80,11 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     let lit = texel.rgb * in.color.rgb * in.light;
     let fog_target = camera.fog_color * (0.15 + 0.85 * in.light);
     let fog = fog_amount(
-        distance(in.world_position, camera.camera_pos),
+        fog_distance(
+            distance(in.world_position, camera.camera_pos),
+            in.clip_position.w,
+            camera.fog_planar,
+        ),
         camera.fog_start,
         camera.fog_end,
         camera.fog_density,

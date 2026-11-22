@@ -21,6 +21,7 @@ cargo install cargo-fuzz --locked
 | `play_session` | `PlaySession::handle` over a packet sequence, framed as `[len, id, body...]` chunks, to exercise session state. |
 | `chunk_parser` | Byte 0 selects the mode: `ChunkData::decode` + `World::apply_chunk`, `MapChunkBulk::decode` + `World::apply_chunk_bulk`, or a raw `ChunkPayload` (arbitrary mask/flags, data as given or fitted to the exact announced length so the section parser is reached). Bit 7 picks overworld vs. nether (sky light on/off). |
 | `framing` | `Framing::read_frame` / `unwrap_body`, raw and compressed (byte 0 = threshold, 0 = raw). |
+| `pack_properties` | `umicraft_packext::Properties::parse`, then every value through `RangeList::parse`, `BiomeFilter` and `WeatherSet` (F6, ADR-0089). |
 
 A decoder must return `Err` on bad input and never panic; the targets ignore
 `Err` results.
@@ -60,6 +61,7 @@ the affected crate with the minimised input.
 | 2026-10-26 | play_session | 600 s | no crash, no slow unit (14.9M runs) |
 | 2026-10-26 | chunk_parser | 600 s | no crash, no slow unit (46.5k runs; each input applies whole columns) |
 | 2026-10-26 | framing | 600 s | no crash, no slow unit (1.2M runs) |
+| 2026-11-21 | pack_properties | 60 s | no crash (~779k runs) |
 
 P1's "fuzzers run 10 minutes without a panic" criterion is met by the
 last five rows (ROADMAP.md P1).

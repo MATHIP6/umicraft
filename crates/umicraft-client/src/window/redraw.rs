@@ -7,7 +7,10 @@ use std::time::{Duration, Instant};
 
 use umicraft_game::inventory::HOTBAR_START;
 use umicraft_mesh::item::ItemMesh;
-use umicraft_render::{NoIcons, RenderEnvironment, Renderer, ScreenOverlays, SkyState};
+use umicraft_render::{
+    FogKind, FogMedium, FogSettings, NoIcons, RenderEnvironment, Renderer, ScreenOverlays,
+    SkyDetails, SkyState,
+};
 use winit::event_loop::ActiveEventLoop;
 
 use super::mods_menu;
@@ -17,11 +20,15 @@ use super::BACKGROUND_FPS;
 use crate::audio_bridge::listener::listener_of;
 use crate::audio_bridge::music::MusicWorld;
 use crate::debug::cpu_split::Stage;
+use crate::debug::lagometer::compact_line;
 use crate::debug::metrics::InputLatencyMetrics;
 use crate::game::GameEvent;
 use crate::hud::dials::DialInputs;
+use crate::options::video_sections::FogChoice;
+use crate::options::video_spec::Effect;
 use crate::options::{self};
 use crate::resources::item_icons::IconSource;
+use crate::resources::sky::CustomSkyFrame;
 use crate::scene::block_entity::{mesh_block_entities, BlockEntityScene};
 use crate::scene::item_world::{entity_items, push_held_item, WorldItems};
 use crate::scene::map::map_id_of;
@@ -43,6 +50,30 @@ pub(super) fn frame_cap(max_fps: u32, focused: bool) -> u32 {
 fn held_stack(world: &WorldView) -> Option<&umicraft_protocol::packets::play::ItemStack> {
     let selected = usize::from(world.hud().selected_slot).min(8);
     world.window_view().player_slots[HOTBAR_START + selected].as_ref()
+}
+
+/// Blocks the clouds rise at full Cloud Height (OptiFine's `ofCloudsHeight * 128`).
+const CLOUD_LIFT_RANGE: f32 = 128.0;
+
+/// Copies the Details options that shape the sky, fog, clouds and rain into
+/// the frame's environment, where the render passes read them.
+fn apply_details(environment: &mut RenderEnvironment, video: &options::VideoOptions) {
+    let details = &video.details;
+    environment.sky_details = SkyDetails {
+        sky: details.sky,
+        stars: details.stars,
+        sun_moon: details.sun_moon,
+    };
+    environment.fog_settings = FogSettings {
+        kind: match details.fog {
+            FogChoice::Fast => FogKind::Fast,
+            FogChoice::Fancy => FogKind::Fancy,
+            FogChoice::Off => FogKind::Off,
+        },
+        start: details.fog_start,
+    };
+    environment.cloud_lift = details.cloud_height * CLOUD_LIFT_RANGE;
+    environment.draw_precipitation = details.rain.fancy(video.fancy_graphics).is_some();
 }
 
 impl App {
@@ -68,6 +99,9 @@ impl App {
         ) else {
             return;
         };
+        let performance = &self.options.video.performance;
+        world.set_upload_budget(performance.upload_budget_bytes());
+        world.set_dynamic_updates(performance.dynamic_updates);
         world.sync(session.frames(), session.chunks(), renderer);
         let video = &self.options.video;
         world.update_camera(
@@ -129,6 +163,37 @@ impl App {
         }
     }
 
+    /// Fills the HUD data of the Show FPS line and the Lagometer, or clears
+    /// it. The graph is a part of the F3 screen; the line shows without it.
+    fn update_perf_hud(&mut self) {
+        let other = &self.options.video.other;
+        let (Some(world), true) = (self.world.as_ref(), self.world_visible()) else {
+            self.frame.hud.fps_line = None;
+            self.frame.hud.lagometer = None;
+            return;
+        };
+        self.frame.hud.fps_line = other.show_fps.then(|| {
+            let chunks = self
+                .renderer
+                .as_ref()
+                .map_or(0, Renderer::visible_chunk_count);
+            compact_line(
+                self.clock.fps,
+                chunks,
+                world.drawn_counts().0,
+                world.meshes_uploaded(),
+            )
+        });
+        self.frame.hud.lagometer = (other.lagometer && self.show_f3).then(|| {
+            let timers = world.lagometer();
+            let mut view = self.frame.hud.lagometer.take().unwrap_or_default();
+            timers.frame.copy_into(&mut view.frame);
+            timers.sync.copy_into(&mut view.sync);
+            timers.upload.copy_into(&mut view.upload);
+            view
+        });
+    }
+
     /// Steps the compass and the clock and writes their new frames into the
     /// block array.
     fn advance_dials(&mut self, elapsed: Duration, environment: RenderEnvironment) {
@@ -159,6 +224,9 @@ impl App {
         let now = Instant::now();
         self.cpu.start(now);
         let elapsed = self.clock.tick(now, self.show_overlay);
+        if let Some(world) = self.world.as_mut() {
+            world.note_frame(Duration::from_secs_f32(elapsed));
+        }
         // Phase E.9: the game thread takes network events once per frame.
         if let Some(session) = self.session.as_ref() {
             session.note_frame(Duration::from_secs_f32(elapsed));
@@ -179,6 +247,12 @@ impl App {
             .map(|world| world.environment(now, self.options.video.render_distance))
             .unwrap_or_default();
         environment.gamma = self.options.video.gamma;
+        apply_details(&mut environment, &self.options.video);
+        environment.colors = self.assets.world_colors.overrides(
+            self.world.is_some(),
+            self.world.as_ref().and_then(WorldView::sky_biome),
+            self.camera.eye().y as f32,
+        );
         // The camera is where it stays for this frame: the entities are made once.
         if let Some(world) = self.world.as_ref() {
             world.entities_into(now, self.camera.render_origin(), &mut self.frame.entities);
@@ -191,6 +265,7 @@ impl App {
         self.update_death_screen(now);
         self.update_container_cursor();
         self.build_overlay();
+        self.update_perf_hud();
 
         if self.exit_error.is_some() {
             // The session ended (the server disconnected): leave the loop.
@@ -219,16 +294,19 @@ impl App {
         let Some(renderer) = self.renderer.as_mut() else {
             return;
         };
-        let effects = self.options_menu.video_applier.apply(
+        let effect = self.options_menu.video_applier.apply(
             &self.options.video,
             self.window.as_deref(),
             renderer,
             self.assets.entity_textures.as_ref(),
+            &self.assets.leaf_layers,
         );
-        if effects.reload_atlas {
-            self.reload_resources();
-        } else if effects.remesh {
-            self.send_event(GameEvent::ReMeshAll);
+        match effect {
+            Effect::ReloadResources => self.reload_resources(),
+            Effect::ReMesh => {
+                self.send_event(GameEvent::ReMeshAll);
+            }
+            Effect::Immediate => {}
         }
         // The renderer leaves `self` while the scene is handed to it, so the
         // steps can read the rest of the window state alongside it.
@@ -288,6 +366,30 @@ impl App {
         self.clock.schedule_next(budget, Instant::now());
     }
 
+    /// Evaluates the pack's custom sky layers for this frame and hands them to
+    /// the renderer. The Custom Sky option off (or no world) gives the vanilla
+    /// sky.
+    fn update_custom_sky(
+        &mut self,
+        renderer: &mut Renderer,
+        environment: RenderEnvironment,
+        elapsed: f32,
+    ) {
+        let frame = CustomSkyFrame {
+            dimension: i32::from(environment.dimension),
+            world_time: environment.world_time,
+            celestial_angle: SkyState::at(environment).celestial_angle,
+            rain: environment.rain_strength,
+            thunder: environment.thunder_strength,
+            biome_id: self.world.as_ref().and_then(WorldView::sky_biome),
+            eye_block_y: self.camera.eye().y.floor() as i64,
+            frame_seconds: elapsed,
+        };
+        let enabled = self.world.is_some() && self.options.video.quality.custom_sky;
+        let (has_layers, frames) = self.assets.custom_sky.evaluate(enabled, &frame);
+        renderer.set_custom_sky(has_layers, frames);
+    }
+
     /// Hands the renderer what this frame shows besides the entities: the
     /// environment, the clouds, rain and particles, the screen overlays, the
     /// border, the animated textures, the selection, the blurs, the name tags,
@@ -303,11 +405,21 @@ impl App {
         // One environment per frame: the sky and the fog read the same clock
         // and interpolation fraction as the camera.
         renderer.set_environment(environment);
+        renderer.set_dynamic_lights(self.frame.dynamic_lights.update(
+            self.options.video.dynamic_lights,
+            now,
+            &self.frame.entities,
+            self.camera.eye(),
+            environment.fog.medium == FogMedium::Water,
+        ));
+        self.update_custom_sky(renderer, environment, elapsed);
         renderer.set_cloud_mode(self.options.video.cloud_mode());
         // 20 client ticks per second drive the cloud drift.
         renderer.set_cloud_ticks((now - self.clock.started).as_secs_f64() * 20.0);
         if let Some(world) = self.world.as_ref() {
-            renderer.set_precipitation(world.precipitation(), self.options.video.fancy_graphics);
+            let video = &self.options.video;
+            let fancy = video.details.rain.fancy(video.fancy_graphics);
+            renderer.set_precipitation(world.precipitation(), fancy.unwrap_or(false));
             world.particle_sprites_into(
                 &mut self.frame.particle_sprites,
                 environment.partial_tick,
@@ -316,23 +428,29 @@ impl App {
             );
             renderer.set_particles(&self.frame.particle_sprites);
         }
-        renderer.set_screen_overlays(
-            self.world
-                .as_mut()
-                .map_or_else(ScreenOverlays::default, |world| {
-                    world.screen_overlays(now, self.options.video.fancy_graphics)
-                }),
-        );
+        renderer.set_screen_overlays(self.world.as_mut().map_or_else(
+            ScreenOverlays::default,
+            |world| {
+                let video = &self.options.video;
+                world.screen_overlays(now, video.details.vignette.is_fancy(video.fancy_graphics))
+            },
+        ));
         renderer.set_world_border(
             self.world.as_ref().and_then(WorldView::border),
             (now - self.clock.started).as_secs_f64(),
         );
         renderer.set_glint_time((now - self.clock.started).as_secs_f32());
-        self.assets
-            .texture_animator
-            .advance(Duration::from_secs_f32(elapsed), |layer, pixels| {
+        // Smart Animations: with the world on screen, only the textures of the
+        // chunks drawn last frame are uploaded. A screen over the world (the
+        // inventory shows block icons) keeps them all running.
+        let smart = self.options.video.performance.smart_animations && self.screen == Screen::None;
+        self.assets.texture_animator.advance(
+            Duration::from_secs_f32(elapsed),
+            |layer| !smart || renderer.layer_in_view(layer),
+            |layer, pixels| {
                 renderer.write_block_layer(layer, pixels);
-            });
+            },
+        );
         renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
         renderer.set_debug_lines(&self.debug_lines());
         // The mods menu blurs the game behind it to keep the focus on itself.
@@ -564,5 +682,53 @@ impl App {
                 input_to_frame_ms,
                 presentation_time_ms: present_us as f32 / 1000.0,
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::options::video_sections::RainChoice;
+    use crate::options::VideoOptions;
+
+    fn applied(video: &VideoOptions) -> RenderEnvironment {
+        let mut environment = RenderEnvironment::DEFAULT;
+        apply_details(&mut environment, video);
+        environment
+    }
+
+    #[test]
+    fn the_defaults_draw_everything_with_the_optifine_fog() {
+        let environment = applied(&VideoOptions::default());
+        assert_eq!(environment.sky_details, SkyDetails::ALL);
+        assert_eq!(environment.fog_settings.kind, FogKind::Fast);
+        assert_eq!(environment.fog_settings.start, 0.8);
+        assert_eq!(environment.cloud_lift, 0.0);
+        assert!(environment.draw_precipitation);
+    }
+
+    #[test]
+    fn the_details_reach_the_environment() {
+        let mut video = VideoOptions::default();
+        video.details.sky = false;
+        video.details.stars = false;
+        video.details.sun_moon = false;
+        video.details.fog = FogChoice::Off;
+        video.details.fog_start = 0.4;
+        video.details.cloud_height = 0.5;
+        video.details.rain = RainChoice::Off;
+        let environment = applied(&video);
+        assert_eq!(
+            environment.sky_details,
+            SkyDetails {
+                sky: false,
+                stars: false,
+                sun_moon: false
+            }
+        );
+        assert_eq!(environment.fog_settings.kind, FogKind::Off);
+        assert_eq!(environment.fog_settings.start, 0.4);
+        assert_eq!(environment.cloud_lift, 64.0);
+        assert!(!environment.draw_precipitation);
     }
 }

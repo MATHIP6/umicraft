@@ -33,6 +33,7 @@ use crate::cave_graph::CaveGraph;
 use crate::chunk_pass::QuadIndices;
 use crate::clouds::CloudRenderer;
 use crate::dynamic_blocks::MovingBlocksPass;
+use crate::dynamic_lights::{DynamicLightSet, GpuLight, MAX_DYNAMIC_LIGHTS};
 use crate::entity_pass::EntityRenderer;
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
@@ -40,6 +41,7 @@ use crate::frame_pacing::FramePacingTracker;
 use crate::gpu_timer::{DrawCallStats, GpuTimer};
 use crate::hires_blocks::HiresBlocks;
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, WorldGlint};
+use crate::layer_set::LayerSet;
 use crate::lightmap::{self, TorchFlicker};
 use crate::motion_blur::MotionBlur;
 use crate::nametag::NametagRenderer;
@@ -126,17 +128,22 @@ pub(crate) struct CameraUniform {
     fog_end: f32,
     /// 1.8 brightness gamma in `0..=1` (Moody → Bright).
     gamma: f32,
-    /// Explicit tail padding: the WGSL `Camera` struct is 112 bytes.
     /// Exponential fog density (water, lava); above zero it replaces the
     /// linear band (`fog_amount` in `fog.wgsl`).
     fog_density: f32,
-    _pad: f32,
+    /// `1.0` when the fog is measured by depth along the view instead of the
+    /// distance to the eye (`FogParams::planar`); fills the 112-byte WGSL
+    /// `Camera` struct.
+    fog_planar: f32,
     /// Integer world offset the matrix is relative to: shaders subtract it
     /// from every position, which keeps f32 exact far from the origin.
     origin: [f32; 3],
-    _pad_origin: f32,
+    /// How many of `lights` are on (`0` with Dynamic Lights off).
+    light_count: u32,
     /// The vanilla lightmap, `[sky * 16 + block]` (see [`crate::lightmap`]).
     lightmap: [[f32; 4]; lightmap::ENTRIES],
+    /// The dynamic lights of the frame, relative to `origin`.
+    lights: [GpuLight; MAX_DYNAMIC_LIGHTS],
 }
 
 impl CameraUniform {
@@ -157,11 +164,12 @@ impl CameraUniform {
             fog_end: HAND_FOG_FREE * 2.0,
             gamma: 0.0,
             fog_density: 0.0,
-            _pad: 0.0,
+            fog_planar: 0.0,
             origin: [0.0; 3],
-            _pad_origin: 0.0,
+            light_count: 0,
             // GUI items are drawn without the lightmap.
             lightmap: lightmap::unlit(),
+            lights: [GpuLight::NONE; MAX_DYNAMIC_LIGHTS],
         }
     }
 }
@@ -215,8 +223,15 @@ pub struct Renderer {
     terrain_solid_pipeline: wgpu::RenderPipeline,
     /// The index buffer every chunk pass is drawn with (F2-2d).
     quad_indices: QuadIndices,
-    /// Which layers of the bound block array need the alpha test.
+    /// Which layers of the bound block array need the alpha test: the
+    /// texture's own flags (`atlas_cutout`) minus `opaque_layers`.
     cutout: Vec<bool>,
+    /// Which layers of the bound block array have a texel under the alpha
+    /// test, as read from the pixels.
+    atlas_cutout: Vec<bool>,
+    /// Layers drawn without the alpha test whatever their texels: the leaves
+    /// of the "Trees: Fast" option (ADR-0089).
+    opaque_layers: Vec<u32>,
     /// Bumped whenever `cutout` changes; chunk passes sorted with an older
     /// one are drawn whole with the alpha test until they are uploaded again.
     cutout_epoch: u32,
@@ -233,6 +248,8 @@ pub struct Renderer {
     /// What the visible lists were last built from: the view, the loaded meshes and
     /// the options, so a frame where none changed keeps them (perf 2, D1).
     visible_key: Option<(glam::Mat4, glam::DVec3, u64, i32, bool)>,
+    /// The atlas layers drawn by the visible chunks, built with the lists.
+    visible_layers: LayerSet,
     /// Terrain pipeline for water, glass and leaves: no depth write, straight
     /// alpha blending. Drawn after every opaque chunk.
     terrain_transparent_pipeline: wgpu::RenderPipeline,
@@ -277,6 +294,11 @@ pub struct Renderer {
     cloud_ticks: f64,
     /// The torch flicker of the lightmap, stepped once per client tick.
     torch_flicker: TorchFlicker,
+    /// The pack's lightmaps by dimension, which replace the computed ones.
+    custom_lightmaps:
+        Option<std::sync::Arc<umicraft_packext::colors::lightmap::DimensionLightmaps>>,
+    /// The dynamic lights of the frame (empty with the option off).
+    dynamic_lights: DynamicLightSet,
     /// Rain and snow, drawn before the translucent terrain.
     weather: WeatherRenderer,
     particles: ParticleRenderer,

@@ -30,6 +30,7 @@ use crate::game::commands::{command_of, CommandQueue};
 use crate::game::messages::{RenderEvent, ViewAngle};
 use crate::game::particles::particle_filter;
 use crate::game::publish::{publish_inventory, publish_status};
+use crate::game::state::clock::WorldClock;
 use crate::game::state::Game;
 use crate::network::ClientCommand;
 
@@ -230,7 +231,7 @@ pub(super) fn join_game(game: &mut Game, info: &JoinGameInfo, frames: &SyncSende
     game.flat_world = is_flat(&info.level_type);
     // The world clock of the new session is unknown until the first
     // `Time Update`; start at the beginning of the cycle.
-    game.world_time = 0;
+    game.clock = WorldClock::default();
     game.playing = true;
     game.status = "PLAYING".to_string();
     game.status_data.status = game.status.clone();
@@ -315,7 +316,7 @@ pub(super) fn respawn(game: &mut Game, packet: &Respawn, frames: &SyncSender<Ren
         game.hud_dirty = true;
         // The new dimension has its own clock; the first `Time
         // Update` of the new world arrives right after the respawn.
-        game.world_time = 0;
+        game.clock = WorldClock::default();
         let _ = frames.try_send(RenderEvent::Reset);
     }
     // A same-dimension respawn keeps the current world clock.

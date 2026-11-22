@@ -61,7 +61,7 @@ pub(super) fn debug_world(game: &Game) -> crate::debug::world::DebugWorld {
             target: game.target().map(|hit| hit.block),
             // A client that has not seen the packet assumes normal.
             difficulty: game.server.difficulty().unwrap_or(2),
-            world_time: game.world_time,
+            world_time: game.clock.time(),
             tick_micros: game.metrics.last_tick_micros,
             net_event_micros: game.metrics.last_net_micros,
             input_processing_micros: game.metrics.last_input_processing_us,
@@ -75,6 +75,12 @@ pub(super) fn debug_world(game: &Game) -> crate::debug::world::DebugWorld {
             dirty_chunks: game.dirty.len(),
         },
     )
+}
+
+/// The id of the biome at `position`, `None` without a loaded column.
+pub(super) fn biome_at(game: &Game, position: DVec3) -> Option<u8> {
+    let block = BlockPos::new(position.x.floor() as i32, 0, position.z.floor() as i32);
+    game.world.as_ref().and_then(|world| world.biome(block))
 }
 
 /// The base temperature of the biome at `position`, which the sky takes its

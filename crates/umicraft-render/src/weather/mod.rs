@@ -126,7 +126,7 @@ impl WeatherRenderer {
         environment: RenderEnvironment,
         ticks: f64,
     ) {
-        if environment.rain_strength <= 0.0 || self.field.is_empty() {
+        if !falls(&environment, self.field.is_empty()) {
             if !self.mesh.vertices.is_empty() {
                 self.mesh.vertices.clear();
                 self.mesh.runs.clear();
@@ -175,6 +175,13 @@ impl WeatherRenderer {
     pub(crate) fn vertex_count(&self) -> usize {
         self.mesh.vertices.len()
     }
+}
+
+/// Whether any rain or snow is drawn: the option is on, it is raining and
+/// there are columns to fall on. Rain & Snow Off only hides the quads; the
+/// splashes and the sounds come from other systems.
+fn falls(environment: &RenderEnvironment, no_columns: bool) -> bool {
+    environment.draw_precipitation && environment.rain_strength > 0.0 && !no_columns
 }
 
 /// The bind layout of a picture: texture and sampler.
@@ -289,6 +296,24 @@ fn pipeline(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rain_off_draws_nothing_even_in_a_storm() {
+        let storm = RenderEnvironment {
+            rain_strength: 1.0,
+            ..RenderEnvironment::DEFAULT
+        };
+        assert!(falls(&storm, false));
+        assert!(!falls(
+            &RenderEnvironment {
+                draw_precipitation: false,
+                ..storm
+            },
+            false
+        ));
+        assert!(!falls(&RenderEnvironment::DEFAULT, false));
+        assert!(!falls(&storm, true));
+    }
 
     /// The shader is only compiled on a GPU device; this validates it without one.
     #[test]

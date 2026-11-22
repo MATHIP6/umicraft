@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use umicraft_ui::FontAtlas;
 
+use crate::resources::game_files::GameFiles;
 use crate::resources::item_icons::ItemResources;
+use crate::resources::sky::CustomSky;
 use crate::resources::texture_animator::TextureAnimator;
 use crate::resources::theme_font::FontChoice;
 use crate::resources::ui_font::LoadedFont;
@@ -19,6 +21,11 @@ use crate::window::startup::AsyncLoadedAssets;
 pub(in crate::window) struct Assets {
     /// The font loaded at startup, before the renderer exists.
     pub(in crate::window) font: LoadedFont,
+    /// The active packs over the jar, which the sky, entity and map
+    /// textures are read from.
+    pub(in crate::window) files: GameFiles,
+    /// The block-array layers of the leaf textures ("Trees: Fast").
+    pub(in crate::window) leaf_layers: Vec<u32>,
     /// Background asset loader channel receiver.
     pub(in crate::window) receiver: Option<std::sync::mpsc::Receiver<AsyncLoadedAssets>>,
     /// The atlas the renderer accepted; the UI metrics must match it.
@@ -38,6 +45,10 @@ pub(in crate::window) struct Assets {
     pub(in crate::window) texture_animator: TextureAnimator,
     /// Entity textures bound for GPU rendering.
     pub(in crate::window) entity_textures: Option<EntityTextures>,
+    /// The pack-defined sky layers (Custom Sky) and their per-frame state.
+    pub(in crate::window) custom_sky: CustomSky,
+    /// The pack's custom sky, fog and lightmap colours.
+    pub(in crate::window) world_colors: crate::resources::custom_colors::WorldColors,
     /// The textures of filled maps, created with the entity textures.
     pub(in crate::window) map_textures: Option<MapTextures>,
 }

@@ -112,10 +112,11 @@ pub enum TerrainTextures {
 }
 
 impl TerrainTextures {
-    /// Loads the official set with optional resource packs, or falls back to procedural.
+    /// Loads the official set with the loaded resource `packs` (ascending
+    /// priority), or falls back to procedural.
     #[must_use]
-    pub fn load_with_packs(paths: &[std::path::PathBuf]) -> Self {
-        match ModelResources::load_with_pack_paths(paths) {
+    pub fn from_packs(packs: &[umicraft_assets::ResourcePack]) -> Self {
+        match ModelResources::load_with_packs(packs) {
             Ok(resources) => Self::official(&resources),
             Err(error) => {
                 tracing::warn!(
@@ -154,7 +155,7 @@ impl TerrainTextures {
     /// environment, or picks the procedural set with exactly one warning.
     #[must_use]
     pub fn load() -> Self {
-        Self::load_with_packs(&[])
+        Self::from_packs(&[])
     }
 
     /// The official set of already loaded resources.
@@ -169,6 +170,28 @@ impl TerrainTextures {
             gui_atlas: resources.resources().gui_atlas().clone(),
             glint: resources.resources().glint_texture().cloned().map(Arc::new),
             items: resources.items(),
+        }
+    }
+
+    /// The baked item models, `None` for the procedural set.
+    #[must_use]
+    pub fn items(&self) -> Option<&Arc<ItemResources>> {
+        match self {
+            Self::Official { items, .. } => Some(items),
+            Self::Procedural => None,
+        }
+    }
+
+    /// The layer lookup and the layer size of the official array, which the
+    /// custom animations of the packs are laid out against; `None` for the
+    /// procedural set.
+    #[must_use]
+    pub fn animation_layout(&self) -> Option<(&ModelMeshContext, (u32, u32))> {
+        match self {
+            Self::Official { atlas, context, .. } => {
+                Some((context.as_ref(), (atlas.width(), atlas.height())))
+            }
+            Self::Procedural => None,
         }
     }
 
@@ -259,6 +282,16 @@ pub struct InstalledTerrain {
     dials: Vec<DialSprite>,
 }
 
+/// The leaf textures of 1.8 (`BlockOldLeaf`, `BlockNewLeaf`).
+const LEAF_TEXTURES: [&str; 6] = [
+    "blocks/leaves_oak",
+    "blocks/leaves_spruce",
+    "blocks/leaves_birch",
+    "blocks/leaves_jungle",
+    "blocks/leaves_acacia",
+    "blocks/leaves_big_oak",
+];
+
 impl InstalledTerrain {
     /// Whether the official 1.8.8 array is bound.
     #[must_use]
@@ -277,6 +310,19 @@ impl InstalledTerrain {
     #[must_use]
     pub fn animations(&self) -> &[TextureAnimation] {
         &self.animations
+    }
+
+    /// The block-array layers of the leaf textures, which "Trees: Fast" draws
+    /// opaque. Empty for the procedural set.
+    #[must_use]
+    pub fn leaf_layers(&self) -> Vec<u32> {
+        let Some(context) = self.mesher.model_context() else {
+            return Vec::new();
+        };
+        LEAF_TEXTURES
+            .iter()
+            .filter_map(|key| context.atlas.layer(key))
+            .collect()
     }
 
     /// The compass and clock sprites, empty for the procedural set.
@@ -389,6 +435,9 @@ mod tests {
                 models: Arc::new(models),
                 atlas: Arc::new(layout),
                 tints: None,
+                ctm: None,
+                natural: None,
+                custom_colors: None,
             }),
             gui_atlas: GuiAtlas::empty(),
             glint: None,

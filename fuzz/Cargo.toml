@@ -11,6 +11,7 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 umicraft-net = { path = "../crates/umicraft-net" }
 umicraft-protocol = { path = "../crates/umicraft-protocol" }
+umicraft-packext = { path = "../crates/umicraft-packext" }
 umicraft-world = { path = "../crates/umicraft-world" }
 
 # Not part of the main workspace: fuzzing needs nightly.
@@ -50,6 +51,34 @@ bench = false
 [[bin]]
 name = "framing"
 path = "fuzz_targets/framing.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pack_ctm"
+path = "fuzz_targets/pack_ctm.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pack_properties"
+path = "fuzz_targets/pack_properties.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pack_sky"
+path = "fuzz_targets/pack_sky.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "pack_cem"
+path = "fuzz_targets/pack_cem.rs"
 test = false
 doc = false
 bench = false

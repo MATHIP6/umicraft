@@ -18,13 +18,17 @@
 //! at runtime. No Mojang asset is embedded in this crate or copied into the
 //! repository/release.
 
+use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
 use thiserror::Error;
 use umicraft_assets::{AssetsError, BlockAtlas, ClientResources};
+use umicraft_mesh::ctm::CtmTable;
+use umicraft_mesh::natural::NaturalTable;
 use umicraft_mesh::tint::BiomeTints;
 use umicraft_mesh::ModelMeshContext;
 use umicraft_model::{definitions, BlockModelSet, ModelError, ResourceSource};
+use umicraft_packext::natural::NaturalRules;
 
 use crate::resources::item_icons::ItemResources;
 use crate::resources::official;
@@ -160,19 +164,7 @@ impl ModelResources {
     /// # Errors
     /// [`ModelResourcesError`] if pack loading or model baking fails.
     pub fn load_with_pack_paths(paths: &[std::path::PathBuf]) -> Result<Self, ModelResourcesError> {
-        let mut packs = Vec::with_capacity(paths.len());
-        for path in paths {
-            // A pack that cannot be read (deleted, unreadable folder, broken
-            // zip) is skipped: one bad pack must not turn every texture into
-            // the procedural fallback.
-            match umicraft_assets::ResourcePack::from_path(path) {
-                Ok(pack) => packs.push(pack),
-                Err(error) => {
-                    tracing::warn!(pack = %path.display(), %error, "skipping a resource pack that could not be loaded");
-                }
-            }
-        }
-        Self::load_with_packs(&packs)
+        Self::load_with_packs(&super::game_files::load_packs(paths))
     }
 
     /// Builds [`ModelResources`] from base resources and active resource packs.
@@ -229,16 +221,26 @@ impl ModelResources {
                 |temperature, rainfall| maps.foliage.sample(temperature, rainfall),
             ))
         });
+        let atlas = resources.atlas().layout().clone();
+        let ctm = ctm_table(packs, &atlas);
+        let natural = natural_table(packs, &atlas);
+        let custom_colors = custom_block_colors(packs);
         let context = Arc::new(ModelMeshContext {
             models: Arc::clone(&models),
-            atlas: Arc::new(resources.atlas().layout().clone()),
+            atlas: Arc::new(atlas),
             tints,
+            ctm,
+            natural,
+            custom_colors,
         });
         tracing::info!(
             blockstates = models.blockstate_count(),
             source_models = models.source_model_count(),
             layers = resources.atlas().layers(),
             biome_tints = context.tints.is_some(),
+            ctm_rules = context.ctm.as_ref().map_or(0, |table| table.len()),
+            custom_colors = context.custom_colors.is_some(),
+            natural_rules = context.natural.as_ref().map_or(0, |table| table.len()),
             packs = packs.len(),
             "loaded 1.8 block models, atlas and resource packs"
         );
@@ -321,6 +323,98 @@ impl ModelResources {
 const MAX_DOCUMENT_RETRIES: usize = 16;
 
 /// Bakes the block and item models of `resources`.
+/// The pack-feature folders, lowest priority first within one pack.
+const FEATURE_FOLDERS: [&str; 2] = ["assets/minecraft/mcpatcher/", "assets/minecraft/optifine/"];
+
+/// Parses the `ctm/**/*.properties` files of `packs` (ascending priority) and
+/// resolves them against `atlas`. The higher pack wins for one relative path,
+/// and within a pack `optifine/` wins over `mcpatcher/`, as
+/// [`umicraft_assets::PackFiles::feature`] does. `None` when no rule is left.
+fn ctm_table(
+    packs: &[umicraft_assets::ResourcePack],
+    atlas: &umicraft_model::AtlasLayout,
+) -> Option<Arc<CtmTable>> {
+    let files = feature_files(packs, "ctm/");
+    if files.is_empty() {
+        return None;
+    }
+    let rules = umicraft_packext::ctm::parse_rules(files, &block_id);
+    CtmTable::build(&rules, atlas, &umicraft_game::debug_f3::biomes::biome_name).map(Arc::new)
+}
+
+/// The pack-feature files whose path relative to the feature folder starts
+/// with `prefix`, keyed by that relative path. A higher pack wins for one
+/// path, and within a pack `optifine/` wins over `mcpatcher/`, as
+/// [`umicraft_assets::PackFiles::feature`] does.
+///
+/// It reads the packs in place instead of going through `PackFiles`, which
+/// would copy every kept file.
+pub(super) fn feature_files<'a>(
+    packs: &'a [umicraft_assets::ResourcePack],
+    prefix: &str,
+) -> BTreeMap<&'a str, &'a [u8]> {
+    let mut files: BTreeMap<&str, &[u8]> = BTreeMap::new();
+    for pack in packs {
+        for (path, bytes) in pack.files() {
+            let relative = FEATURE_FOLDERS
+                .iter()
+                .find_map(|folder| path.strip_prefix(folder))
+                .filter(|relative| relative.starts_with(prefix));
+            if let Some(relative) = relative {
+                // `pack.files()` is sorted, so `mcpatcher/` is inserted
+                // before `optifine/` and the later one replaces it.
+                files.insert(relative, bytes);
+            }
+        }
+    }
+    files
+}
+
+/// The custom block colours of `packs`, or `None` when the Custom Colors
+/// option is off or the packs customise nothing.
+fn custom_block_colors(
+    packs: &[umicraft_assets::ResourcePack],
+) -> Option<Arc<umicraft_mesh::custom_colors::CustomColors>> {
+    if !crate::meshing::settings::custom_colors_enabled() {
+        return None;
+    }
+    let mut files = feature_files(packs, "colormap/");
+    files.extend(feature_files(packs, "color.properties"));
+    super::custom_colors::mesh_colors(&files, &block_id)
+}
+
+/// Parses `natural.properties` of `packs` and resolves it against `atlas`.
+/// `None` when no pack has the file or no rule is left. A broken file is
+/// logged and ignored.
+fn natural_table(
+    packs: &[umicraft_assets::ResourcePack],
+    atlas: &umicraft_model::AtlasLayout,
+) -> Option<Arc<NaturalTable>> {
+    let files = feature_files(packs, "natural.properties");
+    let bytes = files.get("natural.properties")?;
+    let rules = match NaturalRules::parse(bytes) {
+        Ok(rules) => rules,
+        Err(error) => {
+            tracing::warn!(%error, "ignoring natural.properties");
+            return None;
+        }
+    };
+    for (name, error) in &rules.rejected {
+        tracing::warn!(texture = %name, %error, "natural textures: invalid line");
+    }
+    NaturalTable::build(&rules, atlas).map(Arc::new)
+}
+
+/// The id of the block called `name` (`minecraft:glass`); other domains name
+/// no block.
+pub(super) fn block_id(name: &str) -> Option<u16> {
+    let name = name.strip_prefix("minecraft:")?;
+    definitions()
+        .iter()
+        .find(|definition| definition.name == name)
+        .map(|definition| definition.id)
+}
+
 fn bake(resources: &ClientResources) -> Result<(BlockModelSet, ItemResources), ModelError> {
     Ok((
         BlockModelSet::build(resources, definitions())?,

@@ -13,6 +13,7 @@ use crate::overlay::OverlayVertex;
 pub(super) const TERRAIN_WGSL: &str = concat!(
     include_str!("../fog.wgsl"),
     include_str!("../lightmap.wgsl"),
+    include_str!("../dynamic_lights.wgsl"),
     include_str!("../terrain.wgsl")
 );
 

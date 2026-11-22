@@ -15,6 +15,8 @@ use umicraft_render::Renderer;
 use winit::window::{Fullscreen, Window};
 
 use crate::game::GameEvent;
+use crate::options::video_sections::LeavesMode;
+use crate::options::video_spec::{effect_of_change, Effect};
 use crate::options::{Options, VideoOptions, PACKS_FOLDER};
 use crate::scene::entity::EntityTextures;
 
@@ -106,23 +108,14 @@ pub fn open_folder(folder: &Path) {
 }
 
 /// Applies the video options that act on the window, the renderer and the
-/// GUI, once per frame. It remembers what it already did, so a steady option
-/// costs nothing.
+/// GUI, once per frame, and reports what a change asks the window to redo.
+/// It remembers the options it last applied, so a steady frame only compares
+/// them.
 #[derive(Debug, Default)]
 pub struct VideoApplier {
     fullscreen: bool,
-    /// The mip levels the block atlas was last built with, once known.
-    mipmap_levels: Option<u32>,
-}
-
-/// What a changed video option asks the window to redo.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct VideoEffects {
-    /// An option the mesh workers read changed: re-mesh the loaded columns.
-    pub remesh: bool,
-    /// The mip levels changed: rebuild the block atlas (the reference
-    /// reloads the texture map the same way).
-    pub reload_atlas: bool,
+    /// The options of the previous frame, once there was one.
+    applied: Option<VideoOptions>,
 }
 
 impl VideoApplier {
@@ -131,7 +124,7 @@ impl VideoApplier {
     pub fn new(fullscreen: bool) -> Self {
         Self {
             fullscreen,
-            mipmap_levels: None,
+            applied: None,
         }
     }
 
@@ -144,19 +137,27 @@ impl VideoApplier {
         })
     }
 
-    /// Whether the mip levels differ from the ones the atlas was built with.
-    /// The first call only records them: the atlas was built from the same
-    /// options at start-up.
-    fn mipmap_change(&mut self, levels: u32) -> bool {
-        self.mipmap_levels
-            .replace(levels)
-            .is_some_and(|previous| previous != levels)
+    /// The effect of the options that changed since the previous frame
+    /// (ADR-0089). The first call only records `video`: the resources were
+    /// loaded from the same options at start-up.
+    fn change(&mut self, video: &VideoOptions) -> Effect {
+        if self.applied.as_ref() == Some(video) {
+            return Effect::Immediate;
+        }
+        let effect = self
+            .applied
+            .as_ref()
+            .map_or(Effect::Immediate, |before| effect_of_change(before, video));
+        self.applied = Some(video.clone());
+        effect
     }
 
-    /// Applies `video` for this frame: the GUI scale, vsync, fullscreen and
-    /// the entity shadows. Brightness, bobbing and the cloud mode are read
-    /// where they are used (the render environment, the camera and the cloud
-    /// pass). Returns what the window has to redo.
+    /// Applies `video` for this frame: the GUI scale, vsync, fullscreen, the
+    /// entity shadows, the mip levels, cave culling, the opaque leaves of
+    /// "Trees: Fast" (`leaf_layers`) and the mesh options.
+    /// Brightness, bobbing and the cloud mode are read where they are used
+    /// (the render environment, the camera and the cloud pass). Returns what
+    /// the window has to redo.
     #[must_use]
     pub fn apply(
         &mut self,
@@ -164,11 +165,14 @@ impl VideoApplier {
         window: Option<&Window>,
         renderer: &mut Renderer,
         entities: Option<&EntityTextures>,
-    ) -> VideoEffects {
+        leaf_layers: &[u32],
+    ) -> Effect {
         umicraft_ui::set_gui_scale_option(u32::from(video.gui_scale));
         renderer.set_vsync(video.vsync);
+        renderer.set_cave_culling(video.cave_culling);
         if let Some(entities) = entities {
             entities.set_shadows_enabled(video.entity_shadows);
+            entities.set_custom_models_enabled(video.quality.custom_entity_models);
         }
         if let (Some(window), Some(fullscreen)) = (window, self.fullscreen_change(video.fullscreen))
         {
@@ -176,12 +180,11 @@ impl VideoApplier {
             // the change is instant and safe on every platform.
             window.set_fullscreen(fullscreen.then_some(Fullscreen::Borderless(None)));
         }
-        let levels = u32::from(video.mipmap_levels);
-        renderer.set_mipmap_levels(levels);
-        VideoEffects {
-            remesh: crate::meshing::settings::store(video),
-            reload_atlas: self.mipmap_change(levels),
-        }
+        renderer.set_mipmap_levels(u32::from(video.mipmap_levels));
+        let fast_leaves = video.details.trees.resolve(video.fancy_graphics) == LeavesMode::Fast;
+        renderer.set_opaque_layers(if fast_leaves { leaf_layers } else { &[] });
+        crate::meshing::settings::store(video);
+        self.change(video)
     }
 }
 
@@ -270,13 +273,22 @@ mod tests {
     }
 
     #[test]
-    fn a_new_mipmap_level_asks_for_an_atlas_reload_once() {
+    fn a_change_reports_its_effect_once() {
         let mut applier = VideoApplier::default();
-        assert!(!applier.mipmap_change(4), "the first frame only records");
-        assert!(!applier.mipmap_change(4));
-        assert!(applier.mipmap_change(2));
-        assert!(!applier.mipmap_change(2));
-        assert!(applier.mipmap_change(0));
+        let mut video = VideoOptions::default();
+        assert_eq!(
+            applier.change(&video),
+            Effect::Immediate,
+            "the first frame only records"
+        );
+        assert_eq!(applier.change(&video), Effect::Immediate);
+        video.mipmap_levels = 2;
+        assert_eq!(applier.change(&video), Effect::ReloadResources);
+        assert_eq!(applier.change(&video), Effect::Immediate);
+        video.smooth_lighting = 0;
+        assert_eq!(applier.change(&video), Effect::ReMesh);
+        video.view_bobbing = false;
+        assert_eq!(applier.change(&video), Effect::Immediate);
     }
 
     #[test]

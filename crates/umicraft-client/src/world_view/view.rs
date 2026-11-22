@@ -59,6 +59,8 @@ pub(super) struct View {
     pub(super) spawn: Option<(i32, i32, i32)>,
     /// The biome temperature at the player, for the sky colour.
     pub(super) sky_temperature: f32,
+    /// The biome id at the player, `None` while unknown.
+    pub(super) sky_biome: Option<u8>,
     /// The fog inputs of the newest frame (P7g).
     pub(super) fog: FogContext,
     /// The eye light of the fog, eased over ticks.
@@ -150,6 +152,7 @@ impl View {
         self.gamemode = frame.gamemode;
         self.spawn = frame.spawn;
         self.sky_temperature = frame.sky_temperature;
+        self.sky_biome = frame.sky_biome;
         self.fog = frame.fog;
         self.fog_light.tick(frame.fog.light_brightness);
         self.border = Some(frame.border);

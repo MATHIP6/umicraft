@@ -25,6 +25,7 @@ mod bolt;
 mod capes;
 mod creatures;
 mod cull;
+mod custom_models;
 mod dragon_beam;
 mod dragon_death;
 #[cfg(test)]
@@ -40,6 +41,7 @@ mod mushrooms;
 mod paintings;
 mod player;
 mod pose;
+mod random_entities;
 mod rope;
 mod shadow;
 mod skins;

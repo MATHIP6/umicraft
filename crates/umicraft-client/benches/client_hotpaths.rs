@@ -8,7 +8,7 @@
 
 use std::collections::HashMap;
 use std::hint::black_box;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use glam::{DVec3, Vec3};
@@ -17,11 +17,17 @@ use umicraft_client::game::{AtomicLookSlot, Look};
 use umicraft_client::hud::cache::HudCache;
 use umicraft_client::input::{InputState, InputUpdate};
 use umicraft_client::resources::ui_font;
+use umicraft_client::scene::dynamic_lights::{DynamicLightCollector, OffFastFancy};
 use umicraft_client::scene::entity::{mesh_entities, mesh_entities_into};
-use umicraft_game::entity::{EntityId, EntityKind, EntityRecord, EntityRenderSnapshot};
+use umicraft_game::entity::{
+    EntityFlags, EntityId, EntityKind, EntityRecord, EntityRenderSnapshot,
+};
 use umicraft_game::view::ViewEffects;
 use umicraft_game::RenderState;
-use umicraft_render::{ChatLineView, ChatRunView, HudSheets, HudState, TabEntryView, TabListView};
+use umicraft_mesh::Vertex;
+use umicraft_render::{
+    ChatLineView, ChatRunView, HudSheets, HudState, LayerSet, TabEntryView, TabListView,
+};
 use umicraft_ui::DrawList;
 
 fn sample_entities(count: usize) -> Vec<EntityRenderSnapshot> {
@@ -270,8 +276,75 @@ fn bench_input_queue(criterion: &mut Criterion) {
     group.finish();
 }
 
+/// A chunk-sized run of quads cycling over `layers` atlas layers.
+fn quads_over_layers(quads: u32, layers: u32) -> Vec<Vertex> {
+    (0..quads * 4)
+        .map(|i| Vertex {
+            position: [0.0; 3],
+            normal: [0.0, 1.0, 0.0],
+            uv: [0.0; 2],
+            layer: i / 4 % layers,
+            light: 0,
+            tint: 0x00FF_FFFF,
+        })
+        .collect()
+}
+
+/// Smart Animations (F6 phase 3): the layer set of a mesh is built once per
+/// upload (about one upload budget of vertices per frame at most) and the sets
+/// of the visible chunks are joined when the visible lists change.
+/// The per-frame light search over 256 entities, a tenth of them lit, with the
+/// list rebuilt every call (the Fancy worst case).
+fn bench_dynamic_lights(criterion: &mut Criterion) {
+    let mut entities = sample_entities(256);
+    for entity in entities.iter_mut().step_by(10) {
+        entity.flags = EntityFlags::new(0x01, 0);
+    }
+    let mut collector = DynamicLightCollector::default();
+    let eye = DVec3::new(0.0, 64.0, 0.0);
+    let start = Instant::now();
+    let mut frame = 0u32;
+    criterion.bench_function("dynamic_lights_collect_256_entities", |bencher| {
+        bencher.iter(|| {
+            frame += 1;
+            let now = start + Duration::from_millis(u64::from(frame) * 50);
+            black_box(
+                collector
+                    .update(OffFastFancy::Fancy, now, black_box(&entities), eye, false)
+                    .as_slice()
+                    .len(),
+            )
+        });
+    });
+}
+
+fn bench_layer_set(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("client/layer_set");
+    // 1 MiB of vertices (the default upload budget of a frame) is 23 831 of 44 bytes.
+    let budget = quads_over_layers(23_831 / 4, 40);
+    group.bench_function("of_one_upload_budget", |bencher| {
+        bencher.iter(|| black_box(LayerSet::of_vertices(&[black_box(&budget)])));
+    });
+    let sets: Vec<LayerSet> = (0..700)
+        .map(|i| LayerSet::of_vertices(&[&quads_over_layers(64, 3 + i % 40)]))
+        .collect();
+    let mut joined = LayerSet::default();
+    group.bench_function("union_700_visible_chunks", |bencher| {
+        bencher.iter(|| {
+            joined.clear();
+            for set in &sets {
+                joined.union_with(black_box(set));
+            }
+            black_box(joined.contains(7))
+        });
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
+    bench_layer_set,
+    bench_dynamic_lights,
     bench_entity_meshing,
     bench_hud_clone_and_cache,
     bench_frame_distribution_1000,

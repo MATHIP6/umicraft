@@ -281,3 +281,143 @@ fn fog_wgsl_is_valid() {
     .validate(&module)
     .expect("the shader validates");
 }
+
+#[test]
+fn the_fog_of_the_largest_render_distance_ends_inside_the_far_plane() {
+    // 32 chunks is 512 blocks: fog must end before the camera far plane clips
+    // the terrain, or the clipped edge would show.
+    assert_eq!(far_plane(32), MAX_FAR_PLANE);
+    assert!(far_plane(32) < crate::camera::FAR);
+}
+
+fn with_settings(kind: FogKind, start: f32) -> RenderEnvironment {
+    RenderEnvironment {
+        fog_settings: FogSettings { kind, start },
+        ..RenderEnvironment::DEFAULT
+    }
+}
+
+#[test]
+fn the_fog_start_scales_the_terrain_fog_only() {
+    let fog = FogParams::new(BASE, &with_settings(FogKind::Fast, 0.4));
+    assert_eq!(
+        fog.world,
+        FogMode::Linear {
+            start: 51.2,
+            end: 128.0
+        }
+    );
+    // The dome keeps its own range.
+    assert_eq!(
+        fog.sky,
+        FogMode::Linear {
+            start: 0.0,
+            end: 128.0
+        }
+    );
+}
+
+#[test]
+fn the_fog_start_leaves_the_nether_range_alone() {
+    let mut environment = with_settings(FogKind::Fancy, 0.2);
+    environment.dimension = -1;
+    assert_eq!(
+        FogParams::new(BASE, &environment).world,
+        FogMode::Linear {
+            start: 6.4,
+            end: 64.0
+        }
+    );
+}
+
+#[test]
+fn only_fast_measures_the_fog_by_depth() {
+    assert!(FogParams::new(BASE, &with_settings(FogKind::Fast, 0.8)).planar);
+    assert!(!FogParams::new(BASE, &with_settings(FogKind::Fancy, 0.8)).planar);
+    assert!(!FogParams::new(BASE, &RenderEnvironment::DEFAULT).planar);
+}
+
+#[test]
+fn fog_off_shows_no_fog_in_air_but_keeps_the_liquids_and_blindness() {
+    let off = with_settings(FogKind::Off, 0.8);
+    for dimension in [0, -1, 1] {
+        let fog = FogParams::new(BASE, &RenderEnvironment { dimension, ..off });
+        for mode in [fog.world, fog.sky] {
+            let FogMode::Linear { start, .. } = mode else {
+                panic!("air fog is linear");
+            };
+            assert!(start > MAX_FAR_PLANE * 100.0);
+        }
+    }
+    let water = RenderEnvironment {
+        fog: FogContext {
+            medium: FogMedium::Water,
+            ..FogContext::DEFAULT
+        },
+        ..off
+    };
+    assert_eq!(
+        FogParams::new(BASE, &water).world,
+        FogMode::Exp { density: 0.1 }
+    );
+    let blind = RenderEnvironment {
+        fog: FogContext {
+            blindness_ticks: Some(100),
+            ..FogContext::DEFAULT
+        },
+        ..off
+    };
+    assert_eq!(
+        FogParams::new(BASE, &blind).world,
+        FogMode::Linear {
+            start: 1.25,
+            end: 5.0
+        }
+    );
+}
+
+#[test]
+fn liquid_palettes_replace_the_underwater_and_underlava_colours() {
+    let colors = crate::ColorOverrides {
+        underwater: Some([0.4, 0.5, 0.6]),
+        underlava: Some([0.9, 0.8, 0.7]),
+        ..crate::ColorOverrides::default()
+    };
+    let color = |medium| {
+        let environment = RenderEnvironment {
+            colors,
+            fog: FogContext {
+                medium,
+                ..FogContext::DEFAULT
+            },
+            view_distance: 32,
+            ..RenderEnvironment::DEFAULT
+        };
+        FogParams::new([0.0; 3], &environment).color
+    };
+    assert_eq!(color(FogMedium::Water), [0.4, 0.5, 0.6]);
+    assert_eq!(color(FogMedium::Lava), [0.9, 0.8, 0.7]);
+    assert_eq!(color(FogMedium::Air), [0.0; 3]);
+}
+
+#[test]
+fn the_sky_is_clipped_where_the_reference_clips_it() {
+    // The bug: the sky had the world's 512-block far plane, so the void plane
+    // reached the horizon and hid a custom sky that OptiFine shows there.
+    let with = |view_distance, kind, dimension| {
+        sky_clip_distance(&RenderEnvironment {
+            view_distance,
+            dimension,
+            fog_settings: FogSettings {
+                kind,
+                ..FogSettings::DEFAULT
+            },
+            ..RenderEnvironment::DEFAULT
+        })
+    };
+    assert!(near(with(8, FogKind::Fast, 0), 8.0 * 16.0 * 0.83 * 2.0));
+    assert!(near(with(12, FogKind::Fancy, 0), 12.0 * 16.0 * 0.95 * 2.0));
+    assert!(near(with(32, FogKind::Off, 0), 1024.0));
+    assert!(near(with(2, FogKind::Fast, 0), 173.0));
+    assert!(near(with(32, FogKind::Fast, 1), 256.0));
+}

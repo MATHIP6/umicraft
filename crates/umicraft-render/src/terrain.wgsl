@@ -37,13 +37,19 @@ struct Camera {
     fog_density: f32,
     // Explicit tail padding keeps the Rust `CameraUniform` and this struct at
     // the same 112-byte, 16-byte-aligned layout.
-    _pad1: f32,
+    // 1 when the fog is measured by depth instead of distance (`fog_distance`).
+    fog_planar: f32,
     // Integer world offset of the render origin: positions are sent to the
     // GPU relative to it (`view_proj` is built for that origin), so f32
     // keeps its precision far from the world origin.
     origin: vec3<f32>,
+    // How many of `lights` are on (`dynamic_lights.wgsl`); 0 when Dynamic
+    // Lights is off.
+    light_count: u32,
     // The vanilla lightmap, `[sky * 16 + block]` (`lightmap.rs`).
     lightmap: array<vec4<f32>, 256>,
+    // The dynamic lights of the frame, the first `light_count` of them.
+    lights: array<DynamicLight, 16>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -131,10 +137,17 @@ fn vs_main(in: VertexIn) -> VertexOut {
 // target is darkened by the fragment light so a cave does not show a bright
 // sky-coloured haze (`ADR-0008` §3).
 fn shade_fragment(in: VertexOut, texel: vec4<f32>) -> vec3<f32> {
-    let light = lightmap_sample(in.levels.x, in.levels.y);
+    let light = lightmap_sample(
+        dynamic_block_light(in.levels.x, in.world_position),
+        in.levels.y,
+    );
     let lit = texel.rgb * in.tint * light * in.ao * in.shade;
     let fog_target = camera.fog_color * (0.15 + 0.85 * light);
-    let distance = distance(in.world_position, camera.camera_pos);
+    let distance = fog_distance(
+        distance(in.world_position, camera.camera_pos),
+        in.clip_position.w,
+        camera.fog_planar,
+    );
     let fog = fog_amount(distance, camera.fog_start, camera.fog_end, camera.fog_density);
     return mix(lit, fog_target, fog);
 }

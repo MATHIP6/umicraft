@@ -23,6 +23,7 @@ const WORLD_GLINT_WGSL: &str = concat!(
     include_str!("../glint_common.wgsl"),
     include_str!("../fog.wgsl"),
     include_str!("../lightmap.wgsl"),
+    include_str!("../dynamic_lights.wgsl"),
     include_str!("../terrain.wgsl"),
     include_str!("../item_glint.wgsl"),
 );

@@ -18,13 +18,15 @@
 //! [`OptionsScreen::capture_key`] by the window.
 
 use std::collections::HashMap;
+use std::time::Instant;
 
 use umicraft_core::lang::Lang;
 use umicraft_ui::game_menu::draw_default_background;
 use umicraft_ui::menus::draw_menu_background;
-use umicraft_ui::widgets::{button_tinted, slider, SliderState};
+use umicraft_ui::widgets::{button_tinted, slider, HoverDelay, SliderState};
 use umicraft_ui::{Color, FontAtlas, Rect, Ui};
 
+use crate::options::video_spec::VideoPage;
 use crate::options::{Action, Binding, Options};
 
 mod catalog;
@@ -50,8 +52,9 @@ use layout::Gui;
 pub enum Page {
     /// `GuiOptions`: the hub.
     Main,
-    /// `GuiVideoSettings`.
-    Video,
+    /// The video settings, laid out like OptiFine's (ADR-0089): the root
+    /// page or one of its sub-pages.
+    Video(VideoPage),
     /// `GuiControls`.
     Controls,
     /// `ScreenChatOptions`.
@@ -119,6 +122,12 @@ pub struct OptionsScreen {
     /// Whether a world is behind the screen (opened from the game menu):
     /// the translucent gradient instead of the dirt background.
     over_world: bool,
+    /// The "reset the video settings?" question, while it is asked.
+    video_reset: Option<umicraft_ui::menus::ConfirmScreen>,
+    /// The video option the pointer rests on, for its tooltip.
+    video_hover: HoverDelay<&'static str>,
+    /// The time of the frame, given by the window; `None` shows no tooltip.
+    clock: Option<Instant>,
 }
 
 impl Default for OptionsScreen {
@@ -146,6 +155,9 @@ impl OptionsScreen {
             pack_bars: Default::default(),
             rects: HashMap::new(),
             over_world: false,
+            video_reset: None,
+            video_hover: HoverDelay::default(),
+            clock: None,
         }
     }
 
@@ -153,6 +165,12 @@ impl OptionsScreen {
     /// opened from the game menu), the dirt of `drawBackground` otherwise.
     pub fn set_over_world(&mut self, over_world: bool) {
         self.over_world = over_world;
+    }
+
+    /// Gives the time of the frame. The screen reads no clock itself; the
+    /// tooltips of the video options wait on it.
+    pub fn set_clock(&mut self, now: Instant) {
+        self.clock = Some(now);
     }
 
     /// Gives the language and resource pack pages what they list. The window
@@ -247,7 +265,7 @@ impl OptionsScreen {
         ui.push_id("options");
         match self.page {
             Page::Main => self.show_main(ui, atlas, options, gui, lang, &mut outcome),
-            Page::Video => self.show_video(ui, atlas, options, gui, lang, &mut outcome),
+            Page::Video(page) => self.show_video(ui, atlas, options, gui, lang, &mut outcome, page),
             Page::Controls => self.show_controls(ui, atlas, options, gui, lang, &mut outcome),
             Page::Chat => self.show_chat(ui, atlas, options, gui, lang, &mut outcome),
             Page::Skin => self.show_skin(ui, atlas, options, gui, lang, &mut outcome),
@@ -296,10 +314,14 @@ impl OptionsScreen {
         changed.then_some(value)
     }
 
-    /// The bottom "Done" (`gui.done`) of the sub-pages: back to the hub.
+    /// The bottom "Done" (`gui.done`) of the sub-pages: back to the video
+    /// root from a video sub-page, back to the hub from anywhere else.
     fn back(&mut self, ui: &mut Ui, atlas: &FontAtlas, rect: Rect, lang: &Lang) {
         if self.button(ui, atlas, "done", rect, lang.tr("gui.done"), true, None) {
-            self.page = Page::Main;
+            self.page = match self.page {
+                Page::Video(page) if page != VideoPage::Root => Page::Video(VideoPage::Root),
+                _ => Page::Main,
+            };
             self.capturing = None;
             self.scroll = 0.0;
         }

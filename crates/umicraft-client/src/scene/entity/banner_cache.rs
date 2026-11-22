@@ -13,8 +13,7 @@
 
 use std::collections::HashMap;
 
-use umicraft_assets::client_jar::ClientJar;
-use umicraft_assets::skin::decode_png_bytes;
+use crate::resources::game_files::GameFiles;
 use umicraft_model::entity::TextureSlot;
 use umicraft_render::{EntityTexture, Renderer};
 
@@ -37,7 +36,7 @@ impl BannerCache {
         &mut self,
         designs: &BannerDesigns,
         textures: &mut HashMap<TextureSlot, EntityTexture>,
-        jar: Option<&ClientJar>,
+        files: &GameFiles,
         renderer: &Renderer,
     ) {
         self.frame += 1;
@@ -50,7 +49,7 @@ impl BannerCache {
             if self.last_used.contains_key(slot) || !self.make_room(textures) {
                 continue;
             }
-            let image = compose_banner(design, |path| read_entity_image(jar, path));
+            let image = compose_banner(design, |path| read_entity_image(files, path));
             let texture = renderer.create_entity_texture(&image.rgba, image.width, image.height);
             textures.insert(*slot, texture);
             self.last_used.insert(*slot, self.frame);
@@ -78,12 +77,10 @@ impl BannerCache {
     }
 }
 
-/// The PNG at `textures/entity/<path>.png` of the jar, decoded.
-fn read_entity_image(jar: Option<&ClientJar>, path: &str) -> Option<Image> {
-    let bytes = jar?
-        .read_entry(&format!("assets/minecraft/textures/entity/{path}.png"))
-        .ok()?;
-    let (rgba, width, height) = decode_png_bytes(&bytes).ok()?;
+/// The PNG at `textures/entity/<path>.png` of the packs or the jar, decoded.
+fn read_entity_image(files: &GameFiles, path: &str) -> Option<Image> {
+    let (rgba, width, height) =
+        files.read_png(&format!("assets/minecraft/textures/entity/{path}.png"))?;
     Some(Image {
         rgba,
         width,

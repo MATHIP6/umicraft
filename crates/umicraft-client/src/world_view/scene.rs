@@ -27,6 +27,13 @@ impl WorldView {
         Arc::clone(&self.view.weather.precipitation)
     }
 
+    /// The id of the biome at the player in the newest frame, `None` while
+    /// its column is not loaded (the custom sky filters on it).
+    #[must_use]
+    pub fn sky_biome(&self) -> Option<u8> {
+        self.view.sky_biome
+    }
+
     /// How far through its life the elder guardian apparition is at
     /// `partial_ticks` into the tick (`0..=1`), `None` while there is none
     /// (MCP `MobAppearance.renderParticle`: `(age + partial) / maxAge`).
@@ -61,9 +68,9 @@ impl WorldView {
     }
 
     /// The full-screen overlays of the frame at `now`, for
-    /// `Renderer::set_screen_overlays`. `fancy` is the graphics setting, which
-    /// the vignette needs.
-    pub fn screen_overlays(&mut self, now: Instant, fancy: bool) -> ScreenOverlays {
+    /// `Renderer::set_screen_overlays`. `vignette` says whether the vignette is
+    /// drawn (the Vignette option resolved against Graphics).
+    pub fn screen_overlays(&mut self, now: Instant, vignette: bool) -> ScreenOverlays {
         let Some(state) = self.view.sample(now) else {
             return ScreenOverlays::default();
         };
@@ -75,7 +82,7 @@ impl WorldView {
             pitch_degrees: state.pitch.to_degrees(),
             partial_tick: self.view.partial_tick(now),
         };
-        let vignette = fancy.then(|| {
+        let vignette = vignette.then(|| {
             self.view
                 .vignette
                 .step(fog.light_brightness, inputs.border_danger)

@@ -12,6 +12,8 @@ mod bat;
 mod blaze;
 mod book;
 mod cape;
+mod cem;
+mod cem_parts;
 mod chest;
 mod chicken;
 pub mod child;
@@ -45,6 +47,8 @@ pub use bat::BatModel;
 pub use blaze::BlazeModel;
 pub use book::{BookModel, BookPose};
 pub use cape::CapeModel;
+pub use cem::CemRig;
+pub use cem_parts::CemMob;
 pub use chest::{chest_facing_degrees, ChestModel};
 pub use chicken::ChickenModel;
 pub use creeper::CreeperModel;
@@ -843,6 +847,12 @@ pub enum TextureSlot {
     HorseSkeleton,
     /// The skin of a player, by the index the texture cache gave it.
     Skin(u32),
+    /// The texture of a custom entity model of a resource pack (CEM), by the
+    /// index the model registry gave it.
+    Cem(u32),
+    /// An alternative texture of a mob from a resource pack (Random
+    /// Entities), by the index the registry gave it.
+    Random(u32),
     /// The cape of a player, by the index the texture cache gave it.
     Cape(u32),
     /// One frame of a third-party cape (ADR-0081), by the index the cape

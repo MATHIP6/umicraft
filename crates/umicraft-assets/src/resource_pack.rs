@@ -305,6 +305,14 @@ impl ResourcePack {
     pub fn files(&self) -> &BTreeMap<String, Vec<u8>> {
         &self.files
     }
+
+    /// Consumes the pack and returns its game asset files, keyed by virtual
+    /// path. [`PackFiles`](crate::PackFiles) uses it to keep a subset without
+    /// copying the bytes.
+    #[must_use]
+    pub fn into_files(self) -> BTreeMap<String, Vec<u8>> {
+        self.files
+    }
 }
 
 /// Helper to recursively collect files from a directory into virtual paths.

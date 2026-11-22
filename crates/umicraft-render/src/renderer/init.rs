@@ -27,6 +27,7 @@ use crate::cave_graph::CaveGraph;
 use crate::chunk_pass::{cutout_layers, QuadIndices};
 use crate::clouds::CloudRenderer;
 use crate::dynamic_blocks::MovingBlocksPass;
+use crate::dynamic_lights::DynamicLightSet;
 use crate::entity_pass::EntityRenderer;
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
@@ -34,6 +35,7 @@ use crate::frame_pacing::FramePacingTracker;
 use crate::gpu_timer::{DrawCallStats, GpuTimer};
 use crate::hires_blocks::HiresBlocks;
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, WorldGlint};
+use crate::layer_set::LayerSet;
 use crate::lightmap::TorchFlicker;
 use crate::motion_blur::MotionBlur;
 use crate::nametag::NametagRenderer;
@@ -401,11 +403,14 @@ impl Renderer {
                 (TEXTURE_SIZE * TEXTURE_SIZE * 4) as usize,
             ),
             cutout: cutout_layers(&block_data, (TEXTURE_SIZE * TEXTURE_SIZE * 4) as usize),
+            atlas_cutout: cutout_layers(&block_data, (TEXTURE_SIZE * TEXTURE_SIZE * 4) as usize),
+            opaque_layers: Vec::new(),
             cutout_epoch: 0,
             cave_graph: CaveGraph::default(),
             cave_culling: true,
             chunks_version: 0,
             visible_key: None,
+            visible_layers: LayerSet::default(),
             chunk_scratch: Vec::new(),
             terrain_transparent_pipeline,
             crack_pipeline,
@@ -428,6 +433,8 @@ impl Renderer {
             clouds,
             cloud_ticks: 0.0,
             torch_flicker: TorchFlicker::new(),
+            custom_lightmaps: None,
+            dynamic_lights: DynamicLightSet::default(),
             weather,
             particles,
             particle_sprites: Vec::new(),

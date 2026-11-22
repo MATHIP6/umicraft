@@ -36,6 +36,60 @@ const BLINDNESS_DISTANCE: f32 = 5.0;
 /// Light brightness table floor in the Nether (`WorldProviderHell`).
 const NETHER_AMBIENT: f32 = 0.1;
 
+/// Vanilla's start of the terrain fog as a fraction of the far distance
+/// (`EntityRenderer.setupFog`: `farPlaneDistance * 0.75`).
+pub const VANILLA_FOG_START: f32 = 0.75;
+/// A fog that never shows: the start is farther than any visible distance.
+const NO_FOG: FogMode = FogMode::Linear {
+    start: 1.0e6,
+    end: 2.0e6,
+};
+
+/// How the distance fog of the air is measured (OptiFine's "Fog").
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FogKind {
+    /// Fog by depth along the view direction, as the fixed-function pipeline
+    /// of the reference does.
+    Fast,
+    /// Fog by the true distance to the eye (`NV_fog_distance`), which does not
+    /// move when the view turns.
+    #[default]
+    Fancy,
+    /// No distance fog in air; the fog of water, lava and Blindness stays.
+    Off,
+}
+
+/// The user's fog choices that shape the falloff.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FogSettings {
+    /// How the fog distance is measured, or whether there is none.
+    pub kind: FogKind,
+    /// Where the terrain fog starts, as a fraction of its end distance
+    /// (OptiFine's "Fog Start"; vanilla is [`VANILLA_FOG_START`]).
+    pub start: f32,
+}
+
+impl FogSettings {
+    /// The look of the reference with the true-distance fog this renderer
+    /// had before the option existed.
+    pub const DEFAULT: Self = Self {
+        kind: FogKind::Fancy,
+        start: VANILLA_FOG_START,
+    };
+
+    /// Whether the shaders measure the fog by depth instead of distance.
+    #[must_use]
+    pub fn planar(self) -> bool {
+        self.kind == FogKind::Fast
+    }
+}
+
+impl Default for FogSettings {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
 /// What the eye is inside of (`ActiveRenderInfo.getBlockAtEntityViewpoint`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum FogMedium {
@@ -125,6 +179,9 @@ pub struct FogParams {
     /// The falloff of the sky dome (`setupFog(-1)`), which reaches the
     /// horizon sooner.
     pub sky: FogMode,
+    /// The shaders measure the fog by depth along the view instead of the
+    /// distance to the eye ([`FogKind::Fast`]).
+    pub planar: bool,
 }
 
 impl FogParams {
@@ -137,6 +194,7 @@ impl FogParams {
             color: final_color(base_color, environment),
             world: mode(environment, false),
             sky: mode(environment, true),
+            planar: environment.fog_settings.planar(),
         }
     }
 }
@@ -146,6 +204,30 @@ impl FogParams {
 #[must_use]
 pub fn far_plane(view_distance: u8) -> f32 {
     (f32::from(view_distance) * 16.0).clamp(1.0, MAX_FAR_PLANE)
+}
+
+/// The sky pass's far clip distance in blocks (OptiFine's
+/// `EntityRenderer.clipDistance`): twice the far plane, at least 173 blocks
+/// so the custom sky cube (half-size 100) stays whole, and 256 in the End.
+///
+/// The far plane there is the view distance scaled by the fog choice (0.95
+/// for Fancy, 0.83 for Fast). The clip hides the void plane near the horizon,
+/// where the sky behind it, a custom sky in particular, shows instead.
+#[must_use]
+pub fn sky_clip_distance(environment: &RenderEnvironment) -> f32 {
+    /// Smallest clip distance (`clipDistance < 173`).
+    const MIN_CLIP: f32 = 173.0;
+    /// The End's fixed clip distance.
+    const END_CLIP: f32 = 256.0;
+    if environment.dimension == 1 {
+        return END_CLIP;
+    }
+    let scale = match environment.fog_settings.kind {
+        FogKind::Fancy => 0.95,
+        FogKind::Fast => 0.83,
+        FogKind::Off => 1.0,
+    };
+    (f32::from(environment.view_distance) * 16.0 * scale * 2.0).max(MIN_CLIP)
 }
 
 /// `setupFog`: the falloff of the medium, the effects or the dimension.
@@ -172,6 +254,7 @@ fn mode(environment: &RenderEnvironment, sky: bool) -> FogMode {
             }
         };
     }
+    let air_fog = environment.fog_settings;
     match context.medium {
         FogMedium::Water => FogMode::Exp {
             density: if context.water_breathing {
@@ -183,6 +266,7 @@ fn mode(environment: &RenderEnvironment, sky: bool) -> FogMode {
         FogMedium::Lava => FogMode::Exp {
             density: LAVA_DENSITY,
         },
+        FogMedium::Air if air_fog.kind == FogKind::Off => NO_FOG,
         FogMedium::Air if matches!(environment.dimension, -1 | 1) => {
             // `doesXZShowFog`: the Nether and the End close in.
             FogMode::Linear {
@@ -195,7 +279,7 @@ fn mode(environment: &RenderEnvironment, sky: bool) -> FogMode {
             end: far,
         },
         FogMedium::Air => FogMode::Linear {
-            start: far * 0.75,
+            start: far * air_fog.start,
             end: far,
         },
     }
@@ -205,7 +289,13 @@ fn mode(environment: &RenderEnvironment, sky: bool) -> FogMode {
 /// the eye light, the void, Blindness and Night Vision.
 fn final_color(base: [f32; 3], environment: &RenderEnvironment) -> [f32; 3] {
     let context = &environment.fog;
+    let liquid = match context.medium {
+        FogMedium::Water => environment.colors.underwater,
+        FogMedium::Lava => environment.colors.underlava,
+        FogMedium::Air => None,
+    };
     let mut color = match context.medium {
+        _ if liquid.is_some() => liquid.unwrap_or(base),
         FogMedium::Air => base,
         FogMedium::Water => {
             // Water Breathing lightens the water: `f12 * 0.3 + 0.6` with no

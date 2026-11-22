@@ -24,7 +24,7 @@ use umicraft_world::{BlockPos, LightLevel, World};
 use super::look::Look;
 use super::messages::{ChunkEvent, Frame, RenderEvent, TextScreenRequest};
 use super::state::Game;
-use super::view::{debug_world, player_view, sky_temperature};
+use super::view::{biome_at, debug_world, player_view, sky_temperature};
 use crate::pack_offer::ServerPackRequest;
 use crate::scene::fog::fog_context;
 
@@ -120,14 +120,14 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
         rail_entities(world, &mut entities);
         light_entities(world, &mut entities);
         light_paintings(world, &mut entities);
-        shadow_entities(world, &mut entities, game.world_time);
+        shadow_entities(world, &mut entities, game.clock.time());
         eye_light(world, view.position)
     });
     let _ = frames.try_send(RenderEvent::Frame(Box::new(Frame {
         perspective: game.perspective,
         state: view,
         tick_time,
-        world_time: game.world_time,
+        world_time: game.clock.time(),
         dimension: game.dimension,
         flat_world: game.flat_world,
         gamemode: game.gamemode,
@@ -144,12 +144,13 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
         block_entity_data: game.server.block_entities().entity_table(),
         signs: game.server.block_entities().sign_table(),
         sky_temperature: sky_temperature(game, view.position),
+        sky_biome: biome_at(game, view.position),
         fog: fog_context(
             game.world.as_ref(),
             game.server.effects(),
             view.position,
             game.dimension,
-            game.world_time,
+            game.clock.time(),
         ),
         border: crate::scene::border::border_view(game.server.border()),
         weather: crate::scene::weather::WeatherView::new(

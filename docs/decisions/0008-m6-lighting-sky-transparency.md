@@ -316,3 +316,11 @@ Per ADR-0001 the reference tree is consulted and cited, not copied:
   frozen `SkyRenderer` hooks. Any signature change is a lead decision.
 - The M6 acceptance run needs the official installation for real textures but
   must keep the procedural fallback usable without it.
+
+## Amendments
+
+- 2026-11-21: the client clock now follows `WorldClient`: `Time Update`
+  sets the time (a negative value freezes the cycle at its absolute value,
+  `setWorldTime`) and each client tick adds one tick while the cycle runs
+  (`WorldClient.tick`). Before this, the time only changed once a second, so
+  the sky moved in jumps, and a day frozen at noon (`-6000`) showed midnight.

@@ -14,13 +14,19 @@ struct Camera {
     gamma: f32,
     // Exponential fog density; above zero it replaces the linear range.
     fog_density: f32,
-    _pad1: f32,
+    // 1 when the fog is measured by depth instead of distance (`fog_distance`).
+    fog_planar: f32,
     // Integer world offset of the render origin: positions are sent to the
     // GPU relative to it (`view_proj` is built for that origin), so f32
     // keeps its precision far from the world origin.
     origin: vec3<f32>,
+    // How many of `lights` are on (`dynamic_lights.wgsl`); 0 when Dynamic
+    // Lights is off.
+    light_count: u32,
     // The vanilla lightmap, `[sky * 16 + block]` (`lightmap.rs`).
     lightmap: array<vec4<f32>, 256>,
+    // The dynamic lights of the frame, the first `light_count` of them.
+    lights: array<DynamicLight, 16>,
 };
 
 @group(0) @binding(0) var<uniform> camera: Camera;
@@ -109,7 +115,10 @@ fn entity_vertex(in: VertexIn) -> VertexOut {
     out.uv = in.uv;
 
     // Unpack light nibbles: bits 0..=3 block, 4..=7 sky
-    out.light = lightmap_sample(f32(in.light & 0x0Fu), f32((in.light >> 4u) & 0x0Fu));
+    out.light = lightmap_sample(
+        dynamic_block_light(f32(in.light & 0x0Fu), out.world_position),
+        f32((in.light >> 4u) & 0x0Fu),
+    );
     out.shade = face_shade(in.normal);
     // Bit 8: hurt tint. Bits 9..=12: white flash level (the creeper fuse).
     // Bit 13: dye tint, bits 14..=17 the dye (a chat colour with bit 18).
@@ -176,8 +185,12 @@ fn vs_gui(in: VertexIn) -> VertexOut {
 }
 
 // The share of the fog colour at a world position (`fog_amount` in fog.wgsl).
-fn fog_at(world_position: vec3<f32>) -> f32 {
-    let dist = distance(world_position, camera.camera_pos);
+fn fog_at(world_position: vec3<f32>, inv_w: f32) -> f32 {
+    let dist = fog_distance(
+        distance(world_position, camera.camera_pos),
+        inv_w,
+        camera.fog_planar,
+    );
     return fog_amount(dist, camera.fog_start, camera.fog_end, camera.fog_density);
 }
 
@@ -190,7 +203,7 @@ fn lit_colour(in: VertexOut, tex: vec4<f32>) -> vec3<f32> {
     // (MCP `RenderCreeper.getColorMultiplier`).
     base = mix(base, vec3<f32>(1.0), 0.2 * in.flash);
     let lit = base * in.light * in.shade;
-    return mix(lit, camera.fog_color, fog_at(in.world_position));
+    return mix(lit, camera.fog_color, fog_at(in.world_position, in.clip_position.w));
 }
 
 @fragment
@@ -255,7 +268,7 @@ fn fs_additive(in: AdditiveOut) -> @location(0) vec4<f32> {
         rgb = rgb * rgb;
     }
     // A glow fades into the fog like everything else.
-    return vec4<f32>(rgb * (1.0 - fog_at(in.world_position)), 1.0);
+    return vec4<f32>(rgb * (1.0 - fog_at(in.world_position, in.clip_position.w)), 1.0);
 }
 
 // The guardian beam (MCP `RenderGuardian.doRender`): unlit and not blended
@@ -268,7 +281,7 @@ fn fs_tinted(in: AdditiveOut) -> @location(0) vec4<f32> {
         discard;
     }
     let rgb = tex.rgb * in.tint;
-    return vec4<f32>(mix(rgb, camera.fog_color, fog_at(in.world_position)), 1.0);
+    return vec4<f32>(mix(rgb, camera.fog_color, fog_at(in.world_position, in.clip_position.w)), 1.0);
 }
 
 // The shadow under an entity (MCP `Render.renderShadow`): a texture of black
@@ -295,6 +308,6 @@ fn vs_shadow(in: VertexIn) -> ShadowOut {
 fn fs_shadow(in: ShadowOut) -> @location(0) vec4<f32> {
     let tex = textureSample(entity_texture, entity_sampler, in.uv);
     // A shadow fades into the fog like everything else.
-    return vec4<f32>(tex.rgb, tex.a * in.alpha * (1.0 - fog_at(in.world_position)));
+    return vec4<f32>(tex.rgb, tex.a * in.alpha * (1.0 - fog_at(in.world_position, in.clip_position.w)));
 }
 

@@ -51,10 +51,23 @@ pub(super) fn drift(ticks: f64) -> f64 {
     ticks * DRIFT_PER_TICK
 }
 
-/// Placement of the mesh of `mode` for an eye at `eye` after `ticks` ticks.
-/// `Off` has no placement.
-pub(super) fn placement(mode: CloudMode, eye: [f64; 3], ticks: f64) -> Option<Placement> {
-    let height = CLOUD_HEIGHT - eye[1] + HEIGHT_BIAS;
+/// Altitude of the cloud layer with the user's lift: the reference adds
+/// OptiFine's `ofCloudsHeight * 128` to the cloud `y`
+/// (`RenderGlobal.renderClouds`), and the "eye below the clouds" test of the
+/// draw order uses the same sum.
+pub(super) fn altitude(lift: f32) -> f64 {
+    CLOUD_HEIGHT + f64::from(lift)
+}
+
+/// Placement of the mesh of `mode` for an eye at `eye` after `ticks` ticks,
+/// with the layer lifted by `lift` blocks. `Off` has no placement.
+pub(super) fn placement(
+    mode: CloudMode,
+    eye: [f64; 3],
+    ticks: f64,
+    lift: f32,
+) -> Option<Placement> {
+    let height = altitude(lift) - eye[1] + HEIGHT_BIAS;
     match mode {
         CloudMode::Off => None,
         CloudMode::Fast => {
@@ -108,27 +121,35 @@ mod tests {
     }
 
     #[test]
+    fn the_lift_raises_the_layer_and_the_crossing_height() {
+        assert_eq!(altitude(0.0), 128.0);
+        assert_eq!(altitude(64.0), 192.0);
+        let lifted = placement(CloudMode::Fast, [0.0, 64.0, 0.0], 0.0, 64.0).unwrap();
+        assert!((lifted.shift[1] - 128.33).abs() < 1e-4);
+    }
+
+    #[test]
     fn off_has_no_placement() {
-        assert_eq!(placement(CloudMode::Off, [0.0; 3], 0.0), None);
+        assert_eq!(placement(CloudMode::Off, [0.0; 3], 0.0, 0.0), None);
     }
 
     #[test]
     fn the_fast_layer_sits_above_the_eye_and_scrolls_with_x_and_the_drift() {
-        let still = placement(CloudMode::Fast, [0.0, 64.0, 0.0], 0.0).unwrap();
+        let still = placement(CloudMode::Fast, [0.0, 64.0, 0.0], 0.0, 0.0).unwrap();
         assert!((still.shift[1] - 64.33).abs() < 1e-4);
         assert_eq!(still.uv_offset, [0.0, 0.0]);
         // 1024 blocks east: half the texture.
-        let moved = placement(CloudMode::Fast, [1024.0, 64.0, 0.0], 0.0).unwrap();
+        let moved = placement(CloudMode::Fast, [1024.0, 64.0, 0.0], 0.0, 0.0).unwrap();
         assert!((moved.uv_offset[0] - 0.5).abs() < 1e-6);
         // The drift alone moves it the same way.
-        let drifting = placement(CloudMode::Fast, [0.0, 64.0, 0.0], 100.0).unwrap();
+        let drifting = placement(CloudMode::Fast, [0.0, 64.0, 0.0], 100.0, 0.0).unwrap();
         assert!((drifting.uv_offset[0] - 3.0 / 2048.0).abs() < 1e-7);
     }
 
     #[test]
     fn the_fancy_grid_slides_by_the_fraction_of_a_cell() {
         // 18 blocks = 1.5 cells: whole cell 1 in the texture, half a cell of shift.
-        let placed = placement(CloudMode::Fancy, [18.0, 64.0, 0.0], 0.0).unwrap();
+        let placed = placement(CloudMode::Fancy, [18.0, 64.0, 0.0], 0.0, 0.0).unwrap();
         assert!((placed.shift[0] + 0.5).abs() < 1e-6);
         assert!((placed.uv_offset[0] - UV_PER_TEXEL).abs() < 1e-9);
         assert_eq!(placed.scale, [12.0, 12.0]);
@@ -136,15 +157,21 @@ mod tests {
 
     #[test]
     fn the_layer_height_follows_the_eye() {
-        let low = placement(CloudMode::Fancy, [0.0, 0.0, 0.0], 0.0).unwrap();
-        let high = placement(CloudMode::Fancy, [0.0, 130.0, 0.0], 0.0).unwrap();
+        let low = placement(CloudMode::Fancy, [0.0, 0.0, 0.0], 0.0, 0.0).unwrap();
+        let high = placement(CloudMode::Fancy, [0.0, 130.0, 0.0], 0.0, 0.0).unwrap();
         assert!((low.shift[1] - 128.33).abs() < 1e-4);
         assert!((high.shift[1] + 1.67).abs() < 1e-4);
     }
 
     #[test]
     fn a_far_position_keeps_the_texture_offset_in_range() {
-        let far = placement(CloudMode::Fast, [30_000_000.0, 64.0, -30_000_000.0], 5e6).unwrap();
+        let far = placement(
+            CloudMode::Fast,
+            [30_000_000.0, 64.0, -30_000_000.0],
+            5e6,
+            0.0,
+        )
+        .unwrap();
         assert!(far.uv_offset.iter().all(|c| (0.0..1.0).contains(c)));
     }
 }
