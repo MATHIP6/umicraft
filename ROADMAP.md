@@ -39,26 +39,27 @@ release (F1–F4).
 
 ## 3. Status of the original milestones
 
-Assessed on `main` at `27838a4` (details in `docs/roadmap-review.md` §3).
+First assessed on `main` at `27838a4` (details in `docs/roadmap-review.md`
+§3); updated on 2026-11-22 on `main` at `59101c4`.
 
 | Milestone | Status | Remaining work moves to |
 |---|---|---|
 | M0 Foundations | Done (`umicraft-core` not used yet) | F3 |
-| M1 Protocol & offline login | Partial — no fuzzing | P1 |
+| M1 Protocol & offline login | Fuzzing (10 min per target) and packet round-trips done in P1; the P1 trace acceptance is open | P1 |
 | M2 World data & first pixels | Done | — |
-| M3 Movement & interaction | Partial — non-vanilla traffic, fixed-time breaking, no respawn, knockback, effects, flying | P1, P2 |
+| M3 Movement & interaction | Vanilla traffic (P1), hold-to-break, respawn, knockback, effects and gamemodes (P2) are code complete; the live survival session is open | P1, P2 |
 | M4 Interface foundation | Done | — |
 | M5 Model system & atlas | Partial — neighbour-dependent states and block entities done in P7 (not all checked in game); animated textures to verify (P7h) | P7 |
-| M6 Lighting, sky, fog, transparency | Partial — vanilla sky, clouds, weather, fog and border done in P7 (not all checked in game); frame time not measured (P7h) | P7 |
-| M7 First-run assets & resource packs | **Done** (confirmed by the owner); language files unused, animated textures missing | P7, P9 |
-| M8 Entities | Partial / defective — animations, metadata, skins, armour, held items, objects, lighting | P5 |
-| M9 Inventory & containers | Partial — `Click Window` never sent, no item icons | P3, P4 |
+| M6 Lighting, sky, fog, transparency | Partial — vanilla sky, clouds, weather, fog and border done in P7 (not all checked in game); frame time measured by the F2 benchmark scene (`docs/perf-log.md`), the P7 screenshot set is open (P7h) | P7 |
+| M7 First-run assets & resource packs | **Done** (confirmed by the owner); language files used since P9/P10, animated textures to verify (P7h) | P7 |
+| M8 Entities | P5a–P5e done, most of P5f onwards done (armour, layers, light, shadows, objects, vehicles, local body); not verified against vanilla | P5 |
+| M9 Inventory & containers | `Click Window` and item icons done (P3, P4); P4 in progress (survival gaps, live session) | P4 |
 | M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings, keybinds and every options page done in P10 (code complete, owner validation open; Smooth Camera, Super Secret Settings, Force Unicode Font and pack icons are out) | P9, P10 |
 | M11 Audio | Partial — code complete (index, engine, cues, packets, GUI clicks, volumes, music, non-blocking measured); owner validation by ear open | P11 |
-| M12 Accounts & main menu | Title, server list, connecting, disconnected, statistics and achievements screens done in P10 (code complete, owner validation open; Realms, LAN and SRV are out); accounts not started | P10 (rest of menus), F1 (accounts) |
-| M13 Premium authentication | Session join and encryption done in P12 (launcher session, ADR-0053/0054; tested against a fake server, owner check with a real token open); Microsoft login, keychain and isolation in F1 | P12, F1 |
-| M14 Performance pass | Started early as F2 (ADR-0058): audit and plan in `docs/tasks/f2/README.md`, nothing implemented yet | F2 |
-| M15 Modding API v1 | Not started | F3 |
+| M12 Accounts & main menu | Title, server list, connecting, disconnected, statistics and achievements screens done in P10 (code complete, owner validation open; Realms, LAN and SRV are out); account manager and chooser code complete in F1 (ADR-0067/0068) | P10 (rest of menus), F1 (accounts) |
+| M13 Premium authentication | Session join and encryption done in P12 (launcher session, ADR-0053/0054; tested against a fake server, owner check with a real token open); Microsoft login, keychain and isolation code complete in F1, not tried against real Microsoft servers | P12, F1 |
+| M14 Performance pass | Started early as F2 (ADR-0058): phases 0 to 5 done (`docs/tasks/f2/README.md`, numbers in `docs/perf-log.md`) | F2 |
+| M15 Modding API v1 | F3.0–F3.9 done on `feat/modding-api` (ADR-0086/0087, `docs/tasks/f3/README.md`), API frozen as 1.0; a manual pass in a real window is pending | F3 |
 | M16 Hardening & v1.0 | Not started | P12 (proxies), F4 |
 
 ## 4. Order and dependencies
@@ -131,6 +132,14 @@ P0 ─► P1 ─┬─► P2 ─────────────┬─► P4
 (failing on the known gaps); `docs/parity.md` exists; the spec reflects this
 roadmap.
 
+**Status (2026-11-22): done apart from one owner decision.** The tools exist
+(`umicraft-packet-logger`, `-trace-diff`, `-trajectory-diff`,
+`-screenshot-diff`; procedure in `docs/parity-harness.md`), the serverbound
+diff of the movement script ran against a vanilla capture on 2026-10-26, the
+coverage test exists, `docs/parity.md` exists and the spec states the parity
+goal. Open: the trajectory and screenshot tolerances of ADR-0019 are still
+"proposed" (open point §8.1).
+
 ### P1 — Protocol completeness & vanilla traffic
 
 **Features**
@@ -166,6 +175,16 @@ roadmap.
 **Done when:** the coverage test passes with no silently skipped id; the P0
 trace diff of the movement script shows the same packet ids in the same
 order as vanilla; the fuzzers run 10 minutes without a panic (documented).
+
+**Status (2026-11-22): code complete, one live run open.** Every listed packet
+is decoded or sent, and the coverage test, gap audit included
+(`--include-ignored`), passes. The fuzzers ran 600 s per target without a
+crash (`docs/fuzzing.md`), and the round-trips are in
+`umicraft-protocol/tests/roundtrip.rs`. The 2026-10-26 P1 run matches vanilla
+on idle ticks, `Steer Vehicle` and the sneak transitions. Open: a run from a
+clear spot so that the moving ticks and the sprint `Entity Action` can be
+compared (the player was blocked by terrain in that run, see
+`docs/parity-harness.md` "P1 run").
 
 ### P2 — Game-logic extraction & core player loop
 
@@ -363,9 +382,11 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
 **Status:** P5a (module split), P5b (limb swing, body yaw, 3-tick teleport) and
 P5c (hurt, death, arm swing, sleeping, crouch, sword and bow poses) P5d
 (typed metadata, babies, coats, wool, creeper swell) and P5e (profiles,
-skins, capes, name tags) are done; P5f onwards remain (armour and layers,
-lighting and shadows, objects, the local body: the detail is in
-`docs/tasks/p5/README.md`). Eating has no third-person pose in 1.8 beyond the held item.
+skins, capes, name tags) are done. P5f onwards (armour and layers, lighting
+and shadows, objects and vehicles, the local body) is mostly done; left on
+2026-11-22: the held-item glint in third person, arrows in the body, the
+`Collect Item` pop sound and the dragon wing sound. Nothing is verified against
+vanilla yet. The detail is in `docs/tasks/p5/README.md`. Eating has no third-person pose in 1.8 beyond the held item.
 
 **Features**
 - Animation maths: limb swing (vanilla smoothing), body yaw
@@ -448,6 +469,11 @@ session on a public 1.8 network (after P12) raises no anti-cheat flag.
 
 ### P7 — World rendering (finishes M5 and M6)
 
+**Status (2026-11-22):** P7-0 to P7g are done (partly checked in game). P7h,
+not started, is still open: the animated texture check, the parity rows and the
+reference screenshot set. The frame-time benchmark now exists as the F2
+benchmark scene (`docs/perf-log.md`). The detail is in `docs/tasks/p7/README.md`.
+
 **Features**
 - Neighbour-dependent states (`getActualState`): fences, fence gates in
   walls, panes, iron bars, walls, stair shapes, doors (combined halves),
@@ -481,6 +507,11 @@ agreed threshold; the frame-time benchmark exists.
 
 ### P8 — Particles & visual effects
 
+**Status (2026-11-22): implemented, with gaps.** Not done yet: `iconcrack` and
+the item-sprite breaking particles, `ItemTake`, `MobAppearance`, and the
+firework `StarterFX` and overlay. Nothing is compared with vanilla on screen
+(`docs/tasks/p8/README.md`).
+
 **Features**
 - Particle engine (billboards, physics, lighting, the particle setting).
 - `Particle` and `Effect` packets; client-side particles: digging and break,
@@ -497,6 +528,11 @@ class, `RenderGlobal.playAuxSFX` / `spawnParticle`, `GuiIngame`
 breaking, explosions, potions and rain match vanilla on the checklist.
 
 ### P9 — HUD, chat & social
+
+**Status (2026-11-22): implemented, with gaps.** Not done yet: the italic shear,
+tab-list heads and their heart flash, the achievement hover, Tab-completion
+replace and chat-scroll keep. Nothing is compared with vanilla on screen
+(`docs/tasks/p9/README.md`).
 
 **Features**
 - Vanilla HUD from `widgets.png` and `icons.png`: hotbar with item icons,
@@ -568,8 +604,8 @@ check the reason, quit, restart and see the options and the server kept.
 Compare the screens with vanilla in a real window (`--hud-demo --hud-view
 title|servers` shows two of them offscreen).
 
-**Still to do:** Tests de bout en bout du cycle menu/session, persistance des
-options et audit des clés de langue: à faire (autre session).
+**Still to do:** end-to-end tests of the menu/session cycle, of option
+persistence, and an audit of the language keys.
 
 ### P11 — Audio
 
@@ -675,8 +711,8 @@ approved deviation.
 | Milestone | Content | Done when |
 |---|---|---|
 | **F1 — Account manager & live switching** | Starts with a short spike (current Microsoft endpoints, device-code flow, licence of the secret-storage crate). `umicraft-auth`: Microsoft device code → Xbox Live → XSTS → Minecraft services → profile, token refresh, keychain storage (ACC-4/6/7); offline accounts with the standard UUID, multi-account manager, live switch, account UI in menus (ACC-1/2/3/8/10), plugged into the P12 `Session` seam. **State (F1):** code complete, not tried against real Microsoft servers (ADR-0067, `docs/tasks/f1/README.md`); the Prism client id is a stopgap and must be replaced by an own Azure app before any public release. | Former M12 and M13 acceptance criteria. |
-| **F2 — Performance pass** (started early, ADR-0058; plan in `docs/tasks/f2/README.md`) | Instruments first (CPU spans, GPU timestamps, reproducible scene); f64 eye and origin-relative rendering (jitter far from the origin); solid/cutout split and near-to-far order; per-section meshing, frustum and occlusion culling, packed vertices; mesh priority queue, GPU-driven rendering, upload budget, allocation audit, CI benchmarks (backlog "Performance"). | Before/after numbers in `docs/perf-log.md`; spec §7 targets met or explained. |
-| **F3 — Modding API v1** | Former M15, including the move of built-in features onto `umicraft-core`. Resolve first the contradiction between spec §8.4 (ECS for mods) and ADR-0015 (typed `EntityStore`). | Former M15 acceptance criteria. |
+| **F2 — Performance pass** (started early, ADR-0058; plan in `docs/tasks/f2/README.md`) | Instruments first (CPU spans, GPU timestamps, reproducible scene); f64 eye and origin-relative rendering (jitter far from the origin); solid/cutout split and near-to-far order; per-section meshing, frustum and occlusion culling, packed vertices; mesh priority queue, GPU-driven rendering, upload budget, allocation audit, CI benchmarks (backlog "Performance"). **State (F2):** phases 0 to 5 done; F2-2c, F2-3c, F2-4c, F2-4f and F2-5d were either not done or dropped after measuring, and so were the block entities of F2-5c and the sky write of F2-5e. | Before/after numbers in `docs/perf-log.md`; spec §7 targets met or explained. |
+| **F3 — Modding API v1** (started 2026-11-19 before F2 ends, by owner decision; plan in `docs/tasks/f3/README.md`) | Former M15, including the move of built-in features onto `umicraft-core`. Architecture ADR-0086, C ABI ADR-0087; the ECS contradiction is resolved by ADR-0086 (read-only entity queries, no ECS for mods in v1). | Former M15 acceptance criteria. |
 | **F5 — Client identity** (started, ADR-0056) | Umicraft's own assets and texts in the client pack (`umicraft-assets/client-pack`, `umicraft.*` language layer); modern title screen (logo, wordmark, Play, Options; quit by closing the window) with the classic one behind `[menu] title_style`; brand font, rounded shapes and gradients in the UI pass. Built-in mods (ADR-0065, `umicraft-builtin-mods`): mods menu (landing, list, per-mod settings) with HUD widgets movable directly in it (M1-M7 done, manual pass in a real window pending). Client themes (ADR-0078): vanilla, Ember and Amethyst skins for buttons, sliders, backgrounds and the HD font, picked on an options page. Next: more client-specific screens on the `umicraft_ui::modern` widgets. | Modern title shipped (done); the panorama waiver of ADR-0056 is resolved (permission recorded or original panorama) before any public release. |
 | **F6 — Pack features & video settings** (ADR-0088/0089/0090, phases 0–7 code complete on 2026-11-21, not yet tried in a window or with real packs; plan in `docs/tasks/optifine/README.md`, branch `feat/optifine-features`) | OptiFine-style video settings (root page plus Quality, Details, Performance, Animations, Other; tooltips; render distance up to 32), optimisation knobs, and resource-pack features: custom sky, custom entity models (CEM), connected textures, random entities, custom colors, CIT, natural textures, dynamic lights. New crate `umicraft-packext`. | Phases 0 to 7 of the plan; parity screenshots green; perf-log numbers for every optimisation. |
 | **F4 — Hardening & v1.0** | Former M16 minus proxies (moved to P12): long sessions, packaging, crash reports, docs site, legal review. | `docs/release.md` fully ticked. |
