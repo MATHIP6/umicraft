@@ -16,6 +16,7 @@ use umicraft_game::server::block_entities::SignTable;
 use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_game::server::maps::MapStore;
 use umicraft_game::sound::cue::SoundCue;
+use umicraft_game::sound::looping::LoopingSound;
 use umicraft_game::view::Perspective;
 use umicraft_game::RenderState;
 use umicraft_mesh::ChunkSnapshot;
@@ -214,6 +215,8 @@ pub struct Frame {
     pub overlays: crate::scene::overlay_state::OverlayInputs,
     /// The world facts the F3 screen prints (P9-h).
     pub debug: Arc<crate::debug::world::DebugWorld>,
+    /// The looping sounds to hear after this tick (rolling minecarts).
+    pub loops: Arc<[LoopingSound]>,
 }
 
 /// The statistics the debug overlay shows.

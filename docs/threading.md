@@ -250,6 +250,12 @@ ADR-0005).
   `AudioHandle::music_playing`) tells the render thread whether its track is in
   flight; `AudioMessage::StopMusic` is another `try_send`. The render thread
   runs `MusicTicker` at 20 Hz (`audio_bridge::music`).
+- Looping sounds (rolling minecarts, ADR-0092) are declarative: each frame
+  carries the loops the game wants heard, and `audio_bridge::loops::LoopSync`
+  sends `AudioMessage::Loop` for a new or changed one and `EndLoop` for one
+  that left the list. A dropped message is not remembered, so it is sent again
+  next frame. The audio thread recomputes their gains on its 20 Hz tick; the
+  mixer gets them through the same command queue as new voices.
 - Measured (`tests/stall_latency.rs`): with a loader and a backend that sleep
   40 ms per operation, the game thread (20 Hz) and the render thread (60 fps)
   see p99 about 9 us and max about 27 us per call (release); the queue overflows

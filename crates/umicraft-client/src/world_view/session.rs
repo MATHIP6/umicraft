@@ -4,6 +4,7 @@
 //! the status, the statistics, the sounds and the end of the session.
 
 use std::time::Instant;
+use umicraft_game::sound::looping::LoopingSound;
 
 use umicraft_game::inventory::WindowView;
 use umicraft_game::sound::cue::SoundCue;
@@ -82,6 +83,13 @@ impl WorldView {
     /// thread.
     pub fn take_sounds(&mut self) -> Vec<SoundCue> {
         std::mem::take(&mut self.sounds)
+    }
+
+    /// The looping sounds of the newest frame, which the window keeps the
+    /// audio thread in step with.
+    #[must_use]
+    pub fn loops(&self) -> &[LoopingSound] {
+        &self.loops
     }
 
     /// Why the session ended, once it has.

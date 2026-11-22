@@ -28,6 +28,11 @@ pub struct Voice {
     pub pan: f32,
     /// Whether the voice holds a streaming channel instead of a normal one.
     pub streaming: bool,
+    /// The key of a looping voice (a minecart rolling), which plays until
+    /// [`AudioBackend::stop_loop`] and whose gains
+    /// [`AudioBackend::adjust_loop`] changes; `None` for a voice that plays
+    /// once.
+    pub loop_key: Option<u64>,
 }
 
 /// How many voices ended since the last [`AudioBackend::reap`], by kind.
@@ -56,6 +61,22 @@ pub trait AudioBackend {
     /// Ends every streaming voice (the music track). They are reported by a
     /// later [`Self::reap`], like voices that ended by themselves.
     fn stop_streaming(&mut self);
+
+    /// Sets the loudness and the stereo position of the looping voice `key`
+    /// (the values of [`Voice::volume`] and [`Voice::pan`]); nothing happens
+    /// when no such voice plays.
+    ///
+    /// # Errors
+    ///
+    /// [`AudioError::Backend`] when the mixer cannot be reached.
+    fn adjust_loop(&mut self, key: u64, volume: f32, pan: f32) -> Result<(), AudioError>;
+
+    /// Ends the looping voice `key`; it is reaped as a normal voice.
+    ///
+    /// # Errors
+    ///
+    /// [`AudioError::Backend`] when the mixer cannot be reached.
+    fn stop_loop(&mut self, key: u64) -> Result<(), AudioError>;
 }
 
 impl AudioBackend for Box<dyn AudioBackend> {
@@ -69,5 +90,13 @@ impl AudioBackend for Box<dyn AudioBackend> {
 
     fn stop_streaming(&mut self) {
         (**self).stop_streaming();
+    }
+
+    fn adjust_loop(&mut self, key: u64, volume: f32, pan: f32) -> Result<(), AudioError> {
+        (**self).adjust_loop(key, volume, pan)
+    }
+
+    fn stop_loop(&mut self, key: u64) -> Result<(), AudioError> {
+        (**self).stop_loop(key)
     }
 }

@@ -33,6 +33,7 @@ use umicraft_game::server::block_entities::SignTable;
 use umicraft_game::server::chest_lids::ChestLids;
 use umicraft_game::server::maps::MapStore;
 use umicraft_game::sound::cue::SoundCue;
+use umicraft_game::sound::looping::LoopingSound;
 use umicraft_mesh::{BlockEntityRef, Vertex};
 use umicraft_render::{HudState, OutlineBox};
 use umicraft_ui::menus::ConnectStage;
@@ -127,6 +128,8 @@ pub struct WorldView {
     pack_requests: Vec<ServerPackRequest>,
     /// The body of the local player in the newest frame.
     local_body: Option<Arc<EntityFrameData>>,
+    /// The looping sounds of the newest frame.
+    loops: Arc<[LoopingSound]>,
     /// The light at the eye of the local player in the latest frame.
     hand_light: LightLevel,
     /// Selection outline boxes from the latest frame.
@@ -197,6 +200,7 @@ impl WorldView {
             frames: 0,
             entities: Arc::from([]),
             local_body: None,
+            loops: Arc::from([]),
             text_request: None,
             pack_requests: Vec::new(),
             hand_light: LightLevel::FULL_SKY,
@@ -265,6 +269,7 @@ impl WorldView {
                 self.frames += 1;
                 self.entities = Arc::clone(&frame.entities);
                 self.local_body = Some(Arc::clone(&frame.local_body));
+                self.loops = Arc::clone(&frame.loops);
                 self.hand_light = frame.hand_light;
                 self.selection = Arc::clone(&frame.selection);
                 self.maps = Arc::clone(&frame.maps);
@@ -351,6 +356,7 @@ impl WorldView {
         self.connect_stage = ConnectStage::Connecting;
         self.frames = 0;
         self.local_body = None;
+        self.loops = Arc::from([]);
         self.text_request = None;
         self.pack_requests.clear();
         self.hand_light = LightLevel::FULL_SKY;

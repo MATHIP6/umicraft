@@ -13,6 +13,10 @@ use crate::error::AudioError;
 pub struct NullBackend {
     /// Every voice started so far, oldest first.
     pub played: Vec<Voice>,
+    /// Every gain change of a looping voice, `(key, volume, pan)`, oldest first.
+    pub adjusted: Vec<(u64, f32, f32)>,
+    /// The keys of the looping voices still playing.
+    pub looping: Vec<u64>,
     playing: Reaped,
     finished: Reaped,
 }
@@ -26,6 +30,7 @@ impl NullBackend {
 
     /// Marks every playing voice as ended; the next `reap` reports them.
     pub fn finish_all(&mut self) {
+        self.looping.clear();
         self.finished.normal += std::mem::take(&mut self.playing.normal);
         self.finished.streaming += std::mem::take(&mut self.playing.streaming);
     }
@@ -38,6 +43,9 @@ impl AudioBackend for NullBackend {
         } else {
             self.playing.normal += 1;
         }
+        if let Some(key) = voice.loop_key {
+            self.looping.push(key);
+        }
         self.played.push(voice);
         Ok(())
     }
@@ -48,6 +56,22 @@ impl AudioBackend for NullBackend {
 
     fn stop_streaming(&mut self) {
         self.finished.streaming += std::mem::take(&mut self.playing.streaming);
+    }
+
+    fn adjust_loop(&mut self, key: u64, volume: f32, pan: f32) -> Result<(), AudioError> {
+        if self.looping.contains(&key) {
+            self.adjusted.push((key, volume, pan));
+        }
+        Ok(())
+    }
+
+    fn stop_loop(&mut self, key: u64) -> Result<(), AudioError> {
+        let before = self.looping.len();
+        self.looping.retain(|&playing| playing != key);
+        let stopped = before - self.looping.len();
+        self.playing.normal = self.playing.normal.saturating_sub(stopped);
+        self.finished.normal += stopped;
+        Ok(())
     }
 }
 
@@ -66,6 +90,7 @@ mod tests {
             pitch: 1.0,
             pan: 0.0,
             streaming,
+            loop_key: None,
         }
     }
 

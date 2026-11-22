@@ -97,6 +97,8 @@ impl App {
             self.world.as_mut(),
             self.renderer.as_mut(),
         ) else {
+            // Out of a world no cart rolls.
+            self.audio.sync_loops(&[]);
             return;
         };
         let performance = &self.options.video.performance;
@@ -115,6 +117,7 @@ impl App {
         );
         world.focus_on(&self.camera);
         self.audio.play_cues(&world.take_sounds());
+        self.audio.sync_loops(world.loops());
         self.audio
             .set_listener(listener_of(self.camera.position(), self.camera.yaw));
         let step = lifecycle_step(self.screen, world.placed(), world.ended());

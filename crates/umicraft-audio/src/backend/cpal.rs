@@ -17,6 +17,20 @@ use super::mixer::{Mixer, MAX_VOICES};
 use super::{AudioBackend, Reaped, Voice};
 use crate::error::AudioError;
 
+/// What the audio thread asks of the mixer on the stream callback.
+enum Command {
+    /// Start a voice.
+    Play(Voice),
+    /// Set the gains of a looping voice.
+    Adjust { key: u64, volume: f32, pan: f32 },
+    /// End a looping voice.
+    StopLoop(u64),
+}
+
+/// How many commands may wait for the callback: a voice per channel plus a
+/// gain change and a stop for each.
+const COMMAND_QUEUE: usize = MAX_VOICES * 3;
+
 /// Voices that ended, written by the stream callback and read by `reap`.
 #[derive(Default)]
 struct Ended {
@@ -46,7 +60,7 @@ fn buffer_size(supported: &cpal::SupportedBufferSize) -> cpal::BufferSize {
 
 /// Plays voices on the default output device.
 pub struct CpalBackend {
-    voices: SyncSender<Voice>,
+    commands: SyncSender<Command>,
     ended: Arc<Ended>,
     /// Set by `stop_streaming`; the callback ends the streaming voices.
     stop_streams: Arc<AtomicBool>,
@@ -71,7 +85,7 @@ impl CpalBackend {
         config.buffer_size = buffer_size(supported.buffer_size());
         let channels = usize::from(config.channels);
         let mut mixer = Mixer::new(config.sample_rate);
-        let (voices, incoming) = sync_channel::<Voice>(MAX_VOICES);
+        let (commands, incoming) = sync_channel::<Command>(COMMAND_QUEUE);
         let ended = Arc::new(Ended::default());
         let ended_in_callback = Arc::clone(&ended);
         let stop_streams = Arc::new(AtomicBool::new(false));
@@ -80,8 +94,17 @@ impl CpalBackend {
             .build_output_stream(
                 config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    while let Ok(voice) = incoming.try_recv() {
-                        mixer.add(voice);
+                    let mut stopped_loops = 0;
+                    while let Ok(command) = incoming.try_recv() {
+                        match command {
+                            Command::Play(voice) => {
+                                mixer.add(voice);
+                            }
+                            Command::Adjust { key, volume, pan } => {
+                                mixer.adjust_loop(key, volume, pan);
+                            }
+                            Command::StopLoop(key) => stopped_loops += mixer.stop_loop(key).normal,
+                        }
                     }
                     // After the drain: a voice queued before the stop is stopped too.
                     let stopped = if stop_in_callback.swap(false, Ordering::AcqRel) {
@@ -92,7 +115,7 @@ impl CpalBackend {
                     let reaped = mixer.render(data, channels);
                     ended_in_callback
                         .normal
-                        .fetch_add(reaped.normal, Ordering::Relaxed);
+                        .fetch_add(reaped.normal + stopped_loops, Ordering::Relaxed);
                     ended_in_callback
                         .streaming
                         .fetch_add(reaped.streaming + stopped, Ordering::Relaxed);
@@ -103,7 +126,7 @@ impl CpalBackend {
             .map_err(backend_error)?;
         stream.play().map_err(backend_error)?;
         Ok(Self {
-            voices,
+            commands,
             ended,
             stop_streams,
             _stream: stream,
@@ -113,9 +136,7 @@ impl CpalBackend {
 
 impl AudioBackend for CpalBackend {
     fn play(&mut self, voice: Voice) -> Result<(), AudioError> {
-        self.voices
-            .try_send(voice)
-            .map_err(|_| AudioError::Backend("the mixer queue is full or closed".into()))
+        self.send(Command::Play(voice))
     }
 
     fn reap(&mut self) -> Reaped {
@@ -127,6 +148,23 @@ impl AudioBackend for CpalBackend {
 
     fn stop_streaming(&mut self) {
         self.stop_streams.store(true, Ordering::Release);
+    }
+
+    fn adjust_loop(&mut self, key: u64, volume: f32, pan: f32) -> Result<(), AudioError> {
+        self.send(Command::Adjust { key, volume, pan })
+    }
+
+    fn stop_loop(&mut self, key: u64) -> Result<(), AudioError> {
+        self.send(Command::StopLoop(key))
+    }
+}
+
+impl CpalBackend {
+    /// Queues `command` for the stream callback without waiting.
+    fn send(&self, command: Command) -> Result<(), AudioError> {
+        self.commands
+            .try_send(command)
+            .map_err(|_| AudioError::Backend("the mixer queue is full or closed".into()))
     }
 }
 

@@ -17,6 +17,7 @@ use umicraft_game::entity::painting::light_paintings;
 use umicraft_game::entity::rail::rail_entities;
 use umicraft_game::entity::shadow::shadow_entities;
 use umicraft_game::entity::{EntityId, EntityKind};
+use umicraft_game::sound::looping::{minecart_loops, LoopingSound};
 use umicraft_game::view::Perspective;
 use umicraft_mesh::{BlockEntityKind, ChunkSnapshot};
 use umicraft_world::{BlockPos, LightLevel, World};
@@ -58,6 +59,15 @@ pub(super) fn publish_sounds(game: &mut Game, frames: &SyncSender<RenderEvent>) 
     if !cues.is_empty() {
         let _ = frames.try_send(RenderEvent::Sounds(cues));
     }
+}
+
+/// The looping sounds of this tick: the rolling minecarts, and the inside
+/// of the one the local player rides (`MovingSoundMinecart`,
+/// `MovingSoundMinecartRiding`).
+fn looping_sounds(game: &Game) -> Vec<LoopingSound> {
+    let mut loops = Vec::new();
+    minecart_loops(&game.entities, game.vehicle.map(EntityId), &mut loops);
+    loops
 }
 
 /// Publishes the current player state as a frame.
@@ -164,6 +174,7 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
             .overlays
             .inputs(game.perspective == Perspective::FirstPerson),
         debug: Arc::new(debug_world(game)),
+        loops: looping_sounds(game).into(),
     })));
 }
 

@@ -5,7 +5,8 @@
 //! [`AudioBridge`] owns the audio thread of `umicraft-audio` and is the only
 //! audio type the window touches. It turns the game's sound cues
 //! ([`cues`]), the camera ([`listener`]), the menu clicks ([`ui_sounds`]) and
-//! the sound options ([`settings`]) and the background music ([`music`]) into
+//! the sound options ([`settings`]), the looping sounds ([`loops`]) and the
+//! background music ([`music`]) into
 //! messages for the audio thread, and finds the user's sound files ([`loader`]).
 //!
 //! Every call is non-blocking (`AudioHandle` is a `try_send` on a bounded
@@ -16,6 +17,7 @@
 pub mod cues;
 pub mod listener;
 pub mod loader;
+pub mod loops;
 pub mod music;
 pub mod probe;
 pub mod settings;
@@ -26,8 +28,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use umicraft_audio::thread::{self, AudioThread};
 use umicraft_audio::{AudioHandle, Listener, SoundRequest};
 use umicraft_game::sound::cue::SoundCue;
+use umicraft_game::sound::looping::LoopingSound;
 
 use crate::options::SoundOptions;
+use loops::LoopSync;
 use music::MusicDriver;
 use settings::VolumeSync;
 
@@ -38,6 +42,7 @@ pub struct AudioBridge {
     thread: Option<AudioThread>,
     volumes: VolumeSync,
     music: MusicDriver,
+    loops: LoopSync,
 }
 
 impl AudioBridge {
@@ -76,6 +81,7 @@ impl AudioBridge {
             thread: Some(thread),
             volumes: VolumeSync::default(),
             music: MusicDriver::new(seed()),
+            loops: LoopSync::default(),
         };
         bridge.sync_volumes(options);
         bridge
@@ -89,6 +95,7 @@ impl AudioBridge {
             thread: None,
             volumes: VolumeSync::default(),
             music: MusicDriver::default(),
+            loops: LoopSync::default(),
         }
     }
 
@@ -113,6 +120,14 @@ impl AudioBridge {
             } else {
                 self.play(cues::request_of(cue));
             }
+        }
+    }
+
+    /// Keeps the looping sounds of the audio thread to `wanted`, the loops of
+    /// the newest frame; an empty list (no world) ends them all.
+    pub fn sync_loops(&mut self, wanted: &[LoopingSound]) {
+        if let Some(handle) = &self.handle {
+            self.loops.sync(handle, wanted);
         }
     }
 

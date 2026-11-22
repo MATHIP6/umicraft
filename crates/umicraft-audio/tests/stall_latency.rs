@@ -57,6 +57,16 @@ impl AudioBackend for StalledBackend {
     fn stop_streaming(&mut self) {
         sleep(STALL);
     }
+
+    fn adjust_loop(&mut self, _key: u64, _volume: f32, _pan: f32) -> Result<(), AudioError> {
+        sleep(STALL);
+        Ok(())
+    }
+
+    fn stop_loop(&mut self, _key: u64) -> Result<(), AudioError> {
+        sleep(STALL);
+        Ok(())
+    }
 }
 
 fn index() -> SoundIndex {
