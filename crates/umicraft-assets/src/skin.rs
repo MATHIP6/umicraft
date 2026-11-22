@@ -43,10 +43,52 @@ impl SkinModel {
     }
 }
 
+/// Edge of a processed skin, in pixels.
+const SKIN_EDGE: usize = 64;
+
+/// The faces of the right leg and arm a legacy 64×32 skin copies onto the left
+/// limbs, as `(dst_x, dst_y, src_x, src_y, width, height)`. Each face is
+/// flipped on its own and the inner and outer sides swap, like the twelve
+/// `drawImage` calls of `ImageBufferDownload.parseUserSkin` (MCP 1.8.9).
+const LEGACY_LIMB_FACES: [(usize, usize, usize, usize, usize, usize); 12] = [
+    // Left leg: top, bottom, then the sides, front and back.
+    (20, 48, 4, 16, 4, 4),
+    (24, 48, 8, 16, 4, 4),
+    (16, 52, 8, 20, 4, 12),
+    (20, 52, 4, 20, 4, 12),
+    (24, 52, 0, 20, 4, 12),
+    (28, 52, 12, 20, 4, 12),
+    // Left arm, the same way from the right arm.
+    (36, 48, 44, 16, 4, 4),
+    (40, 48, 48, 16, 4, 4),
+    (32, 52, 48, 20, 4, 12),
+    (36, 52, 44, 20, 4, 12),
+    (40, 52, 40, 20, 4, 12),
+    (44, 52, 52, 20, 4, 12),
+];
+
+/// The base layer of a skin, as `(x0, y0, x1, y1)`: forced opaque
+/// (`setAreaOpaque`), so a transparent pixel there shows black.
+const OPAQUE_AREAS: [(usize, usize, usize, usize); 3] =
+    [(0, 0, 32, 16), (0, 16, 64, 32), (16, 48, 48, 64)];
+
+/// The outer layers (hat, jacket, sleeves, trousers): an area without any
+/// transparent pixel is cleared entirely (`setAreaTransparent`), which hides
+/// the solid hats of old skins.
+const OUTER_AREAS: [(usize, usize, usize, usize); 6] = [
+    (32, 0, 64, 32),
+    (0, 32, 16, 48),
+    (16, 32, 40, 48),
+    (40, 32, 56, 48),
+    (0, 48, 16, 64),
+    (48, 48, 64, 64),
+];
+
 /// Upgrades a legacy 64×32 skin RGBA buffer to modern 64×64 format.
 ///
-/// In 1.8, 64×32 skins mirror the right arm and leg onto the left arm and leg
-/// in the lower half of the 64×64 layout.
+/// In 1.8, 64×32 skins copy the faces of the right arm and leg onto the left
+/// arm and leg in the lower half of the 64×64 layout (see
+/// [`LEGACY_LIMB_FACES`]). The rest of the lower half stays transparent.
 ///
 /// # Errors
 /// [`AssetsError::Image`] if the input buffer is not exactly 64×32×4 bytes.
@@ -61,16 +103,64 @@ pub fn convert_64x32_to_64x64(raw: &[u8]) -> Result<Vec<u8>, AssetsError> {
         });
     }
 
-    let mut out = vec![0u8; 64 * 64 * 4];
-    // Copy the original 64x32 upper half
+    let mut out = vec![0u8; SKIN_EDGE * SKIN_EDGE * 4];
     out[0..raw.len()].copy_from_slice(raw);
-
-    // Mirror right leg (0..16, 16..32) to left leg (16..32, 48..64)
-    copy_sub_image_mirrored(raw, 64, 0, 16, &mut out, 64, 16, 48, 16, 16);
-    // Mirror right arm (40..56, 16..32) to left arm (32..48, 48..64)
-    copy_sub_image_mirrored(raw, 64, 40, 16, &mut out, 64, 32, 48, 16, 16);
-
+    for (dst_x, dst_y, src_x, src_y, w, h) in LEGACY_LIMB_FACES {
+        copy_sub_image_mirrored(
+            raw, SKIN_EDGE, src_x, src_y, &mut out, SKIN_EDGE, dst_x, dst_y, w, h,
+        );
+    }
     Ok(out)
+}
+
+/// Prepares a downloaded 64×64 RGBA skin the way the 1.8 client does
+/// (`ImageBufferDownload.parseUserSkin`, MCP 1.8.9):
+///
+/// 1. A fully transparent pixel becomes transparent black: the reference
+///    draws the picture over an empty image, which keeps nothing of it.
+/// 2. The base layer ([`OPAQUE_AREAS`]) is made opaque, so its holes show
+///    black (or the colour of a half-transparent pixel).
+/// 3. An outer layer ([`OUTER_AREAS`]) without a single transparent pixel is
+///    made fully transparent.
+///
+/// A buffer of any other length is left as it is.
+///
+/// # Example
+///
+/// ```
+/// use umicraft_assets::parse_user_skin;
+///
+/// let mut skin = vec![0u8; 64 * 64 * 4];
+/// skin[..4].copy_from_slice(&[255, 0, 0, 0]); // a hole in the head
+/// parse_user_skin(&mut skin);
+/// assert_eq!(&skin[..4], &[0, 0, 0, 255]); // shown black
+/// ```
+pub fn parse_user_skin(skin: &mut [u8]) {
+    if skin.len() != SKIN_EDGE * SKIN_EDGE * 4 {
+        return;
+    }
+    for pixel in skin.chunks_exact_mut(4) {
+        if pixel[3] == 0 {
+            pixel.fill(0);
+        }
+    }
+    for area in OPAQUE_AREAS {
+        for pixel in area_pixels(area) {
+            skin[pixel * 4 + 3] = u8::MAX;
+        }
+    }
+    for area in OUTER_AREAS {
+        if area_pixels(area).all(|pixel| skin[pixel * 4 + 3] == u8::MAX) {
+            for pixel in area_pixels(area) {
+                skin[pixel * 4 + 3] = 0;
+            }
+        }
+    }
+}
+
+/// The indices of the pixels of `(x0, y0, x1, y1)` in a 64×64 skin.
+fn area_pixels((x0, y0, x1, y1): (usize, usize, usize, usize)) -> impl Iterator<Item = usize> {
+    (y0..y1).flat_map(move |y| (x0..x1).map(move |x| y * SKIN_EDGE + x))
 }
 
 /// Generates an original procedural fallback skin (64×64 RGBA8).
@@ -958,32 +1048,76 @@ mod tests {
         assert_eq!(&new[0..4], &[10, 20, 30, 255]);
     }
 
+    /// A 64×32 skin whose pixel `(x, y)` is `[x, y, 1, 255]`.
+    fn legacy_skin() -> Vec<u8> {
+        (0..32u8)
+            .flat_map(|y| (0..64u8).flat_map(move |x| [x, y, 1, 255]))
+            .collect()
+    }
+
+    fn pixel(skin: &[u8], x: usize, y: usize) -> [u8; 4] {
+        let index = (y * 64 + x) * 4;
+        [
+            skin[index],
+            skin[index + 1],
+            skin[index + 2],
+            skin[index + 3],
+        ]
+    }
+
     #[test]
-    fn convert_64x32_mirrors_limb_textures_horizontally() {
-        let mut old = vec![0u8; 64 * 32 * 4];
-        // Paint pixel (0, 16) in the right leg region with a unique color.
-        let src_idx = (16 * 64) * 4;
-        old[src_idx..src_idx + 4].copy_from_slice(&[0xAA, 0xBB, 0xCC, 0xFF]);
+    fn a_legacy_skin_copies_each_limb_face_flipped_and_swaps_the_sides() {
+        let new = convert_64x32_to_64x64(&legacy_skin()).unwrap();
+        // Leg top (4..8, 16) flipped into (20..24, 48).
+        assert_eq!(pixel(&new, 20, 48), [7, 16, 1, 255]);
+        assert_eq!(pixel(&new, 23, 48), [4, 16, 1, 255]);
+        // The outer side of the right leg (0..4) is the inner side of the left
+        // one (24..28), the inner (8..12) the outer (16..20).
+        assert_eq!(pixel(&new, 24, 52), [3, 20, 1, 255]);
+        assert_eq!(pixel(&new, 16, 52), [11, 20, 1, 255]);
+        // The back keeps its place: 12..16 into 28..32.
+        assert_eq!(pixel(&new, 28, 63), [15, 31, 1, 255]);
+        // Arm front (44..48) into 36..40, flipped.
+        assert_eq!(pixel(&new, 36, 52), [47, 20, 1, 255]);
+        // The unused corners of the face rows stay empty.
+        assert_eq!(pixel(&new, 16, 48), [0, 0, 0, 0]);
+        assert_eq!(pixel(&new, 32, 48), [0, 0, 0, 0]);
+    }
 
-        let new = convert_64x32_to_64x64(&old).unwrap();
+    #[test]
+    fn a_hole_in_the_base_layer_shows_black_and_a_half_one_keeps_its_colour() {
+        let mut skin = vec![0u8; 64 * 64 * 4];
+        let set = |skin: &mut Vec<u8>, x: usize, y: usize, rgba: [u8; 4]| {
+            skin[(y * 64 + x) * 4..][..4].copy_from_slice(&rgba);
+        };
+        set(&mut skin, 20, 20, [200, 100, 50, 0]);
+        set(&mut skin, 21, 20, [200, 100, 50, 128]);
+        set(&mut skin, 40, 8, [9, 9, 9, 0]);
+        parse_user_skin(&mut skin);
+        assert_eq!(pixel(&skin, 20, 20), [0, 0, 0, 255], "body hole");
+        assert_eq!(pixel(&skin, 21, 20), [200, 100, 50, 255]);
+        assert_eq!(pixel(&skin, 20, 50), [0, 0, 0, 255], "left leg base");
+        // The hat has a transparent pixel, so it is kept, and stays clear.
+        assert_eq!(pixel(&skin, 40, 8), [0, 0, 0, 0]);
+    }
 
-        // The right leg (x:0..16, y:16..32) is mirrored to left leg (x:16..32, y:48..64).
-        // Source pixel at local (0, 0) of the 16-wide strip should appear at
-        // destination local (15, 0) due to horizontal flip: dst (16+15, 48) = (31, 48).
-        let dst_idx = (48 * 64 + 31) * 4;
-        assert_eq!(
-            &new[dst_idx..dst_idx + 4],
-            &[0xAA, 0xBB, 0xCC, 0xFF],
-            "right-leg pixel at src (0,16) should mirror to dst (31,48)"
-        );
+    #[test]
+    fn a_solid_outer_layer_is_hidden_and_one_with_holes_is_kept() {
+        let mut skin = vec![255u8; 64 * 64 * 4];
+        // One hole in the jacket (16..40, 32..48) keeps it.
+        skin[(40 * 64 + 20) * 4 + 3] = 0;
+        parse_user_skin(&mut skin);
+        assert_eq!(pixel(&skin, 40, 8)[3], 0, "solid hat hidden");
+        assert_eq!(pixel(&skin, 50, 50)[3], 0, "solid sleeve hidden");
+        assert_eq!(pixel(&skin, 30, 40)[3], 255, "jacket with a hole kept");
+        assert_eq!(pixel(&skin, 8, 8)[3], 255, "base untouched");
+    }
 
-        // The un-flipped position (16, 48) should NOT have our color.
-        let wrong_idx = (48 * 64 + 16) * 4;
-        assert_ne!(
-            &new[wrong_idx..wrong_idx + 4],
-            &[0xAA, 0xBB, 0xCC, 0xFF],
-            "mirrored copy must flip horizontally, not plain-copy"
-        );
+    #[test]
+    fn a_buffer_that_is_not_a_skin_is_left_alone() {
+        let mut odd = vec![7u8; 12];
+        parse_user_skin(&mut odd);
+        assert_eq!(odd, [7; 12]);
     }
 
     #[test]

@@ -24,7 +24,7 @@ use tokio::task::JoinSet;
 
 use crate::error::{image_error, AssetsError, AssetsResult};
 use crate::http::{Endpoints, HttpClient};
-use crate::skin::{base64_decode, convert_64x32_to_64x64, decode_png_bytes};
+use crate::skin::{base64_decode, convert_64x32_to_64x64, decode_png_bytes, parse_user_skin};
 
 /// Largest texture download accepted, in bytes (a 64x64 PNG is far smaller).
 const MAX_TEXTURE_BYTES: usize = 1 << 20;
@@ -114,21 +114,26 @@ pub fn is_trusted_texture_url(url: &str) -> bool {
         .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
 }
 
-/// Turns a decoded skin image into 64x64 RGBA; a legacy 64x32 skin is
-/// converted.
+/// Turns a decoded skin image into the 64x64 RGBA the client draws: a legacy
+/// 64x32 skin is converted, then the layers are made opaque or hidden as the
+/// 1.8 client does ([`parse_user_skin`]).
 ///
 /// # Errors
 ///
 /// [`AssetsError::Image`] for an image of any other size.
 pub fn skin_from_image(rgba: &[u8], width: u32, height: u32) -> AssetsResult<Vec<u8>> {
-    match (width, height) {
-        (64, 64) => Ok(rgba.to_vec()),
-        (64, 32) => convert_64x32_to_64x64(rgba),
-        _ => Err(image_error(
-            "skin",
-            format!("unsupported skin size {width}x{height}"),
-        )),
-    }
+    let mut skin = match (width, height) {
+        (64, 64) => rgba.to_vec(),
+        (64, 32) => convert_64x32_to_64x64(rgba)?,
+        _ => {
+            return Err(image_error(
+                "skin",
+                format!("unsupported skin size {width}x{height}"),
+            ))
+        }
+    };
+    parse_user_skin(&mut skin);
+    Ok(skin)
 }
 
 /// Checks that a decoded cape image is 64x32.
