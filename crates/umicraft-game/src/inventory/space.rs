@@ -9,7 +9,10 @@
 
 use umicraft_protocol::packets::play::ItemStack;
 
+use super::anvil::{self, AnvilState};
 use super::kind::{resolve_container_slot, SlotTarget, HOTBAR_START, PLAYER_SLOT_COUNT};
+use super::merchant;
+use super::payload::Trade;
 use super::player::PlayerInventory;
 use super::slot::SlotKind;
 use super::stack::{add_count, count, normalize};
@@ -20,6 +23,10 @@ pub struct ClickSpace<'a> {
     own: &'a mut [Option<ItemStack>],
     kinds: &'a [SlotKind],
     player_window: bool,
+    /// The offers and the selected one of a villager window.
+    merchant: Option<(&'a mut [Trade], usize)>,
+    /// The cost and name of an anvil window.
+    anvil: Option<&'a mut AnvilState>,
 }
 
 impl<'a> ClickSpace<'a> {
@@ -30,6 +37,8 @@ impl<'a> ClickSpace<'a> {
             own: &mut [],
             kinds,
             player_window: true,
+            merchant: None,
+            anvil: None,
         }
     }
 
@@ -44,7 +53,35 @@ impl<'a> ClickSpace<'a> {
             own,
             kinds,
             player_window: false,
+            merchant: None,
+            anvil: None,
         }
+    }
+
+    /// Gives an anvil window its state, so that the result is only taken
+    /// with the levels for it and taking it uses the inputs.
+    #[must_use]
+    pub fn with_anvil(mut self, state: &'a mut AnvilState) -> Self {
+        self.anvil = Some(state);
+        self
+    }
+
+    /// `Slot.canTakeStack`: true except for an anvil result the player cannot
+    /// pay for.
+    #[must_use]
+    pub fn can_take(&self, index: usize) -> bool {
+        match self.kind(index) {
+            SlotKind::AnvilResult => self.anvil.as_ref().is_some_and(|state| state.can_take()),
+            _ => true,
+        }
+    }
+
+    /// Gives a villager window its offers, so that taking the result pays
+    /// for it ([`Self::picked_up`]).
+    #[must_use]
+    pub fn with_merchant(mut self, trades: &'a mut [Trade], selected: usize) -> Self {
+        self.merchant = Some((trades, selected));
+        self
     }
 
     /// Number of slots of the window.
@@ -149,9 +186,16 @@ impl<'a> ClickSpace<'a> {
     }
 
     /// Removes `amount` items from a slot (`Slot.decrStackSize`), clearing
-    /// the slot when it runs empty.
+    /// the slot when it runs empty. A crafting or villager result always goes
+    /// whole (`InventoryCraftResult` and `InventoryMerchant.decrStackSize`
+    /// ignore the count), so a right click takes all of it.
     pub fn decrease(&mut self, index: usize, amount: i32) -> Option<ItemStack> {
+        let whole = matches!(
+            self.kind(index),
+            SlotKind::CraftingResult { .. } | SlotKind::MerchantResult | SlotKind::AnvilResult
+        );
         let stack = self.get_mut(index)?;
+        let amount = if whole { count(stack) } else { amount };
         let taken = super::stack::split(stack, amount);
         let empty = count(stack) == 0;
         if empty {
@@ -168,13 +212,27 @@ impl<'a> ClickSpace<'a> {
     }
 
     /// `Slot.onPickupFromSlot`: taking a crafting result consumes one item of
-    /// each ingredient. The result is cleared; the server sends the next one.
+    /// each ingredient (the result is cleared; the server sends the next one),
+    /// and taking a villager result pays the offer and fills the result again.
     pub fn picked_up(&mut self, index: usize) {
-        if let SlotKind::CraftingResult { grid_len } = self.kind(index) {
-            for slot in index + 1..=index + usize::from(grid_len) {
-                self.decrease(slot, 1);
+        match self.kind(index) {
+            SlotKind::CraftingResult { grid_len } => {
+                for slot in index + 1..=index + usize::from(grid_len) {
+                    self.decrease(slot, 1);
+                }
+                self.set(index, None);
             }
-            self.set(index, None);
+            SlotKind::MerchantResult => {
+                if let Some((trades, selected)) = self.merchant.as_mut() {
+                    merchant::take_result(self.own, trades, *selected);
+                }
+            }
+            SlotKind::AnvilResult => {
+                if let Some(state) = self.anvil.as_mut() {
+                    anvil::take_result(self.own, state);
+                }
+            }
+            _ => {}
         }
     }
 

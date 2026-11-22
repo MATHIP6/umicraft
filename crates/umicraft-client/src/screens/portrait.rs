@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The player model of the inventory screens, after
-//! `GuiInventory.drawEntityOnScreen`.
+//! The player model of the inventory screens and the horse of a horse
+//! window, after `GuiInventory.drawEntityOnScreen`.
 //!
 //! The model is drawn into the portrait block of the icon atlas
 //! ([`umicraft_render::PORTRAIT_KEY`]) and shown as a 64x64 GUI pixel item
@@ -10,7 +10,7 @@
 //! 16x16 box of the icon camera.
 
 use glam::{Mat4, Vec3};
-use umicraft_game::entity::EntityRenderSnapshot;
+use umicraft_game::entity::{EntityId, EntityRenderSnapshot};
 use umicraft_mesh::item::ItemMesh;
 use umicraft_ui::Rect;
 use umicraft_world::LightLevel;
@@ -57,6 +57,26 @@ pub(crate) const CREATIVE: Placement = Placement {
     head: 30.0,
 };
 
+/// The horse window (`GuiScreenHorseInventory`: 51, 60, 17, the pointer
+/// measured from `j + 75 - 50`, so 35 above the feet).
+pub(crate) const HORSE: Placement = Placement {
+    x: 51.0,
+    y: 60.0,
+    scale: 17.0,
+    head: 35.0,
+};
+
+/// Whose model a portrait shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Subject {
+    /// The local player's body.
+    LocalPlayer,
+    /// A tracked entity, such as the horse of a horse window.
+    Entity(EntityId),
+    /// The book of the enchanting table screen.
+    EnchantingBook,
+}
+
 /// Where a screen put the portrait in the last frame, for the render step that
 /// draws the model.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -67,6 +87,8 @@ pub(crate) struct Spot {
     pub gui_scale: u32,
     /// Where the model stands.
     pub placement: Placement,
+    /// Whose model it is.
+    pub subject: Subject,
 }
 
 impl Spot {
@@ -162,6 +184,7 @@ mod tests {
             origin: (100.0, 50.0),
             gui_scale: 2,
             placement: INVENTORY,
+            subject: Subject::LocalPlayer,
         };
         let head = (100.0 + 51.0 * 2.0, 50.0 + 25.0 * 2.0);
         assert_eq!(spot.mouse_offset(head), (0.0, 0.0));
@@ -230,7 +253,22 @@ mod tests {
             origin: (0.0, 0.0),
             gui_scale: 1,
             placement: CREATIVE,
+            subject: Subject::LocalPlayer,
         };
         assert_eq!(spot.mouse_offset((43.0, 15.0)), (0.0, 0.0));
+    }
+
+    #[test]
+    fn the_horse_stands_lower_and_smaller() {
+        let spot = Spot {
+            origin: (0.0, 0.0),
+            gui_scale: 1,
+            placement: HORSE,
+            subject: Subject::Entity(EntityId(7)),
+        };
+        // `j + 75 - 50`: the pointer is measured 25 pixels below the top.
+        assert_eq!(spot.mouse_offset((51.0, 25.0)), (0.0, 0.0));
+        let feet = HORSE.matrix((0.0, 0.0)).transform_point3(Vec3::ZERO);
+        assert!((feet.y - 58.0 / 4.0).abs() < 1e-4);
     }
 }

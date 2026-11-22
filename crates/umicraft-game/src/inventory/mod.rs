@@ -14,12 +14,16 @@
 //! own slots first, then the 27 backpack and the 9 hotbar slots
 //! ([`kind::resolve_container_slot`]).
 
+pub mod anvil;
 pub mod armor;
 pub mod click;
 pub mod creative;
 pub mod effect_list;
+pub mod enchant_book;
+pub mod enchant_names;
 pub mod kind;
 mod manager;
+pub mod merchant;
 pub mod payload;
 pub mod player;
 pub mod preview;
@@ -37,4 +41,4 @@ pub use kind::{
 pub use manager::{ClickCommand, ContainerWindow, WindowManager};
 pub use player::PlayerInventory;
 pub use preview::{drag_preview, DragPreview};
-pub use view::{ContainerView, WindowView};
+pub use view::{ContainerView, HorseWindow, WindowView};

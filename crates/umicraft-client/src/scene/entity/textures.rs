@@ -539,6 +539,16 @@ impl EntityTextures {
         renderer.render_portrait(&batches, held);
     }
 
+    /// Draws the enchanting screen's book into the portrait of the icon atlas;
+    /// `vertices` are already in the icon box
+    /// ([`crate::screens::enchant_book::book_vertices`]).
+    pub(crate) fn render_book(&self, vertices: &[EntityVertex], renderer: &mut Renderer) {
+        let textures = self.textures.borrow();
+        if let Some(texture) = textures.get(&TextureSlot::EnchantingBook) {
+            renderer.render_portrait(&[(vertices, texture.bind_group())], &ItemMesh::default());
+        }
+    }
+
     /// Creates the texture of every horse coat in `slots` that is not there yet.
     fn compose_missing_coats<'a>(
         &self,

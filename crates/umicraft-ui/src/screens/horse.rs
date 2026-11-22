@@ -18,33 +18,35 @@ const CHEST_ROWS: u32 = 3;
 /// saddle, armour, and 15 chest slots when the horse carries a chest.
 ///
 /// `GuiScreenHorseInventory` draws the chest backdrop for a chested horse and
-/// the armour slot frame when the horse can wear armour. The packet only
-/// announces the slot count, so a chest is inferred from a count above 2; the
-/// armour frame is always drawn because the type of the horse (donkeys and
-/// mules cannot wear armour) is not part of the window.
-pub(super) fn spec(own_slots: usize) -> ScreenSpec {
+/// the armour slot frame when the horse can wear armour (`armor`, the horse
+/// type 0). The packet only announces the slot count, so a chest is inferred
+/// from a count above 2. Without armour the slot stays in the window but is
+/// left out of the layout: `canBeHovered` is false, so vanilla neither draws
+/// nor clicks it.
+pub(super) fn spec(own_slots: usize, armor: bool) -> ScreenSpec {
     let chested = own_slots > 2;
-    let mut slots = vec![
-        SlotSpec {
-            index: 0,
-            x: 8,
-            y: 18,
-        },
-        SlotSpec {
+    let mut slots = vec![SlotSpec {
+        index: 0,
+        x: 8,
+        y: 18,
+    }];
+    let mut background = vec![Decoration::full((0, 0), (176, HEIGHT), (0, 0))];
+    if armor {
+        slots.push(SlotSpec {
             index: 1,
             x: 8,
             y: 36,
-        },
-    ];
-    let mut background = vec![Decoration::full((0, 0), (176, HEIGHT), (0, 0))];
+        });
+    }
     if chested {
         slots.extend(grid_slots(2, CHEST_COLUMNS, CHEST_ROWS, 80, 18));
         background.push(Decoration::full((0, HEIGHT), (90, 54), (79, 17)));
     }
-    background.push(Decoration::full((0, HEIGHT + 54), (18, 18), (7, 35)));
-    let player_first = slots.len();
+    if armor {
+        background.push(Decoration::full((0, HEIGHT + 54), (18, 18), (7, 35)));
+    }
     // Vanilla puts the backpack at y = 102 + (3 - 4) * 18 = 84.
-    slots.extend(player_inventory_slots(player_first, 84));
+    slots.extend(player_inventory_slots(own_slots.max(2), 84));
     ScreenSpec {
         texture: "container/horse",
         size: (176, HEIGHT),
@@ -59,7 +61,7 @@ mod tests {
 
     #[test]
     fn a_plain_horse_has_saddle_and_armour_slots() {
-        let spec = spec(2);
+        let spec = spec(2, true);
         assert_eq!(spec.slots.len(), 2 + 36);
         assert_eq!((spec.slots[0].x, spec.slots[0].y), (8, 18));
         assert_eq!((spec.slots[1].x, spec.slots[1].y), (8, 36));
@@ -69,11 +71,22 @@ mod tests {
 
     #[test]
     fn a_chested_horse_adds_fifteen_slots() {
-        let spec = spec(17);
+        let spec = spec(17, true);
         assert_eq!(spec.slots.len(), 17 + 36);
         assert_eq!((spec.slots[2].x, spec.slots[2].y), (80, 18));
         assert_eq!((spec.slots[16].x, spec.slots[16].y), (152, 54));
         assert_eq!((spec.slots[17].x, spec.slots[17].y), (8, 84));
         assert_eq!(spec.background.len(), 3);
+    }
+
+    #[test]
+    fn a_donkey_has_no_armour_slot_or_frame() {
+        let spec = spec(17, false);
+        assert_eq!(spec.slots.len(), 16 + 36);
+        assert!(spec.slots.iter().all(|slot| slot.index != 1));
+        assert_eq!((spec.slots[1].index, spec.slots[1].x), (2, 80));
+        // The backpack still starts after the 17 window slots.
+        assert_eq!((spec.slots[16].index, spec.slots[16].y), (17, 84));
+        assert_eq!(spec.background.len(), 2);
     }
 }

@@ -10,7 +10,7 @@
 
 use umicraft_protocol::packets::play::ItemStack;
 
-use super::{banner, potion, Rarity, TooltipLine, TooltipText, POTION};
+use super::{banner, book, potion, Rarity, TooltipLine, TooltipText, POTION};
 use crate::item_nbt::ItemDisplay;
 use crate::items;
 use crate::nbt::Nbt;
@@ -32,6 +32,7 @@ pub(super) fn name_line(
     display: &ItemDisplay,
     root: Option<&Nbt>,
     rarity: Rarity,
+    advanced: bool,
 ) -> TooltipLine {
     let colour = rarity.color();
     if let Some(custom) = &display.custom_name {
@@ -61,11 +62,16 @@ pub(super) fn name_line(
         .flatten()
     {
         potion
-    } else if def.name == FILLED_MAP {
+    } else if def.name == FILLED_MAP && !advanced {
         let suffix = TooltipText::literal(format!(" #{}", stack.damage));
         TooltipText::Concat(vec![name, suffix])
     } else if def.name == SPAWN_EGG {
         spawn_egg_name(name, stack.damage)
+    } else if let Some(title) = (def.name == book::WRITTEN_BOOK)
+        .then(|| book::title(root))
+        .flatten()
+    {
+        TooltipText::literal(title)
     } else {
         name
     };

@@ -295,6 +295,11 @@ and `crates/umicraft-client/src/entity_textures.rs` (since P5a: `scene/entity/`)
 
 ### 3.4 M9 inventory: defects
 
+> **Update (2026-11-22):** every defect below is fixed: `Click Window` with
+> prediction and rollback (P4, ADR-0025), item icons and tooltips (P3), the
+> container screens and their packets (P4d), and the last gaps on the
+> `p4-finish` branch. The list is kept as the state of 2026-10-26.
+
 - **`Click Window` is never sent**; no mouse handling for slots, no cursor
   item, so the acceptance criterion "items can be moved" is not met.
 - `Confirm Transaction`: rejected ids are echoed (good), but there is no

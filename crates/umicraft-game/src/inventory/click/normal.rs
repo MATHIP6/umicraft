@@ -29,6 +29,10 @@ pub(super) fn click(
     button: i8,
 ) -> Option<ItemStack> {
     let before = space.get(slot).cloned();
+    // `canTakeStack` guards every click on a slot that holds something.
+    if before.is_some() && !space.can_take(slot) {
+        return before;
+    }
     let held_fits = cursor.as_ref().map(|held| space.kind(slot).accepts(held));
     match (&before, held_fits) {
         (None, _) => place_into_empty(space, cursor, slot, button),
@@ -125,6 +129,9 @@ pub(super) fn clone_stack(space: &ClickSpace<'_>, cursor: &mut Option<ItemStack>
 
 /// Mode 4: the drop key removes one item (button 0) or the whole stack.
 pub(super) fn drop_from_slot(space: &mut ClickSpace<'_>, slot: usize, button: i8) {
+    if !space.can_take(slot) {
+        return;
+    }
     let Some(stack) = space.get(slot) else { return };
     let amount = if button == 0 { 1 } else { count(stack) };
     if space.decrease(slot, amount).is_some() {
@@ -233,6 +240,30 @@ mod tests {
         assert_eq!(cursor, Some(stack(1, 2)));
         click_with(&mut w, &mut cursor, ClickRequest::outside(false));
         assert!(cursor.is_none());
+    }
+
+    #[test]
+    fn an_outside_click_with_an_empty_cursor_changes_nothing() {
+        let mut w = TestWindow::player();
+        w.inv.set_slot(10, Some(stack(1, 5)));
+        let mut cursor = None;
+        for right in [false, true] {
+            let clicked = click_with(&mut w, &mut cursor, ClickRequest::outside_empty(right));
+            assert!(clicked.is_none());
+        }
+        assert!(cursor.is_none());
+        assert_eq!(w.inv.slot(10), Some(&stack(1, 5)));
+    }
+
+    #[test]
+    fn a_survival_pick_block_click_changes_nothing() {
+        let mut w = TestWindow::player();
+        w.inv.set_slot(10, Some(stack(1, 5)));
+        let mut cursor = None;
+        let clicked = click_with(&mut w, &mut cursor, ClickRequest::pick_block(10, 0));
+        assert!(clicked.is_none());
+        assert!(cursor.is_none());
+        assert_eq!(w.inv.slot(10), Some(&stack(1, 5)));
     }
 
     #[test]

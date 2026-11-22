@@ -259,4 +259,13 @@ mod tests {
         assert_eq!(search.len() - books.len(), tabbed);
         assert_eq!(search[0].item_id, 1);
     }
+
+    #[test]
+    fn book_levels_agree_with_the_enchantment_table() {
+        // The generated table and `crate::enchantments` must not drift apart.
+        for &(id, max_level) in BOOK_ENCHANTMENTS {
+            let def = crate::enchantments::lookup(id).expect("a 1.8 enchantment");
+            assert_eq!(i32::from(max_level), def.max_level, "enchantment {id}");
+        }
+    }
 }

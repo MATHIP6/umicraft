@@ -134,7 +134,7 @@ fn potion_type(id: u8) -> Option<&'static PotionType> {
 
 /// `Potion.getName()` of the potion `id`: the language key of the effect, or
 /// `None` for an id `Potion.potionTypes` leaves empty.
-pub(crate) fn effect_name_key(id: u8) -> Option<&'static str> {
+pub fn effect_name_key(id: u8) -> Option<&'static str> {
     potion_type(id).map(|potion| potion.name)
 }
 

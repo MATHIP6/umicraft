@@ -350,6 +350,7 @@ impl App {
             world_items: WorldItems::default(),
             entity_icons: EntityIcons::default(),
             portrait: None,
+            screen_book: None,
             anvil_field: AnvilField::default(),
             text_screens: TextScreens::default(),
             server_pack: server_pack_control::ServerPackRuntime::default(),

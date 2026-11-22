@@ -17,6 +17,7 @@
 //! assert!(matches!(sword.kind, ItemKind::Tool(..)));
 //! ```
 
+mod block_names;
 mod egg_table;
 mod fish;
 pub mod kind;
@@ -24,6 +25,7 @@ mod name_table;
 mod names;
 mod potion_color;
 mod potion_variants;
+mod subtype_table;
 mod table;
 pub mod tint;
 
@@ -63,6 +65,36 @@ pub fn lookup(id: i32) -> Option<&'static ItemDef> {
     let id = u16::try_from(id).ok()?;
     let index = table::ITEMS.binary_search_by_key(&id, |def| def.id).ok()?;
     table::ITEMS.get(index)
+}
+
+/// Whether the item has subtypes (`Item.getHasSubtypes`): wool, dyes, potions,
+/// maps... The advanced tooltip shows their damage after the id.
+#[must_use]
+pub fn has_subtypes(item_id: i16) -> bool {
+    u16::try_from(item_id).is_ok_and(|id| subtype_table::SUBTYPES.binary_search(&id).is_ok())
+}
+
+/// The unlocalised name of a block (`Block.getUnlocalizedName`, such as
+/// `tile.water`) found the way `Block.getBlockFromName` finds it: by registry
+/// name (with or without `minecraft:`), else by number, an unknown number
+/// giving air as the defaulted registry does. `None` for an unknown name.
+#[must_use]
+pub fn block_unlocalized_name(name: &str) -> Option<&'static str> {
+    let bare = name.strip_prefix("minecraft:").unwrap_or(name);
+    let by_name = block_names::BLOCKS
+        .iter()
+        .find(|(_, known, _)| *known == bare);
+    let entry = match by_name {
+        Some(entry) => entry,
+        None => {
+            let id = name.parse::<u16>().ok()?;
+            block_names::BLOCKS
+                .iter()
+                .find(|(known, _, _)| *known == id)
+                .unwrap_or(&block_names::BLOCKS[0])
+        }
+    };
+    Some(entry.2)
 }
 
 /// The food values of an item stack, `None` when the item is not food.

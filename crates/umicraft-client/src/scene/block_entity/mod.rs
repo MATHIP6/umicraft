@@ -21,6 +21,7 @@ mod banner_patterns;
 mod banner_texture;
 mod beacon;
 mod book;
+pub(crate) use book::facing;
 mod book_state;
 mod chest;
 mod end_portal;

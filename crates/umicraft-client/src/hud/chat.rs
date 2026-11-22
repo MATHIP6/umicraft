@@ -14,6 +14,7 @@ use umicraft_core::lang::Lang;
 use umicraft_game::chat::events::{hover_entity_lines, parse_hover_item};
 use umicraft_game::chat::{self, Color, HoverEvent, Run};
 use umicraft_game::inventory::tooltip::tooltip_advanced;
+use umicraft_game::server::maps::MapStore;
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::{ChatLineView, ChatRunView};
 use umicraft_ui::widgets::tooltip::TooltipRow;
@@ -83,10 +84,14 @@ fn run_view(run: &Run) -> ChatRunView {
 /// tooltip, or a red `umicraft.hover.invalidItem`; `show_entity` shows only with advanced
 /// tooltips on. `show_achievement` needs the statistics list, which the
 /// client does not have, so it shows nothing.
-pub(crate) fn hover_rows(hover: &HoverEvent, advanced: bool) -> Vec<TooltipRow> {
+pub(crate) fn hover_rows(
+    hover: &HoverEvent,
+    advanced: bool,
+    maps: Option<&MapStore>,
+) -> Vec<TooltipRow> {
     match hover {
         HoverEvent::ShowText(runs) => text_rows(runs),
-        HoverEvent::ShowItem(snbt) => item_rows(snbt, advanced),
+        HoverEvent::ShowItem(snbt) => item_rows(snbt, advanced, maps),
         HoverEvent::ShowEntity(snbt) if advanced => hover_entity_lines(snbt).map_or_else(
             || vec![row(lang().tr("umicraft.hover.invalidEntity"), RED)],
             |lines| lines.into_iter().map(|line| row(&line, WHITE)).collect(),
@@ -126,7 +131,7 @@ fn text_rows(runs: &[Run]) -> Vec<TooltipRow> {
     rows
 }
 
-fn item_rows(snbt: &str, advanced: bool) -> Vec<TooltipRow> {
+fn item_rows(snbt: &str, advanced: bool, maps: Option<&MapStore>) -> Vec<TooltipRow> {
     let Some(item) = parse_hover_item(snbt).and_then(|item| {
         Some(ItemStack {
             item_id: i16::try_from(item.id).ok()?,
@@ -137,6 +142,7 @@ fn item_rows(snbt: &str, advanced: bool) -> Vec<TooltipRow> {
     }) else {
         return vec![row(lang().tr("umicraft.hover.invalidItem"), RED)];
     };
+    let advanced = advanced.then(|| tooltip::advanced_facts(&item, maps));
     tooltip_advanced(&item, advanced)
         .iter()
         .map(|line| row(&tooltip::resolve(&line.text), line.color.rgb()))
@@ -204,16 +210,19 @@ mod tests {
 
     #[test]
     fn show_item_is_the_item_tooltip_and_a_broken_item_is_invalid() {
-        let rows = item_rows(r#"{id:"minecraft:diamond_sword",Damage:0s}"#, false);
+        let rows = item_rows(r#"{id:"minecraft:diamond_sword",Damage:0s}"#, false, None);
         // No language file in the test: the legacy key reads as its words.
         assert_eq!(rows[0].text, "Sword Diamond");
-        assert_eq!(item_rows("garbage", false), vec![row("Invalid Item!", RED)]);
+        assert_eq!(
+            item_rows("garbage", false, None),
+            vec![row("Invalid Item!", RED)]
+        );
     }
 
     #[test]
     fn show_entity_needs_advanced_tooltips() {
         let hover = HoverEvent::ShowEntity(r#"{id:"x",name:"Pig"}"#.to_string());
-        assert!(hover_rows(&hover, false).is_empty());
-        assert_eq!(hover_rows(&hover, true)[0].text, "Pig");
+        assert!(hover_rows(&hover, false, None).is_empty());
+        assert_eq!(hover_rows(&hover, true, None)[0].text, "Pig");
     }
 }

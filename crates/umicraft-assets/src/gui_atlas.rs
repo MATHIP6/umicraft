@@ -51,6 +51,8 @@ pub fn coordinate_space(name: &str, width: u32, height: u32) -> (u32, u32) {
         "container/stats_icons" => (128, 128),
         // Addressed like the sign model's 64 x 32 sheet (`ModelSign`).
         "entity/sign" => (64, 32),
+        // `FontRenderer` addresses a glyph grid in 128ths, whatever its size.
+        _ if name.starts_with("font/") => (128, 128),
         "options_background" => (width, height),
         _ if name.starts_with("misc/")
             || name.starts_with("blocks/")
@@ -249,6 +251,41 @@ impl GuiAtlas {
     #[must_use]
     pub fn region(&self, name: &str) -> Option<&GuiRegion> {
         self.regions.get(name)
+    }
+
+    /// The advance of each of the 256 glyphs of the font grid `name`, in the
+    /// 8-pixel cells of the 1.8 font (`FontRenderer.readFontTexture`): the
+    /// rightmost column of the cell that has a visible pixel, scaled to 8
+    /// pixels and rounded, plus one. `None` when the atlas has no such region.
+    ///
+    /// The space gets no special width here; `FontRenderer.getCharWidth`
+    /// answers 4 for it.
+    #[must_use]
+    pub fn font_widths(&self, name: &str) -> Option<[u8; 256]> {
+        let region = self.region(name)?;
+        let (cell_w, cell_h) = (region.pixel_width / 16, region.pixel_height / 16);
+        if cell_w == 0 || cell_h == 0 {
+            return None;
+        }
+        let origin_x = (region.u_min * self.width as f32).round() as u32;
+        let origin_y = (region.v_min * self.height as f32).round() as u32;
+        let alpha = |x: u32, y: u32| {
+            let index = (y as usize * self.width as usize + x as usize) * 4 + 3;
+            self.pixels.get(index).copied().unwrap_or(0)
+        };
+        let scale = 8.0 / cell_w as f32;
+        Some(std::array::from_fn(|glyph| {
+            let (left, top) = (
+                origin_x + glyph as u32 % 16 * cell_w,
+                origin_y + glyph as u32 / 16 * cell_h,
+            );
+            let used = (0..cell_w)
+                .rev()
+                .find(|&x| (0..cell_h).any(|y| alpha(left + x, top + y) != 0))
+                .map_or(0, |x| x + 1);
+            // `(int) (0.5D + (double) ((float) i2 * f)) + 1`.
+            (0.5 + f64::from(used as f32 * scale)) as u8 + 1
+        }))
     }
 
     /// All named regions.
@@ -461,6 +498,45 @@ mod tests {
             height,
             pixels: vec![255; (width * height * 4) as usize],
         }
+    }
+
+    /// A 128 x 128 font grid with glyph `a` (97) five pixels wide and glyph
+    /// `b` (98) filled to its last column.
+    fn font_grid(name: &str, side: u32) -> GuiImage {
+        let mut pixels = vec![0; (side * side * 4) as usize];
+        let cell = side / 16;
+        let mut fill = |glyph: u32, columns: u32| {
+            let (left, top) = (glyph % 16 * cell, glyph / 16 * cell);
+            for x in 0..columns {
+                let index = ((top + 2) * side + left + x) * 4 + 3;
+                pixels[index as usize] = 255;
+            }
+        };
+        fill(97, 5 * cell / 8);
+        fill(98, cell);
+        GuiImage {
+            name: name.to_string(),
+            width: side,
+            height: side,
+            pixels,
+        }
+    }
+
+    #[test]
+    fn font_widths_follow_read_font_texture() {
+        for side in [128, 256] {
+            let atlas = pack_gui_atlas(vec![
+                test_image("x", 176, 166),
+                font_grid("font/ascii_sga", side),
+            ]);
+            let widths = atlas.font_widths("font/ascii_sga").expect("a font region");
+            assert_eq!((widths[97], widths[98]), (6, 9), "side {side}");
+            // An empty cell is one pixel wide, the space included.
+            assert_eq!((widths[0], widths[32]), (1, 1));
+        }
+        assert!(pack_gui_atlas(Vec::new())
+            .font_widths("font/ascii_sga")
+            .is_none());
     }
 
     #[test]

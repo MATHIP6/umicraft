@@ -9,6 +9,9 @@ use super::super::space::ClickSpace;
 /// When the hotbar item cannot go into the slot, it moves to the first empty
 /// inventory slot instead; with no room nothing happens.
 pub(super) fn number_key(space: &mut ClickSpace<'_>, slot: usize, key: usize) {
+    if !space.can_take(slot) {
+        return;
+    }
     let hotbar = ClickSpace::hotbar_slot(key);
     let hotbar_item = space.inventory().slot(hotbar).cloned();
     let fits_slot = |space: &ClickSpace<'_>| {

@@ -37,6 +37,7 @@ use crate::resources::entity_icons::EntityIcons;
 use crate::scene::item_world::WorldItems;
 use crate::screens::anvil_field::AnvilField;
 use crate::screens::creative::input::CreativeInput;
+use crate::screens::enchant_book::BookClock;
 use crate::screens::inventory::input::InventoryInput;
 use crate::screens::menu_flow::{MenuCommand, MenuFlow};
 use crate::screens::portrait::Spot;
@@ -207,6 +208,8 @@ struct App {
     entity_icons: EntityIcons,
     /// Where the inventory screen put the player model in the last frame.
     portrait: Option<Spot>,
+    /// The book of the enchanting table screen while it is open.
+    screen_book: Option<BookClock>,
     /// The name field of the anvil screen.
     anvil_field: AnvilField,
     /// The open book or sign screen.

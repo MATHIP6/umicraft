@@ -64,6 +64,7 @@ mod digging;
 mod entities;
 mod event_order;
 mod game_loop;
+mod horse_window;
 mod hotbar;
 mod hud;
 mod inventory_key;

@@ -273,7 +273,11 @@ impl App {
             .as_ref()
             .and_then(|run| run.hover.as_ref())
             .map(|hover| {
-                crate::hud::chat::hover_rows(hover, self.options.controls.advanced_tooltips)
+                crate::hud::chat::hover_rows(
+                    hover,
+                    self.options.controls.advanced_tooltips,
+                    self.world.as_ref().map(|world| world.maps().as_ref()),
+                )
             })
             .unwrap_or_default();
         let pointer = [self.input.pointer.0, self.input.pointer.1];
@@ -329,6 +333,7 @@ impl App {
                         caret_visible: (self.clock.started.elapsed().as_millis() / 300)
                             .is_multiple_of(2),
                         effects: &world.hud().effects,
+                        maps: Some(world.maps()),
                     };
                     let layout =
                         CreativeLayout::for_effects(width, height, !scene.effects.is_empty());

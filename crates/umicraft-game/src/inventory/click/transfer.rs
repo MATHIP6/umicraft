@@ -41,6 +41,9 @@ impl Plan {
 /// Returns a copy of the stack as it was before the first move, the "clicked
 /// item" of the packet.
 pub(super) fn shift_click(space: &mut ClickSpace<'_>, slot: usize) -> Option<ItemStack> {
+    if !space.can_take(slot) {
+        return None;
+    }
     let first = transfer_stack(space, slot)?;
     for _ in 0..MAX_REPEATS {
         let same_item_left = space.get(slot).is_some_and(|s| s.item_id == first.item_id);

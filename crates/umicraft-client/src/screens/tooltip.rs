@@ -12,7 +12,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use umicraft_core::lang::Lang;
-use umicraft_game::inventory::tooltip::{tooltip_advanced, TooltipLine, TooltipText};
+use umicraft_game::inventory::tooltip::{tooltip_advanced, Advanced, TooltipLine, TooltipText};
+use umicraft_game::server::maps::MapStore;
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_ui::widgets::tooltip::{self, TooltipRow};
 use umicraft_ui::{FontAtlas, Rect, Ui};
@@ -31,9 +32,24 @@ pub(crate) fn set_advanced(on: bool) {
     ADVANCED.store(on, Ordering::Relaxed);
 }
 
-/// The tooltip lines of `stack` as the player's setting asks for them.
-pub(crate) fn item_lines(stack: &ItemStack) -> Vec<TooltipLine> {
-    tooltip_advanced(stack, ADVANCED.load(Ordering::Relaxed))
+/// The tooltip lines of `stack` as the player's setting asks for them;
+/// `maps` gives a filled map its scale in advanced mode.
+pub(crate) fn item_lines(stack: &ItemStack, maps: Option<&MapStore>) -> Vec<TooltipLine> {
+    let advanced = ADVANCED
+        .load(Ordering::Relaxed)
+        .then(|| advanced_facts(stack, maps));
+    tooltip_advanced(stack, advanced)
+}
+
+/// What the advanced tooltip of `stack` needs from the world: the scale of
+/// the map a filled map shows (`ItemMap.getMapData`, the map id is the
+/// damage), when the server sent it.
+pub(crate) fn advanced_facts(stack: &ItemStack, maps: Option<&MapStore>) -> Advanced {
+    Advanced {
+        map_scale: maps
+            .and_then(|maps| maps.get(i32::from(stack.damage)))
+            .map(|map| map.scale),
+    }
 }
 
 /// The text of a tooltip text in the current language.
@@ -175,9 +191,10 @@ mod tests {
             damage: 61,
             nbt: None,
         };
-        let lines = tooltip_advanced(&stack, true);
-        let last = lines.last().expect("lines");
-        assert_eq!(resolve_in(&lang(), &last.text), "Wear: 1500 / 1561");
+        let lines = tooltip_advanced(&stack, Some(Advanced::default()));
+        // The durability comes just before the registry name.
+        let durability = &lines[lines.len() - 2];
+        assert_eq!(resolve_in(&lang(), &durability.text), "Wear: 1500 / 1561");
     }
 
     #[test]

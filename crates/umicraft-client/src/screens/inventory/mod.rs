@@ -5,5 +5,6 @@
 
 pub(crate) mod custom_gui;
 pub(crate) mod draw;
+pub(crate) mod galactic;
 pub(crate) mod input;
 pub(crate) mod winit_keys;

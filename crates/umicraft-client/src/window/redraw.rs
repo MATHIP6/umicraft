@@ -32,9 +32,11 @@ use crate::resources::sky::CustomSkyFrame;
 use crate::scene::block_entity::{mesh_block_entities, BlockEntityScene};
 use crate::scene::item_world::{entity_items, push_held_item, WorldItems};
 use crate::scene::map::map_id_of;
-use crate::screens::portrait::{carry, turned_towards};
+use crate::screens::enchant_book::{book_vertices, BookClock};
+use crate::screens::portrait::{carry, turned_towards, Subject};
 use crate::screens::Screen;
 use crate::world_view::WorldView;
+use umicraft_game::inventory::enchant_book::BookTick;
 
 /// The frame-rate cap in force: the option, and at most [`BACKGROUND_FPS`] without
 /// the focus.
@@ -634,14 +636,26 @@ impl App {
         }
     }
 
-    /// Draws the player into the portrait of the inventory screen, turned
-    /// towards the mouse.
+    /// Draws the player (or the horse of a horse window) into the portrait of
+    /// the inventory screen, turned towards the mouse; on the enchanting
+    /// screen, the book.
     fn draw_portrait(&mut self, renderer: &mut Renderer) {
-        if let (Some(spot), Some(textures), Some(body)) = (
-            self.portrait,
-            self.assets.entity_textures.as_ref(),
-            self.world.as_ref().and_then(|world| world.local_body()),
-        ) {
+        if self.portrait.map(|spot| spot.subject) == Some(Subject::EnchantingBook) {
+            self.draw_screen_book(renderer);
+            return;
+        }
+        self.screen_book = None;
+        let body = self
+            .portrait
+            .zip(self.world.as_ref())
+            .and_then(|(spot, world)| match spot.subject {
+                Subject::LocalPlayer => world.local_body(),
+                Subject::Entity(id) => world.entity_body(id),
+                Subject::EnchantingBook => None,
+            });
+        if let (Some(spot), Some(textures), Some(body)) =
+            (self.portrait, self.assets.entity_textures.as_ref(), body)
+        {
             let mouse = spot.mouse_offset(self.input.pointer);
             let posed = turned_towards(body, mouse);
             let matrix = spot.placement.matrix(mouse);
@@ -659,6 +673,30 @@ impl App {
             }
             textures.render_portrait(&posed, matrix, &held, renderer);
         }
+    }
+
+    /// Steps and draws the book of the enchanting table screen into the
+    /// portrait: it opens while a row has a cost and turns its pages when the
+    /// item changes (`GuiEnchantment.func_147068_g`).
+    fn draw_screen_book(&mut self, renderer: &mut Renderer) {
+        let (Some(world), Some(textures)) =
+            (self.world.as_ref(), self.assets.entity_textures.as_ref())
+        else {
+            return;
+        };
+        let Some(container) = world.window_view().container.as_ref() else {
+            return;
+        };
+        let now = Instant::now();
+        let tick = BookTick {
+            item: container.slots.first().and_then(Option::as_ref),
+            offers: container.properties.iter().take(3).any(|&level| level != 0),
+        };
+        let pose = self
+            .screen_book
+            .get_or_insert_with(|| BookClock::new(now))
+            .pose_at(now, tick);
+        textures.render_book(&book_vertices(pose), renderer);
     }
 
     /// Records the input latency of the frame for F3: how long the game

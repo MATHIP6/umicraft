@@ -7,15 +7,24 @@
 //! window slot) and issues the draw calls. It runs on the render thread and
 //! never touches the game state.
 
+use std::sync::Arc;
+
 use umicraft_assets::GuiAtlas;
+use umicraft_game::entity::EntityId;
 use umicraft_game::inventory::effect_list::EffectLine;
+use umicraft_game::inventory::tooltip::{
+    effect_name_key, enchant_row_lines, EnchantRow, TooltipColor, TooltipLine, TooltipText,
+};
 use umicraft_game::inventory::{
     resolve_container_slot, ContainerView, DragPreview, SlotTarget, WindowKind, WindowView,
 };
+use umicraft_game::server::maps::MapStore;
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::PORTRAIT_KEY;
 use umicraft_ui::screens::{
-    Hotspot, Label, ScreenKind, ScreenLayout, ScreenState, Sheet, SpriteRect, TRADE_OFFER_ITEMS,
+    anvil_cost_line, beacon_tooltip, BeaconTooltip, CostText, Hotspot, Label, ScreenKind,
+    ScreenLayout, ScreenState, Sheet, SpriteRect, COST_RIGHT, COST_Y, TRADE_DISABLED_CROSSES,
+    TRADE_OFFER_ITEMS,
 };
 use umicraft_ui::styled_text::{draw_styled, styled_width, StyledRun};
 use umicraft_ui::widgets::slot;
@@ -24,8 +33,10 @@ use umicraft_ui::{draw_item, FontAtlas, Rect, TextStyle, Ui};
 use crate::resources::item_icons::{slot_item, ItemView};
 use crate::screens::anvil_field::FieldView;
 use crate::screens::effect_list::draw_effect_list;
+use crate::screens::enchant_book;
+use crate::screens::inventory::galactic::draw_enchant_names;
 use crate::screens::inventory::input::Context;
-use crate::screens::portrait::{self, Spot};
+use crate::screens::portrait::{self, Spot, Subject};
 use crate::screens::tooltip::draw_tooltip;
 
 /// Number of backpack and hotbar slots after a container's own slots.
@@ -61,6 +72,7 @@ pub fn screen_kind(container: Option<&ContainerView>) -> ScreenKind {
         WindowKind::Villager => ScreenKind::Villager,
         WindowKind::Horse => ScreenKind::Horse {
             own_slots: u8::try_from(container.slots.len()).unwrap_or(u8::MAX),
+            armor: container.horse.is_none_or(|horse| horse.wears_armor),
         },
         WindowKind::Chest => ScreenKind::Chest {
             rows: rows(container.slots.len()),
@@ -83,18 +95,16 @@ fn screen_layout(viewport: Rect, kind: ScreenKind, has_effects: bool) -> ScreenL
 pub(crate) const CREATIVE_GAMEMODE: u8 = 1;
 
 /// The layout of the open screen in `viewport` and what the input layer needs
-/// to know about the window (`gamemode` is the wire id of the game mode,
-/// `has_effects` whether the player has a potion effect).
+/// to know about the window (`has_effects` whether the player has a potion
+/// effect).
 pub fn screen_input(
     viewport: Rect,
     view: &WindowView,
-    gamemode: u8,
     has_effects: bool,
 ) -> (ScreenLayout, Context) {
     let layout = screen_layout(viewport, screen_kind(view.container.as_ref()), has_effects);
     let context = Context {
         cursor_has_item: view.cursor.is_some(),
-        creative: gamemode == CREATIVE_GAMEMODE,
     };
     (layout, context)
 }
@@ -115,6 +125,8 @@ pub(crate) struct ScreenFacts {
     pub caret_visible: bool,
     /// The potion effects listed beside the player inventory.
     pub effects: Vec<EffectLine>,
+    /// The maps the server sent, for the advanced tooltip of a filled map.
+    pub maps: Option<Arc<MapStore>>,
     /// The atlas region a pack replaces the picture of the screen with
     /// (Custom GUIs), `None` for the vanilla picture.
     pub custom_texture: Option<String>,
@@ -150,26 +162,72 @@ pub(crate) fn screen_state<'a>(
         hover,
         trade_previous: container.selected_trade > 0,
         trade_next: container.selected_trade + 1 < trades,
+        trade_disabled: container
+            .trades
+            .get(container.selected_trade)
+            .is_some_and(|trade| trade.disabled),
     }
 }
 
+/// The offset of the `FontRenderer` drop shadow, in GUI pixels.
+const DROP_SHADOW: &[(f32, f32)] = &[(1.0, 1.0)];
+/// The thicker shadow of the anvil cost line: `GuiRepair` draws the shadow
+/// colour below, right and below-right of the text.
+const COST_SHADOW: &[(f32, f32)] = &[(0.0, 1.0), (1.0, 0.0), (1.0, 1.0)];
+
 /// Draws the labels of a screen with the vanilla drop shadow.
 fn draw_labels(ui: &mut Ui, atlas: &FontAtlas, layout: &ScreenLayout, labels: &[Label]) {
-    let scale = layout.scale as f32;
     for label in labels {
-        let width = atlas.measure(&label.text, scale);
-        let x = layout.background.x + label.right as f32 * scale - width;
-        let y = layout.background.y + label.y as f32 * scale;
-        let color = rgb(label.color);
-        let shadow = [color[0] * 0.25, color[1] * 0.25, color[2] * 0.25, 1.0];
-        ui.draw().text(
-            [x + scale, y + scale],
-            label.text.clone(),
-            TextStyle::new(scale, shadow),
-        );
-        ui.draw()
-            .text([x, y], label.text.clone(), TextStyle::new(scale, color));
+        draw_label(ui, atlas, layout, label, DROP_SHADOW);
     }
+}
+
+/// Draws one right-aligned label over copies in the shadow colour at
+/// `shadow` offsets (`(color & 0xFCFCFC) >> 2`, as `FontRenderer` and
+/// `GuiRepair` compute it).
+fn draw_label(
+    ui: &mut Ui,
+    atlas: &FontAtlas,
+    layout: &ScreenLayout,
+    label: &Label,
+    shadow: &[(f32, f32)],
+) {
+    let scale = layout.scale as f32;
+    let width = atlas.measure(&label.text, scale);
+    let x = layout.background.x + label.right as f32 * scale - width;
+    let y = layout.background.y + label.y as f32 * scale;
+    let shadow_color = rgb((label.color & 0xFC_FC_FC) >> 2);
+    for &(dx, dy) in shadow {
+        ui.draw().text(
+            [x + dx * scale, y + dy * scale],
+            label.text.clone(),
+            TextStyle::new(scale, shadow_color),
+        );
+    }
+    ui.draw().text(
+        [x, y],
+        label.text.clone(),
+        TextStyle::new(scale, rgb(label.color)),
+    );
+}
+
+/// Draws the cost line of the anvil, if any (`GuiRepair`).
+fn draw_anvil_cost(ui: &mut Ui, atlas: &FontAtlas, layout: &ScreenLayout, state: &ScreenState<'_>) {
+    let Some(line) = anvil_cost_line(state) else {
+        return;
+    };
+    let lang = crate::language::current();
+    let text = match line.text {
+        CostText::Cost(cost) => lang.tr_args("container.repair.cost", &[&cost.to_string()]),
+        CostText::TooExpensive => lang.tr("container.repair.expensive").to_string(),
+    };
+    let label = Label {
+        text,
+        right: COST_RIGHT,
+        y: COST_Y,
+        color: line.color,
+    };
+    draw_label(ui, atlas, layout, &label, COST_SHADOW);
 }
 
 /// Colour of the captions (`4210752`, `0x404040`).
@@ -333,12 +391,13 @@ fn rgb(value: u32) -> [f32; 4] {
     [channel(16), channel(8), channel(0), 1.0]
 }
 
-/// The number of slots the container adds in front of the player part.
+/// The number of slots the container adds in front of the player part. A
+/// horse window keeps its armour slot when the layout leaves it out.
 fn own_slot_count(layout: &ScreenLayout, kind: ScreenKind) -> usize {
-    if kind == ScreenKind::Player {
-        0
-    } else {
-        layout.slots.len().saturating_sub(PLAYER_PART_LEN)
+    match kind {
+        ScreenKind::Player => 0,
+        ScreenKind::Horse { own_slots, .. } => usize::from(own_slots),
+        _ => layout.slots.len().saturating_sub(PLAYER_PART_LEN),
     }
 }
 
@@ -352,6 +411,38 @@ fn stack_at(view: &WindowView, own_len: usize, index: usize) -> Option<&ItemStac
         SlotTarget::Container(i) => container.slots.get(i)?.as_ref(),
         SlotTarget::Player(i) => view.player_slots.get(i)?.as_ref(),
     }
+}
+
+/// Where the screen shows a model: the player in the survival inventory,
+/// the horse in a horse window (`GuiScreenHorseInventory`), the book of the
+/// enchanting table (`GuiEnchantment`).
+fn portrait_spot(
+    layout: &ScreenLayout,
+    kind: ScreenKind,
+    container: Option<&ContainerView>,
+) -> Option<Spot> {
+    let (placement, subject) = match kind {
+        ScreenKind::Player => (portrait::INVENTORY, Subject::LocalPlayer),
+        ScreenKind::Horse { .. } => {
+            let horse = container?.horse?;
+            (portrait::HORSE, Subject::Entity(EntityId(horse.entity_id)))
+        }
+        ScreenKind::EnchantingTable => (enchant_book::BOOK, Subject::EnchantingBook),
+        _ => return None,
+    };
+    Some(Spot {
+        origin: (layout.background.x, layout.background.y),
+        gui_scale: layout.scale,
+        placement,
+        subject,
+    })
+}
+
+/// Whether window slot `index` of the open screen holds a stack
+/// (`Slot.getHasStack`, which the pick-block and drop keys need).
+pub(crate) fn slot_has_stack(view: &WindowView, layout: &ScreenLayout, index: usize) -> bool {
+    let own_len = own_slot_count(layout, screen_kind(view.container.as_ref()));
+    stack_at(view, own_len, index).is_some()
 }
 
 /// Draws the inventory or container screen as a modal overlay, including the
@@ -379,7 +470,8 @@ pub(crate) fn draw_inventory_overlay(
         custom.or_else(|| atlas.region(layout.spec.texture))
     });
     let hover = ui.pointer().and_then(|[x, y]| layout.hotspot_at((x, y)));
-    let dynamic = kind.dynamic(&screen_state(view, facts, hover));
+    let state = screen_state(view, facts, hover);
+    let dynamic = kind.dynamic(&state);
 
     match region {
         Some(region) => {
@@ -397,16 +489,18 @@ pub(crate) fn draw_inventory_overlay(
         }
         None => ui.draw().rect(layout.background, FALLBACK_BACKGROUND),
     }
+    if kind == ScreenKind::EnchantingTable {
+        draw_enchant_names(ui, &layout, gui_atlas, &state);
+    }
     draw_labels(ui, atlas, &layout, &dynamic.labels);
     draw_captions(ui, atlas, &layout, (kind, view.container.as_ref()));
+    if kind == ScreenKind::Anvil {
+        draw_anvil_cost(ui, atlas, &layout, &state);
+    }
     if let Some(field) = &facts.anvil {
         draw_name_field(ui, atlas, &layout, field, facts.caret_visible);
     }
-    let spot = (kind == ScreenKind::Player).then_some(Spot {
-        origin: (layout.background.x, layout.background.y),
-        gui_scale: layout.scale,
-        placement: portrait::INVENTORY,
-    });
+    let spot = portrait_spot(&layout, kind, view.container.as_ref());
     if let Some(spot) = &spot {
         ui.draw().item(PORTRAIT_KEY, spot.rect(), false);
     }
@@ -433,7 +527,22 @@ pub(crate) fn draw_inventory_overlay(
     draw_cursor_item(ui, atlas, layout.scale, cursor, items);
     if view.cursor.is_none() {
         let hovered = hovered_stack(ui, &layout, view, own_len).or(offer);
-        draw_hovered_tooltip(ui, atlas, viewport, &layout, hovered);
+        draw_hovered_tooltip(
+            ui,
+            atlas,
+            viewport,
+            &layout,
+            (hovered, facts.maps.as_deref()),
+        );
+    }
+    if offer.is_none() && state.trade_disabled {
+        draw_deprecated_tooltip(ui, atlas, viewport, &layout);
+    }
+    if let Some(tooltip) = hover.and_then(|hotspot| beacon_tooltip(hotspot, &state)) {
+        draw_beacon_tooltip(ui, atlas, viewport, &layout, tooltip);
+    }
+    if let Some(Hotspot::Enchant(row)) = hover {
+        draw_enchant_tooltip(ui, atlas, viewport, &layout, &state, row);
     }
     // `InventoryEffectRenderer.drawScreen` draws the list after the rest of
     // the screen, the held stack and the tooltip included.
@@ -499,13 +608,122 @@ fn draw_hovered_tooltip(
     atlas: &FontAtlas,
     viewport: Rect,
     layout: &ScreenLayout,
-    stack: Option<&ItemStack>,
+    (stack, maps): (Option<&ItemStack>, Option<&MapStore>),
 ) {
     let (Some(stack), Some(pointer)) = (stack, ui.pointer()) else {
         return;
     };
-    let lines = crate::screens::tooltip::item_lines(stack);
+    let lines = crate::screens::tooltip::item_lines(stack, maps);
     draw_tooltip(ui, atlas, viewport, layout.scale as f32, pointer, &lines);
+}
+
+/// Shows `merchant.deprecated` over the crosses of a used-up offer
+/// (`GuiMerchant.drawScreen`, `drawCreativeTabHoveringText`: one white line).
+fn draw_deprecated_tooltip(ui: &mut Ui, atlas: &FontAtlas, viewport: Rect, layout: &ScreenLayout) {
+    let Some(pointer) = ui.pointer() else {
+        return;
+    };
+    let scale = layout.scale as f32;
+    let over_cross = TRADE_DISABLED_CROSSES.iter().any(|&(x, y, w, h)| {
+        Rect::new(
+            layout.background.x + x as f32 * scale,
+            layout.background.y + y as f32 * scale,
+            w as f32 * scale,
+            h as f32 * scale,
+        )
+        .contains(pointer)
+    });
+    if over_cross {
+        let text = TooltipText::Translation {
+            key: "merchant.deprecated".into(),
+            args: Vec::new(),
+        };
+        draw_text_tooltip(ui, atlas, viewport, layout, text);
+    }
+}
+
+/// Shows the tooltip of a hovered beacon button: the power name, with " II"
+/// on the last tier, or `gui.done` / `gui.cancel` (`GuiBeacon`).
+fn draw_beacon_tooltip(
+    ui: &mut Ui,
+    atlas: &FontAtlas,
+    viewport: Rect,
+    layout: &ScreenLayout,
+    tooltip: BeaconTooltip,
+) {
+    let key = |key: &str| TooltipText::Translation {
+        key: key.into(),
+        args: Vec::new(),
+    };
+    let text = match tooltip {
+        BeaconTooltip::Done => key("gui.done"),
+        BeaconTooltip::Cancel => key("gui.cancel"),
+        BeaconTooltip::Power { effect, level_two } => {
+            let Some(name) = u8::try_from(effect).ok().and_then(effect_name_key) else {
+                return;
+            };
+            let name = crate::language::current().tr(name).to_string();
+            TooltipText::Literal(if level_two { name + " II" } else { name })
+        }
+    };
+    draw_text_tooltip(ui, atlas, viewport, layout, text);
+}
+
+/// Top of the first enchanting row and the distance between rows.
+const ENCHANT_ROW_TOP: f32 = 14.0;
+const ENCHANT_ROW_STEP: f32 = 19.0;
+/// Height of the part of a row that shows its tooltip: 17 of its 19 pixels
+/// (`isPointInRegion(60, 14 + 19 * j, 108, 17)`).
+const ENCHANT_TOOLTIP_HEIGHT: f32 = 17.0;
+
+/// Shows the clue and the cost of a hovered enchanting row
+/// (`GuiEnchantment.drawScreen`).
+fn draw_enchant_tooltip(
+    ui: &mut Ui,
+    atlas: &FontAtlas,
+    viewport: Rect,
+    layout: &ScreenLayout,
+    state: &ScreenState<'_>,
+    row: u8,
+) {
+    let Some(pointer) = ui.pointer() else {
+        return;
+    };
+    let scale = layout.scale as f32;
+    let top = layout.background.y + (ENCHANT_ROW_TOP + f32::from(row) * ENCHANT_ROW_STEP) * scale;
+    if pointer[1] >= top + ENCHANT_TOOLTIP_HEIGHT * scale {
+        return;
+    }
+    let lines = enchant_row_lines(EnchantRow {
+        properties: state.properties,
+        row,
+        lapis: state.lapis,
+        xp_level: state.xp_level,
+        creative: state.creative,
+    });
+    if let Some(lines) = lines {
+        draw_tooltip(ui, atlas, viewport, scale, pointer, &lines);
+    }
+}
+
+/// Draws a one-line white tooltip at the pointer
+/// (`GuiScreen.drawCreativeTabHoveringText`).
+fn draw_text_tooltip(
+    ui: &mut Ui,
+    atlas: &FontAtlas,
+    viewport: Rect,
+    layout: &ScreenLayout,
+    text: TooltipText,
+) {
+    let Some(pointer) = ui.pointer() else {
+        return;
+    };
+    let line = TooltipLine {
+        text,
+        color: TooltipColor::White,
+        italic: false,
+    };
+    draw_tooltip(ui, atlas, viewport, layout.scale as f32, pointer, &[line]);
 }
 
 /// Draws one texture sub-rectangle.
@@ -587,6 +805,7 @@ mod tests {
             properties: Vec::new(),
             trades: Vec::new(),
             selected_trade: 0,
+            horse: None,
         }
     }
 
@@ -643,6 +862,22 @@ mod tests {
         let last = view_of(villager);
         let state = screen_state(&last, &ScreenFacts::default(), None);
         assert!(state.trade_previous && !state.trade_next);
+        assert!(!state.trade_disabled);
+    }
+
+    #[test]
+    fn a_used_up_offer_reaches_the_screen_state() {
+        let mut villager = container(WindowKind::Villager, 3);
+        villager.trades = vec![umicraft_game::inventory::payload::Trade {
+            buy: stack(1),
+            buy_second: None,
+            sell: stack(2),
+            disabled: true,
+            uses: 7,
+            max_uses: 7,
+        }];
+        let view = view_of(villager);
+        assert!(screen_state(&view, &ScreenFacts::default(), None).trade_disabled);
     }
 
     #[test]
@@ -678,7 +913,10 @@ mod tests {
         assert_eq!(kind(WindowKind::Villager, 3), ScreenKind::Villager);
         assert_eq!(
             kind(WindowKind::Horse, 17),
-            ScreenKind::Horse { own_slots: 17 }
+            ScreenKind::Horse {
+                own_slots: 17,
+                armor: true
+            }
         );
     }
 

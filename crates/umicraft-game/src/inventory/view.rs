@@ -24,6 +24,20 @@ pub struct ContainerView {
     pub trades: Vec<Trade>,
     /// The offer a villager window shows.
     pub selected_trade: usize,
+    /// The horse of a horse window.
+    pub horse: Option<HorseWindow>,
+}
+
+/// The horse a horse window belongs to: the entity id of its `Open Window`
+/// and whether it can wear armour (`EntityHorse.canWearArmor`, only the horse
+/// type 0). The armour slot of a donkey or mule is not drawn and cannot be
+/// hovered (`ContainerHorseInventory`, `canBeHovered`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HorseWindow {
+    /// The entity id of the horse.
+    pub entity_id: i32,
+    /// Whether the horse can wear armour.
+    pub wears_armor: bool,
 }
 
 /// An immutable snapshot of the full window state.

@@ -35,7 +35,8 @@ pub(super) fn collect(
                 continue;
             };
             let skip_full = pass == 0 && count(there) == max_stack(there);
-            let mergeable = !matches!(space.kind(index), SlotKind::CraftingResult { .. });
+            let mergeable = !matches!(space.kind(index), SlotKind::CraftingResult { .. })
+                && space.can_take(index);
             if !mergeable || skip_full || !same_item(there, held) {
                 continue;
             }

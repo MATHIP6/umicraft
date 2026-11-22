@@ -45,6 +45,7 @@ pub mod combat;
 pub mod debug_f3;
 pub mod digging;
 pub mod editors;
+pub mod enchantments;
 pub mod entity;
 pub mod gamemode;
 pub mod hand;
