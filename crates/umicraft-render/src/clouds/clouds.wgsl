@@ -40,7 +40,9 @@ struct VertexOut {
     @builtin(position) @invariant position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) shade: vec3<f32>,
-    @location(2) eye_distance: f32,
+    // Position relative to the eye; the fog distance is measured per
+    // fragment, since the fast cloud quads are too large to interpolate it.
+    @location(2) relative: vec3<f32>,
 };
 
 @vertex
@@ -54,7 +56,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.position = clouds.view_proj * vec4<f32>(relative, 1.0);
     out.uv = in.uv + clouds.uv_offset.xy;
     out.shade = in.shade.rgb;
-    out.eye_distance = fog_distance(length(relative), 1.0 / out.position.w, clouds.fog.w);
+    out.relative = relative;
     return out;
 }
 
@@ -68,6 +70,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     }
     let lit = texel.rgb * clouds.tint.rgb * in.shade;
     // The same fog as the terrain.
-    let amount = fog_amount(in.eye_distance, clouds.fog.x, clouds.fog.y, clouds.fog.z);
+    let distance = fog_distance(length(in.relative), in.position.w, clouds.fog.w);
+    let amount = fog_amount(distance, clouds.fog.x, clouds.fog.y, clouds.fog.z);
     return vec4<f32>(mix(lit, clouds.fog_color.rgb, amount), texel.a * clouds.tint.a);
 }

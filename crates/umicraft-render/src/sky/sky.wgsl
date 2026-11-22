@@ -36,8 +36,11 @@ struct VertexOut {
     @builtin(position) position: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
-    // Distance from the eye, the input of the linear fog.
-    @location(2) eye_distance: f32,
+    // Position relative to the eye. The fog distance is measured per
+    // fragment: the dome's squares are 64 blocks wide, and a distance
+    // interpolated between their corners drew the triangle edges into the
+    // fog.
+    @location(2) relative: vec3<f32>,
 };
 
 @vertex
@@ -47,7 +50,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.position = slot.view_proj * relative;
     out.uv = in.uv;
     out.color = in.color * slot.tint;
-    out.eye_distance = fog_distance(length(relative.xyz), 1.0 / out.position.w, slot.fog.w);
+    out.relative = relative.xyz;
     return out;
 }
 
@@ -65,7 +68,8 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     }
     if (slot.params.y > 0.5) {
         // `setupFog(-1)`: the dome's own range, or the medium's exponential fog.
-        let amount = fog_amount(in.eye_distance, slot.fog.x, slot.fog.y, slot.fog.z);
+        let distance = fog_distance(length(in.relative), in.position.w, slot.fog.w);
+        let amount = fog_amount(distance, slot.fog.x, slot.fog.y, slot.fog.z);
         color = vec4<f32>(mix(color.rgb, slot.fog_color.rgb, amount), color.a);
     }
     return color;
