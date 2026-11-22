@@ -10,6 +10,7 @@ use super::kind::{
     resolve_container_slot, SlotTarget, WindowKind, HOTBAR_LEN, HOTBAR_START, MAIN_INV_LEN,
     PLAYER_SLOT_COUNT,
 };
+use super::merchant;
 use super::payload::{Trade, TradeList};
 use super::player::{main_index_to_slot, PlayerInventory};
 use super::slot::{container_window_kinds, player_window_kinds, SlotKind};
@@ -136,7 +137,13 @@ impl WindowManager {
             .filter(|c| i16::from(c.window_id) == i16::from(window_id))
         {
             match resolve_container_slot(slot, container.container_slots.len()) {
-                Some(SlotTarget::Container(idx)) => container.container_slots[idx] = value,
+                Some(SlotTarget::Container(idx)) => {
+                    container.container_slots[idx] = value;
+                    // `Slot.putStack` into a wanted slot resets the result.
+                    if idx != merchant::RESULT {
+                        self.reset_merchant();
+                    }
+                }
                 Some(SlotTarget::Player(idx)) => {
                     self.inventory.set_slot(idx, value);
                 }
@@ -242,10 +249,13 @@ impl WindowManager {
             .selected_trade
             .saturating_add_signed(step as isize)
             .min(last);
-        (next != container.selected_trade).then(|| {
-            container.selected_trade = next;
-            next
-        })
+        if next == container.selected_trade {
+            return None;
+        }
+        container.selected_trade = next;
+        // `ContainerMerchant.setCurrentRecipeIndex` resets the result.
+        self.reset_merchant();
+        Some(next)
     }
 
     /// Returns the next action number for a `Click Window` packet
@@ -297,7 +307,40 @@ impl WindowManager {
         if request.mode == ClickMode::Shift && self.cursor.is_none() {
             self.remember_shift_reference(request.slot);
         }
-        self.with_space(|space, cursor, drag| slot_click(space, cursor, drag, request, creative))
+        let wanted = self.merchant_inputs();
+        let clicked = self
+            .with_space(|space, cursor, drag| slot_click(space, cursor, drag, request, creative));
+        if self.merchant_inputs() != wanted {
+            self.reset_merchant();
+        }
+        clicked
+    }
+
+    /// The two wanted-item slots of an open villager window
+    /// (`InventoryMerchant` resets its result whenever they change).
+    fn merchant_inputs(&self) -> Option<[Option<ItemStack>; 2]> {
+        let container = self
+            .container
+            .as_ref()
+            .filter(|c| c.kind == WindowKind::Villager)?;
+        let slot = |index: usize| container.container_slots.get(index).cloned().flatten();
+        Some([slot(0), slot(1)])
+    }
+
+    /// Fills the result slot of an open villager window from its offers
+    /// (`InventoryMerchant.resetRecipeAndSlots`).
+    fn reset_merchant(&mut self) {
+        if let Some(container) = self
+            .container
+            .as_mut()
+            .filter(|c| c.kind == WindowKind::Villager)
+        {
+            merchant::reset(
+                &mut container.container_slots,
+                &container.trades,
+                container.selected_trade,
+            );
+        }
     }
 
     /// Remembers the stack a shift-click starts on (`shiftClickedSlot`), the
@@ -375,11 +418,20 @@ impl WindowManager {
         } = self;
         match container {
             Some(window) => {
-                let mut space = ClickSpace::container_window(
-                    inventory,
-                    &mut window.container_slots,
-                    &window.kinds,
-                );
+                let ContainerWindow {
+                    kind,
+                    container_slots,
+                    kinds,
+                    trades,
+                    selected_trade,
+                    ..
+                } = window;
+                let space = ClickSpace::container_window(inventory, container_slots, kinds);
+                let mut space = if *kind == WindowKind::Villager {
+                    space.with_merchant(trades, *selected_trade)
+                } else {
+                    space
+                };
                 f(&mut space, cursor, drag)
             }
             None => {
@@ -599,6 +651,63 @@ mod tests {
         assert_eq!(wm.cursor(), Some(&stack(1, 2)));
         wm.apply_set_slot(-1, -1, ItemStack::EMPTY);
         assert_eq!(wm.cursor(), None);
+    }
+
+    /// A villager window (id 4) whose first offer takes 20 wheat for an
+    /// emerald, with the cursor holding 45 wheat.
+    fn villager_window() -> WindowManager {
+        let mut wm = WindowManager::new();
+        wm.open_window(4, WindowKind::Villager, "Farmer".into(), 3);
+        wm.set_trades(TradeList {
+            window_id: 4,
+            trades: vec![Trade {
+                buy: stack(296, 20),
+                buy_second: None,
+                sell: stack(388, 1),
+                disabled: false,
+                uses: 0,
+                max_uses: 7,
+            }],
+        });
+        wm.set_cursor(Some(stack(296, 45)));
+        wm
+    }
+
+    fn villager_slot(wm: &WindowManager, index: usize) -> Option<ItemStack> {
+        wm.view().container.and_then(|c| c.slots[index].clone())
+    }
+
+    /// Regression: the result of a villager offer only showed up after the
+    /// next click, because the server does not send it for an accepted click.
+    #[test]
+    fn placing_the_wanted_items_shows_the_villager_result_at_once() {
+        let mut wm = villager_window();
+        wm.click(ClickRequest::left(0), false);
+        assert_eq!(villager_slot(&wm, 2), Some(stack(388, 1)));
+    }
+
+    #[test]
+    fn taking_the_villager_result_pays_and_reports_the_emerald() {
+        let mut wm = villager_window();
+        wm.click(ClickRequest::left(0), false);
+        let take = wm.click(ClickRequest::left(2), false);
+        // The server compares this with its own result and accepts the click.
+        assert_eq!(take.clicked_item, to_wire(Some(&stack(388, 1))));
+        assert_eq!(wm.cursor(), Some(&stack(388, 1)));
+        assert_eq!(villager_slot(&wm, 0), Some(stack(296, 25)));
+        // 25 wheat still pay for another emerald.
+        assert_eq!(villager_slot(&wm, 2), Some(stack(388, 1)));
+    }
+
+    #[test]
+    fn a_right_click_takes_the_whole_result() {
+        let mut wm = villager_window();
+        wm.apply_set_slot(4, 0, stack(296, 20));
+        wm.set_cursor(None);
+        assert_eq!(villager_slot(&wm, 2), Some(stack(388, 1)));
+        wm.click(ClickRequest::right(2), false);
+        assert_eq!(wm.cursor(), Some(&stack(388, 1)));
+        assert_eq!(villager_slot(&wm, 0), None);
     }
 
     /// A horse window (id 3) with iron horse armour in the first backpack slot.

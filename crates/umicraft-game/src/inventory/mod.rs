@@ -22,6 +22,7 @@ pub mod enchant_book;
 pub mod enchant_names;
 pub mod kind;
 mod manager;
+pub mod merchant;
 pub mod payload;
 pub mod player;
 pub mod preview;
