@@ -16,7 +16,8 @@ use umicraft_game::inventory::{
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::PORTRAIT_KEY;
 use umicraft_ui::screens::{
-    Hotspot, Label, ScreenKind, ScreenLayout, ScreenState, Sheet, SpriteRect, TRADE_OFFER_ITEMS,
+    anvil_cost_line, CostText, Hotspot, Label, ScreenKind, ScreenLayout, ScreenState, Sheet,
+    SpriteRect, COST_RIGHT, COST_Y, TRADE_OFFER_ITEMS,
 };
 use umicraft_ui::styled_text::{draw_styled, styled_width, StyledRun};
 use umicraft_ui::widgets::slot;
@@ -153,23 +154,65 @@ pub(crate) fn screen_state<'a>(
     }
 }
 
+/// The offset of the `FontRenderer` drop shadow, in GUI pixels.
+const DROP_SHADOW: &[(f32, f32)] = &[(1.0, 1.0)];
+/// The thicker shadow of the anvil cost line: `GuiRepair` draws the shadow
+/// colour below, right and below-right of the text.
+const COST_SHADOW: &[(f32, f32)] = &[(0.0, 1.0), (1.0, 0.0), (1.0, 1.0)];
+
 /// Draws the labels of a screen with the vanilla drop shadow.
 fn draw_labels(ui: &mut Ui, atlas: &FontAtlas, layout: &ScreenLayout, labels: &[Label]) {
-    let scale = layout.scale as f32;
     for label in labels {
-        let width = atlas.measure(&label.text, scale);
-        let x = layout.background.x + label.right as f32 * scale - width;
-        let y = layout.background.y + label.y as f32 * scale;
-        let color = rgb(label.color);
-        let shadow = [color[0] * 0.25, color[1] * 0.25, color[2] * 0.25, 1.0];
-        ui.draw().text(
-            [x + scale, y + scale],
-            label.text.clone(),
-            TextStyle::new(scale, shadow),
-        );
-        ui.draw()
-            .text([x, y], label.text.clone(), TextStyle::new(scale, color));
+        draw_label(ui, atlas, layout, label, DROP_SHADOW);
     }
+}
+
+/// Draws one right-aligned label over copies in the shadow colour at
+/// `shadow` offsets (`(color & 0xFCFCFC) >> 2`, as `FontRenderer` and
+/// `GuiRepair` compute it).
+fn draw_label(
+    ui: &mut Ui,
+    atlas: &FontAtlas,
+    layout: &ScreenLayout,
+    label: &Label,
+    shadow: &[(f32, f32)],
+) {
+    let scale = layout.scale as f32;
+    let width = atlas.measure(&label.text, scale);
+    let x = layout.background.x + label.right as f32 * scale - width;
+    let y = layout.background.y + label.y as f32 * scale;
+    let shadow_color = rgb((label.color & 0xFC_FC_FC) >> 2);
+    for &(dx, dy) in shadow {
+        ui.draw().text(
+            [x + dx * scale, y + dy * scale],
+            label.text.clone(),
+            TextStyle::new(scale, shadow_color),
+        );
+    }
+    ui.draw().text(
+        [x, y],
+        label.text.clone(),
+        TextStyle::new(scale, rgb(label.color)),
+    );
+}
+
+/// Draws the cost line of the anvil, if any (`GuiRepair`).
+fn draw_anvil_cost(ui: &mut Ui, atlas: &FontAtlas, layout: &ScreenLayout, state: &ScreenState<'_>) {
+    let Some(line) = anvil_cost_line(state) else {
+        return;
+    };
+    let lang = crate::language::current();
+    let text = match line.text {
+        CostText::Cost(cost) => lang.tr_args("container.repair.cost", &[&cost.to_string()]),
+        CostText::TooExpensive => lang.tr("container.repair.expensive").to_string(),
+    };
+    let label = Label {
+        text,
+        right: COST_RIGHT,
+        y: COST_Y,
+        color: line.color,
+    };
+    draw_label(ui, atlas, layout, &label, COST_SHADOW);
 }
 
 /// Colour of the captions (`4210752`, `0x404040`).
@@ -410,7 +453,8 @@ pub(crate) fn draw_inventory_overlay(
         custom.or_else(|| atlas.region(layout.spec.texture))
     });
     let hover = ui.pointer().and_then(|[x, y]| layout.hotspot_at((x, y)));
-    let dynamic = kind.dynamic(&screen_state(view, facts, hover));
+    let state = screen_state(view, facts, hover);
+    let dynamic = kind.dynamic(&state);
 
     match region {
         Some(region) => {
@@ -430,6 +474,9 @@ pub(crate) fn draw_inventory_overlay(
     }
     draw_labels(ui, atlas, &layout, &dynamic.labels);
     draw_captions(ui, atlas, &layout, (kind, view.container.as_ref()));
+    if kind == ScreenKind::Anvil {
+        draw_anvil_cost(ui, atlas, &layout, &state);
+    }
     if let Some(field) = &facts.anvil {
         draw_name_field(ui, atlas, &layout, field, facts.caret_visible);
     }

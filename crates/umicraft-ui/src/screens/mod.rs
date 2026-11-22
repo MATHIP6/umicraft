@@ -41,6 +41,7 @@ mod scale;
 mod screen_layout;
 mod villager;
 
+pub use anvil::{cost_line as anvil_cost_line, CostLine, CostText, COST_RIGHT, COST_Y};
 pub use beacon::effect_of as beacon_effect;
 pub use decoration::{Decoration, Fill, Sheet, SpriteRect};
 pub use enchanting::row_available as enchant_row_available;
