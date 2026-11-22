@@ -12,9 +12,11 @@ use umicraft_protocol::packets::play::Metadata;
 
 use crate::particles::MobBody;
 use crate::physics::EYE_HEIGHT;
+use crate::shapes::BlockSource;
 use crate::view::ViewEffects;
 use crate::RenderState;
 
+use super::boat::RiderInput;
 use super::{
     BedPose, BodyYaw, EntityFlags, EntityFrameData, EntityId, EntityItem, EntityKind, EntityRecord,
     EntityRenderSnapshot, MobState, PlayerProfile, Variant,
@@ -176,8 +178,18 @@ impl EntityStore {
     /// As `NetHandlerPlayClient.handleEntityAttach` and `Entity.mountEntity`
     /// do: a rider the client does not track is ignored, a vehicle it does not
     /// track makes the call a dismount, and a mount that would seat the
-    /// vehicle on its own rider, however far up the chain, is refused.
+    /// vehicle on its own rider, however far up the chain, is refused. The
+    /// local player, which is not tracked here, goes through [`Self::board`].
     pub fn attach(&mut self, rider: EntityId, vehicle: Option<EntityId>) {
+        // Anyone but the local player boarding a boat makes it an empty boat
+        // for the client again (`setIsBoatEmpty(true)`), even when the rider
+        // is unknown.
+        if let Some(boat) = vehicle
+            .and_then(|id| self.entities.get_mut(&id))
+            .filter(|entity| entity.kind == EntityKind::Boat)
+        {
+            boat.boat.driven = false;
+        }
         if !self.entities.contains_key(&rider) {
             return;
         }
@@ -382,8 +394,64 @@ impl EntityStore {
         pitch: f32,
         on_ground: bool,
     ) {
+        let ridden = self.has_rider(id);
         if let Some(entity) = self.entities.get_mut(&id) {
-            entity.teleport_to(position, yaw, pitch, on_ground);
+            if entity.kind == EntityKind::Boat && (ridden || entity.boat.boarded) {
+                entity.server_position = position;
+                entity.on_ground = on_ground;
+                entity.snap_to(position, yaw, pitch);
+            } else {
+                entity.teleport_to(position, yaw, pitch, on_ground);
+            }
+        }
+    }
+
+    /// Whether a tracked entity rides `vehicle`.
+    fn has_rider(&self, vehicle: EntityId) -> bool {
+        self.entities
+            .values()
+            .any(|entity| entity.vehicle == Some(vehicle))
+    }
+
+    /// The local player boarded `vehicle`, or left its vehicle (`None`). A
+    /// boat it boards is driven by the client from now on, and stays so after
+    /// it leaves (MCP `handleEntityAttach`: `setIsBoatEmpty(false)`).
+    pub fn board(&mut self, vehicle: Option<EntityId>) {
+        for entity in self.entities.values_mut() {
+            entity.boat.boarded = false;
+        }
+        if let Some(boat) = vehicle
+            .and_then(|id| self.entities.get_mut(&id))
+            .filter(|entity| entity.kind == EntityKind::Boat)
+        {
+            boat.boat.driven = true;
+            boat.boat.boarded = true;
+            boat.interpolation_steps = 0;
+        }
+    }
+
+    /// Runs one tick of every boat the client drives
+    /// ([`super::boat::BoatMotion::drive`]); `rider` holds the keys of the local
+    /// player for the boat it rides. Call it before [`Self::tick`], which
+    /// leaves these boats alone.
+    pub fn drive_boats<S: BlockSource + ?Sized>(&mut self, rider: Option<RiderInput>, world: &S) {
+        for entity in self.entities.values_mut() {
+            if entity.kind != EntityKind::Boat || !entity.boat.driven {
+                continue;
+            }
+            entity.begin_tick();
+            let keys = rider.filter(|_| entity.boat.boarded);
+            let driven =
+                entity
+                    .boat
+                    .drive(entity.position, entity.yaw, entity.on_ground, keys, world);
+            entity.position = driven.position;
+            entity.target_position = driven.position;
+            entity.yaw = driven.yaw;
+            entity.target_yaw = driven.yaw;
+            entity.pitch = 0.0;
+            entity.target_pitch = 0.0;
+            entity.on_ground = driven.on_ground;
         }
     }
 
@@ -590,8 +658,11 @@ impl EntityStore {
     /// position, then animate limbs and body (MCP `EntityLivingBase.onUpdate`).
     pub fn tick(&mut self) {
         for entity in self.entities.values_mut() {
-            entity.begin_tick();
-            entity.glide_to_target();
+            // A driven boat already moved this tick (`drive_boats`).
+            if !(entity.kind == EntityKind::Boat && entity.boat.driven) {
+                entity.begin_tick();
+                entity.glide_to_target();
+            }
             entity.animate();
             entity.animation.tick();
             if let Variant::Creeper(creeper) = &entity.meta.variant {

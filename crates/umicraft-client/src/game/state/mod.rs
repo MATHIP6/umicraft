@@ -144,6 +144,9 @@ pub(super) struct Game {
     /// The collision boxes of the boats, gathered before each tick; the
     /// buffer is reused so the tick does not allocate.
     pub(super) solid_entities: Vec<umicraft_game::collision::Aabb>,
+    /// The boxes of the boats the client does not drive, which a driven boat
+    /// bumps into; gathered before each tick, the vector is reused.
+    pub(super) boat_obstacles: Vec<umicraft_game::collision::Aabb>,
     /// The boxes of the entities that keep a placed block out, gathered on
     /// a use click; the buffer is reused.
     pub(super) blocking_entities: Vec<umicraft_game::collision::Aabb>,
@@ -214,6 +217,7 @@ impl Game {
             hud_dirty: true,
             hit_emitters: Vec::new(),
             solid_entities: Vec::new(),
+            boat_obstacles: Vec::new(),
             blocking_entities: Vec::new(),
             hud_view: crate::hud::player::HudTracker::default(),
             entities: EntityStore::new(),

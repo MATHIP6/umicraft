@@ -347,7 +347,13 @@ pub(super) fn attach_entity(game: &mut Game, packet: &AttachEntity) {
     }
     if packet.leash == 0 {
         let vehicle = (packet.vehicle_id != -1).then_some(EntityId(packet.vehicle_id));
-        game.entities.attach(EntityId(packet.entity_id), vehicle);
+        // The local player is not in the store: boarding a boat hands it to
+        // the client's own simulation instead.
+        if packet.entity_id == game.entity_id {
+            game.entities.board(vehicle);
+        } else {
+            game.entities.attach(EntityId(packet.entity_id), vehicle);
+        }
     }
 }
 

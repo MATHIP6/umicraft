@@ -47,11 +47,21 @@ impl EntityRecord {
     /// Starts gliding to `target` and the given rotation over the
     /// interpolation ticks of the kind (MCP `Entity.setPositionAndRotation2`
     /// and its overrides). A boat also takes its velocity back as its motion.
+    ///
+    /// A boat the client drives ignores a position within a block of its own
+    /// and only takes the server's velocity for a farther one
+    /// (`EntityBoat.setPositionAndRotation2` while not `isBoatEmpty`).
     pub(super) fn retarget(&mut self, target: DVec3, yaw: f32, pitch: f32, on_ground: bool) {
+        self.on_ground = on_ground;
+        if self.kind == EntityKind::Boat && self.boat.driven {
+            if self.position.distance_squared(target) > 1.0 {
+                self.boat.set_velocity(self.velocity);
+            }
+            return;
+        }
         self.target_position = target;
         self.target_yaw = yaw;
         self.target_pitch = pitch;
-        self.on_ground = on_ground;
         self.interpolation_steps = interpolation_ticks(self.kind);
         if self.kind == EntityKind::Boat {
             self.boat.set_velocity(self.velocity);
@@ -70,6 +80,22 @@ impl EntityRecord {
             position
         };
         self.retarget(target, yaw, pitch, on_ground);
+    }
+
+    /// Puts a ridden boat at a teleport's position at once, at rest
+    /// (`EntityBoat.setPositionAndRotation2` with a rider and the teleport
+    /// flag of `handleEntityTeleport`).
+    pub(super) fn snap_to(&mut self, position: DVec3, yaw: f32, pitch: f32) {
+        self.position = position;
+        self.previous_position = position;
+        self.target_position = position;
+        self.yaw = yaw;
+        self.target_yaw = yaw;
+        self.pitch = pitch;
+        self.target_pitch = pitch;
+        self.interpolation_steps = 0;
+        self.velocity = glam::Vec3::ZERO;
+        self.boat.motion = DVec3::ZERO;
     }
 
     /// Moves one step towards the target: each tick covers `1 / steps` of
