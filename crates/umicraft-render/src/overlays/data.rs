@@ -36,6 +36,17 @@ impl ScreenOverlays {
             && self.portal.is_none()
             && self.vignette.is_none()
     }
+
+    /// Returns true when an overlay samples block atlas `layer`.
+    ///
+    /// Smart Animations asks this besides the visible chunks: the flames of a
+    /// burning player use `fire_layer_1`, which no fire block in the terrain
+    /// draws (`fire_floor_main` only uses `fire_layer_0`), so they would freeze.
+    #[must_use]
+    pub fn draws_layer(&self, layer: u32) -> bool {
+        let portal = self.portal.map(|portal| portal.layer);
+        [self.in_wall, self.fire, portal].contains(&Some(layer))
+    }
 }
 
 /// What the underwater picture needs: the light and where the player looks.
@@ -56,4 +67,25 @@ pub struct Portal {
     pub layer: u32,
     /// The opacity, `0.0..=1.0`.
     pub alpha: f32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_overlays_draw_their_atlas_layers_only() {
+        let overlays = ScreenOverlays {
+            in_wall: Some(3),
+            fire: Some(7),
+            portal: Some(Portal {
+                layer: 9,
+                alpha: 0.5,
+            }),
+            ..ScreenOverlays::default()
+        };
+        assert!([3, 7, 9].iter().all(|&layer| overlays.draws_layer(layer)));
+        assert!(!overlays.draws_layer(4));
+        assert!(!ScreenOverlays::default().draws_layer(0));
+    }
 }

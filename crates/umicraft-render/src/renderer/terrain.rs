@@ -412,11 +412,13 @@ impl Renderer {
         }
     }
 
-    /// Whether a chunk drawn in the last frame uses atlas `layer`: the question
-    /// Smart Animations asks before it uploads a new picture of the layer.
+    /// Whether a chunk drawn in the last frame or a screen overlay of this
+    /// frame uses atlas `layer`: the question Smart Animations asks before it
+    /// uploads a new picture of the layer. Call it after
+    /// [`Self::set_screen_overlays`] so a burning player's flames animate.
     #[must_use]
     pub fn layer_in_view(&self, layer: u32) -> bool {
-        self.visible_layers.contains(layer)
+        self.visible_layers.contains(layer) || self.screen_overlays.draws_layer(layer)
     }
 
     /// Replaces the GPU mesh for `pos`, or removes it when both passes are

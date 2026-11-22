@@ -44,4 +44,8 @@ optimisation without a measured gain is not kept.
 - A block drawn outside the terrain (a held block, a dropped item) can freeze
   its animation while no chunk with that texture is in view. OptiFine's
   Smart Animations has the same trade-off.
+- The screen overlays (in-wall, fire, portal) count as in view: the flames of a
+  burning player use `fire_layer_1`, which no terrain fire draws
+  (`fire_floor_main` only uses `fire_layer_0`), so without this they froze
+  (fixed 2026-11-21, `ScreenOverlays::draws_layer`).
 - Numbers are in `docs/perf-log.md`.
