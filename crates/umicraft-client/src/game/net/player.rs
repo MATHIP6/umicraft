@@ -282,6 +282,7 @@ pub(super) fn respawn(game: &mut Game, packet: &Respawn, frames: &SyncSender<Ren
     // nothing yet (MCP `handleRespawn` creates a new player entity,
     // whose sprint and sneak states start off).
     game.vehicle = None;
+    game.entities.board(None);
     // A new player entity: its first health update only sets the health.
     game.vitals.health_known = false;
     game.overlays.reset();

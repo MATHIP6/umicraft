@@ -161,6 +161,10 @@ impl EntityKind {
             Self::ArmorStand => 1.975,
             Self::WitherSkull | Self::SmallFireball => 0.3125,
             Self::LargeFireball => 1.0,
+            Self::Boat => 0.6,
+            Self::Minecart => 0.7,
+            Self::EnderCrystal => 2.0,
+            Self::PrimedTnt | Self::FallingBlock => 0.98,
             _ => 1.8,
         }
     }
@@ -180,6 +184,10 @@ impl EntityKind {
             Self::Ghast => 4.0,
             Self::Arrow => 0.5,
             Self::Item => 0.25,
+            Self::Boat => 1.5,
+            Self::Minecart | Self::PrimedTnt | Self::FallingBlock => 0.98,
+            Self::EnderCrystal => 2.0,
+            Self::LargeFireball => 1.0,
             _ => 0.6,
         }
     }

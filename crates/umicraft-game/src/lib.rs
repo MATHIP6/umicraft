@@ -474,6 +474,16 @@ impl GameState {
         self.player.set_sprinting(false);
     }
 
+    /// Stands the player at `feet` as it leaves its vehicle
+    /// (`Entity.mountEntity(null)`: `setLocationAndAngles` over the vehicle,
+    /// the previous position included, so it does not glide there).
+    pub fn dismount(&mut self, feet: DVec3) {
+        self.player.set_position(feet);
+        self.player.velocity = DVec3::ZERO;
+        self.previous_position = feet;
+        self.history.clear();
+    }
+
     /// Puts the player on the seat of its vehicle instead of simulating it.
     ///
     /// MCP `EntityPlayerSP.onUpdate` calls `Entity.updateRidden` while the

@@ -8,6 +8,7 @@
 
 pub mod angle;
 pub mod anim;
+pub mod boat;
 pub mod body_yaw;
 pub mod boss;
 pub mod cape;

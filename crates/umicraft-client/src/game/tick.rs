@@ -6,6 +6,7 @@ use std::sync::mpsc::SyncSender;
 use std::time::Instant;
 
 use umicraft_game::collision::{boat_box, WithEntities, WithMovingBlocks};
+use umicraft_game::entity::boat::RiderInput;
 use umicraft_game::entity::{EntityId, EntityKind};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::input::RawInput;
@@ -74,6 +75,38 @@ pub(super) fn gather_solid_entities(game: &mut Game) {
             .values()
             .filter(|entity| entity.kind == EntityKind::Boat)
             .map(|boat| boat_box(boat.position)),
+    );
+}
+
+/// Runs the boats the client drives (MCP `EntityBoat.onUpdate` while not
+/// `isBoatEmpty`): the one the local player rides takes its keys. They bump
+/// into the other boats and the moving blocks, not into each other.
+fn drive_boats(game: &mut Game, intent: &InputIntent) {
+    let Some(world) = game.world.as_ref() else {
+        return;
+    };
+    let rider = game.vehicle.map(|_| RiderInput {
+        forward: intent.forward,
+        strafe: intent.strafe,
+        yaw: intent.yaw,
+    });
+    game.boat_obstacles.clear();
+    game.boat_obstacles.extend(
+        game.entities
+            .entities()
+            .values()
+            .filter(|entity| entity.kind == EntityKind::Boat && !entity.boat.driven)
+            .map(|boat| boat_box(boat.position)),
+    );
+    game.entities.drive_boats(
+        rider,
+        &WithMovingBlocks {
+            world: &WithEntities {
+                world,
+                boxes: &game.boat_obstacles,
+            },
+            moving: game.server.moving_blocks(),
+        },
     );
 }
 
@@ -185,6 +218,9 @@ pub(super) fn tick(
     // true) and the physics sinks the player there instead of pulling it
     // down (`BlockSource::is_column_loaded`).
     let ready = game.world_ready();
+    // The vehicle moves before its rider sits on it
+    // (`World.updateEntityWithOptionalForce`).
+    drive_boats(game, &intent);
     let seat = game
         .vehicle
         .and_then(|vehicle| game.entities.rider_feet(EntityId(vehicle)));

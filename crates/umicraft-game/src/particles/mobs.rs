@@ -177,6 +177,10 @@ impl ParticleEngine {
             self.dragon_explosions(entity, filter);
             return;
         }
+        if entity.kind == EntityKind::Minecart {
+            self.cart_smoke(entity, filter);
+            return;
+        }
         let Some(body) = MobBody::of(entity) else {
             return;
         };
@@ -212,6 +216,25 @@ impl ParticleEngine {
         }
         if entity.kind == EntityKind::Player {
             self.eating_crumbs(entity, filter);
+        }
+    }
+
+    /// The smoke of a minecart: a puff half a block up each tick of a lit
+    /// TNT cart's fuse (`EntityMinecartTNT.onUpdate`), and one tick in four a
+    /// large puff over a furnace cart that burns fuel
+    /// (`EntityMinecartFurnace.onUpdate`). The fuse already stepped this
+    /// tick, so its last puff is not made.
+    fn cart_smoke(&mut self, entity: &EntityRecord, filter: &SpawnFilter) {
+        let Some(cart) = entity.meta.cart() else {
+            return;
+        };
+        if cart.fuse > 0 {
+            let at = entity.position + DVec3::new(0.0, 0.5, 0.0);
+            self.emit(ParticleKind::Smoke, at, DVec3::ZERO, filter);
+        }
+        if cart.powered && self.rng().next_int(4) == 0 {
+            let at = entity.position + DVec3::new(0.0, 0.8, 0.0);
+            self.emit(ParticleKind::LargeSmoke, at, DVec3::ZERO, filter);
         }
     }
 
@@ -627,6 +650,31 @@ mod tests {
         assert_eq!(after_tick(&mob(EntityKind::Enderman)), 2);
         assert_eq!(after_tick(&mob(EntityKind::Endermite)), 2);
         assert_eq!(after_tick(&mob(EntityKind::Zombie)), 0);
+    }
+
+    #[test]
+    fn a_lit_tnt_cart_smokes_every_tick_and_a_burning_furnace_cart_sometimes() {
+        let mut tnt = mob(EntityKind::Minecart);
+        assert_eq!(after_tick(&tnt), 0, "no cart state yet");
+        tnt.meta.ignite_cart();
+        assert_eq!(after_tick(&tnt), 1);
+        let mut furnace = mob(EntityKind::Minecart);
+        furnace.meta.apply(
+            EntityKind::Minecart,
+            &umicraft_protocol::packets::play::Metadata {
+                objects: vec![umicraft_protocol::packets::play::metadata::WatchedObject {
+                    type_id: 0,
+                    index: 16,
+                    value: vec![1],
+                }],
+            },
+        );
+        let mut engine = ParticleEngine::new(7);
+        for _ in 0..400 {
+            engine.spawn_mob_tick(&furnace, &Ground, &filter());
+        }
+        // One tick in four on average.
+        assert!((50..150).contains(&engine.len()), "{}", engine.len());
     }
 
     #[test]

@@ -10,6 +10,7 @@ use umicraft_game::entity::{EntityItem, EntityKind, EntityRenderSnapshot};
 use umicraft_mesh::item::ItemStyle;
 use umicraft_model::display::DisplayContext;
 use umicraft_model::item::pose::context_pose;
+use umicraft_model::ModelQuad;
 
 use super::{entity_stack_model, world_light, ItemLayers};
 use crate::resources::item_icons::ItemResources;
@@ -44,9 +45,16 @@ const TNT: i16 = 46;
 /// The blocks of the minecarts that carry one.
 pub(crate) const CHEST: i16 = 54;
 const FURNACE: i16 = 61;
-const MOB_SPAWNER: i16 = 52;
+/// The burning furnace, a block without an item.
+const LIT_FURNACE: i16 = 62;
+pub(crate) const MOB_SPAWNER: i16 = 52;
 const HOPPER: i16 = 154;
 const COMMAND_BLOCK: i16 = 137;
+/// The `data` of the spawn packet of the carts whose renderer does more
+/// than draw the block (`EntityMinecart.EnumMinecartType`).
+const FURNACE_CART: i32 = 2;
+const TNT_CART: i32 = 3;
+pub(crate) const SPAWNER_CART: i32 = 4;
 /// The fire charge item, the sprite of fireballs.
 const FIRE_CHARGE: i16 = 385;
 
@@ -69,12 +77,23 @@ pub(super) fn push(
     let Some((item, pose)) = placed(entity, view) else {
         return;
     };
-    let Some((model, quads)) = entity_stack_model(resources, &item) else {
-        return;
-    };
-    let matrix = match pose {
-        Pose::Block(matrix) => matrix,
-        Pose::Sprite(frame) => frame * context_pose(model, DisplayContext::Ground),
+    let (quads, matrix) = match pose {
+        // The burning furnace of a cart has no item: its block model.
+        Pose::Block(matrix) if item.item_id == LIT_FURNACE => {
+            (resources.models().lit_furnace_quads(), matrix)
+        }
+        Pose::Block(matrix) => {
+            let Some(quads) = block_quads(resources, &item) else {
+                return;
+            };
+            (quads, matrix)
+        }
+        Pose::Sprite(frame) => {
+            let Some((model, quads)) = entity_stack_model(resources, &item) else {
+                return;
+            };
+            (quads, frame * context_pose(model, DisplayContext::Ground))
+        }
     };
     let tints = resources.tints(item.item_id, item.damage, None);
     let lit = takes_item_lights(entity.kind);
@@ -88,6 +107,21 @@ pub(super) fn push(
     } else {
         layers.push(quads, &matrix, &style, false);
     }
+}
+
+/// The quads of a block drawn whole: by its id and metadata, else by its id
+/// alone, since the item of a block only has models for the metadata that
+/// change its look (a cart's tile set by a command may face any way).
+fn block_quads<'a>(resources: &'a ItemResources, item: &EntityItem) -> Option<&'a [ModelQuad]> {
+    entity_stack_model(resources, item)
+        .or_else(|| {
+            let plain = EntityItem {
+                damage: 0,
+                ..item.clone()
+            };
+            entity_stack_model(resources, &plain)
+        })
+        .map(|(_, quads)| quads)
 }
 
 /// Whether an object of `kind` is lit by the item lights of the entity pass
@@ -129,35 +163,132 @@ fn placed(entity: &EntityRenderSnapshot, view: View) -> Option<(EntityItem, Pose
 
 /// The block a minecart carries by its type, the `data` of its spawn packet
 /// (`getDefaultDisplayTile` of each cart class), and how many pixels it sits
-/// over the floor (`getDefaultDisplayTileOffset`). An empty cart and the
-/// display tile of a cart edited with commands are not drawn.
-pub(crate) fn cart_block(entity: &EntityRenderSnapshot) -> Option<(EntityItem, Pose)> {
-    let (item_id, offset) = match entity.object_data {
+/// over the floor (`getDefaultDisplayTileOffset`). A furnace cart that burns
+/// fuel shows the lit furnace.
+fn default_tile(entity: &EntityRenderSnapshot) -> Option<(i16, i32)> {
+    Some(match entity.object_data {
         1 => (CHEST, 8),
-        2 => (FURNACE, 6),
-        3 => (TNT, 6),
-        4 => (MOB_SPAWNER, 6),
+        FURNACE_CART if entity.meta.cart().is_some_and(|cart| cart.powered) => (LIT_FURNACE, 6),
+        FURNACE_CART => (FURNACE, 6),
+        TNT_CART => (TNT, 6),
+        SPAWNER_CART => (MOB_SPAWNER, 6),
         5 => (HOPPER, 1),
         6 => (COMMAND_BLOCK, 6),
         _ => return None,
+    })
+}
+
+/// The block a cart shows and its height over the floor in pixels: the tile
+/// a command set (entries 20 to 22) or the default one of its type
+/// (`getDisplayTile`, `getDisplayTileOffset`). Air shows nothing.
+fn display_tile(entity: &EntityRenderSnapshot) -> Option<(EntityItem, i32)> {
+    let block = |item_id: i16, damage: i16| EntityItem {
+        item_id,
+        damage,
+        count: 1,
+        nbt: None,
     };
-    // `RenderMinecart.doRender`: the cart's own frame (the model is drawn
-    // 0.375 up, turned to its yaw and tipped by its pitch), then the block at
-    // three quarters of its size, centred in the cart.
-    let matrix = Mat4::from_translation(entity.position + Vec3::new(0.0, 0.375, 0.0))
+    match entity.meta.cart().and_then(|cart| cart.display_tile()) {
+        Some(tile) if tile.block_id() == 0 => None,
+        Some(tile) => Some((
+            block(tile.block_id() as i16, tile.metadata() as i16),
+            tile.offset,
+        )),
+        None => default_tile(entity).map(|(id, offset)| (block(id, 0), offset)),
+    }
+}
+
+/// The frame a cart draws its block in (`RenderMinecart.doRender`): the
+/// cart's own frame (the model is drawn 0.375 up, turned to its yaw, tipped
+/// by its pitch and rolled by its shake), then three quarters of the size and
+/// the block's corner `offset` pixels over the floor.
+pub(crate) fn cart_frame(entity: &EntityRenderSnapshot, offset: i32) -> Mat4 {
+    Mat4::from_translation(entity.position + cart_jitter(entity.id.0) + Vec3::new(0.0, 0.375, 0.0))
         * Mat4::from_rotation_y((180.0 - entity.yaw).to_radians())
         * Mat4::from_rotation_z((-entity.pitch).to_radians())
         * Mat4::from_rotation_x(wobble(entity).to_radians())
         * Mat4::from_scale(Vec3::splat(0.75))
         * Mat4::from_translation(Vec3::new(-0.5, (offset - 8) as f32 / 16.0, 0.5))
+}
+
+/// The few thousandths of a block every cart is moved by its id, so that
+/// carts on the same spot do not flicker into each other
+/// (`RenderMinecart.doRender`, the hash of `getEntityId`).
+pub(crate) fn cart_jitter(id: i32) -> Vec3 {
+    let mut hash = i64::from(id).wrapping_mul(493_286_711);
+    hash = hash
+        .wrapping_mul(hash)
+        .wrapping_mul(4_392_167_121)
+        .wrapping_add(hash.wrapping_mul(98_761));
+    let axis = |shift: u32| ((((hash >> shift) & 7) as f32 + 0.5) / 8.0 - 0.5) * 0.004;
+    Vec3::new(axis(16), axis(20), axis(24))
+}
+
+/// `minecartTNTFuse - partialTicks + 1` of a lit TNT cart, `None` while it
+/// is not lit.
+fn cart_fuse_remaining(entity: &EntityRenderSnapshot) -> Option<(i32, f32)> {
+    if entity.object_data != TNT_CART {
+        return None;
+    }
+    let fuse = entity.meta.cart()?.fuse;
+    (fuse > -1).then(|| (fuse, fuse as f32 - entity.age.fract() + 1.0))
+}
+
+/// The block a minecart carries, placed in the cart; a lit TNT cart swells
+/// its block in the last 10 ticks (`RenderTntMinecart.func_180560_a`).
+pub(crate) fn cart_block(entity: &EntityRenderSnapshot) -> Option<(EntityItem, Pose)> {
+    let (item, offset) = display_tile(entity)?;
+    let grown = cart_fuse_remaining(entity).map_or(1.0, |(_, remaining)| swell(remaining));
+    // The quarter turn is `renderBlockBrightness`'s.
+    let matrix = cart_frame(entity, offset)
+        * Mat4::from_scale(Vec3::splat(grown))
         * Mat4::from_rotation_y(90.0_f32.to_radians());
-    let item = EntityItem {
-        item_id,
-        damage: 0,
-        count: 1,
-        nbt: None,
-    };
     Some((item, Pose::Block(matrix)))
+}
+
+/// Where the white flash of a lit TNT cart goes and how strongly
+/// (`RenderTntMinecart.func_180560_a`: every second 5 ticks of the fuse, a
+/// unit TNT cube in the swollen frame of the block), `None` between flashes.
+pub(crate) fn cart_flash(entity: &EntityRenderSnapshot) -> Option<(Mat4, f32)> {
+    let (fuse, remaining) = cart_fuse_remaining(entity)?;
+    let strength = flash_strength(fuse, remaining)?;
+    let offset = display_tile(entity).map_or(6, |(_, offset)| offset);
+    // `renderBlockBrightness` turns the white TNT a quarter, as the block.
+    let matrix = cart_frame(entity, offset)
+        * Mat4::from_scale(Vec3::splat(swell(remaining)))
+        * Mat4::from_rotation_y(90.0_f32.to_radians());
+    Some((matrix, strength))
+}
+
+/// The frame of the spinning mob of a spawner cart that shows its spawner
+/// (`RenderMinecartMobSpawner`).
+pub(crate) fn cart_spawner_frame(entity: &EntityRenderSnapshot) -> Option<Mat4> {
+    if entity.object_data != SPAWNER_CART {
+        return None;
+    }
+    let (item, offset) = display_tile(entity)?;
+    (item.item_id == MOB_SPAWNER).then(|| cart_frame(entity, offset))
+}
+
+/// How much a TNT block has grown with `remaining` ticks of fuse
+/// (`fuse - partialTicks + 1`): from 1 to 1.3 over the last 10.
+fn swell(remaining: f32) -> f32 {
+    if remaining < 10.0 {
+        let grown = (1.0 - remaining / 10.0).clamp(0.0, 1.0);
+        1.0 + grown.powi(4) * 0.3
+    } else {
+        1.0
+    }
+}
+
+/// How strongly the white flash of TNT is added with `fuse` whole ticks and
+/// `remaining` exact ticks left, or `None` between flashes (`fuse / 5 % 2 ==
+/// 0`, `(1 - remaining / 100) * 0.8`).
+pub(crate) fn flash_strength(fuse: i32, remaining: f32) -> Option<f32> {
+    if fuse < 0 || (fuse / 5) % 2 != 0 {
+        return None;
+    }
+    Some(((1.0 - remaining / 100.0) * 0.8).clamp(0.0, 1.0))
 }
 
 /// `RenderSnowball.doRender`: half size, turned to face the camera.
@@ -198,18 +329,11 @@ fn falling_block(entity: &EntityRenderSnapshot) -> (EntityItem, Pose) {
 /// `RenderTntPrimed.doRender`: the block of TNT, growing in the last 10 ticks
 /// of the fuse. Only the lit block is drawn here, not the white flash.
 fn tnt(entity: &EntityRenderSnapshot) -> Pose {
-    let remaining = fuse_remaining(entity.age);
-    let swell = if remaining < 10.0 {
-        let grown = (1.0 - remaining / 10.0).clamp(0.0, 1.0);
-        1.0 + grown.powi(4) * 0.3
-    } else {
-        1.0
-    };
     // `translate(-0.5, -0.5, 0.5)` then the quarter turn of
     // `renderBlockBrightness`.
     Pose::Block(
         Mat4::from_translation(entity.position + Vec3::new(0.0, 0.5, 0.0))
-            * Mat4::from_scale(Vec3::splat(swell))
+            * Mat4::from_scale(Vec3::splat(swell(fuse_remaining(entity.age))))
             * Mat4::from_translation(Vec3::new(-0.5, -0.5, 0.5))
             * Mat4::from_rotation_y(90.0_f32.to_radians()),
     )
@@ -226,6 +350,14 @@ pub(crate) fn tnt_matrix(entity: &EntityRenderSnapshot) -> Mat4 {
 /// 80 and goes down by one per tick.
 fn fuse_remaining(age: f32) -> f32 {
     TNT_FUSE - age + 1.0
+}
+
+/// The flash of a primed TNT of `age` ticks: where and how strongly
+/// (`RenderTntPrimed.doRender`), `None` between flashes.
+pub(crate) fn primed_flash(entity: &EntityRenderSnapshot) -> Option<(Mat4, f32)> {
+    let fuse = (TNT_FUSE - entity.age.floor()) as i32;
+    let strength = flash_strength(fuse, fuse_remaining(entity.age))?;
+    Some((tnt_matrix(entity), strength))
 }
 
 #[cfg(test)]
@@ -313,8 +445,9 @@ mod tests {
         assert_eq!(item.item_id, TNT);
         let centre = matrix(&pose).transform_point3(Vec3::splat(0.5));
         let expected_y = 70.0 + 0.375 + 0.75 * (-2.0 / 16.0 + 0.5);
+        // Within the 0.002 the id moves a cart by.
         assert!(
-            (centre.y - expected_y).abs() < 1e-4,
+            (centre.y - expected_y).abs() < 0.0021,
             "{} {expected_y}",
             centre.y
         );
@@ -325,6 +458,110 @@ mod tests {
         cart.object_data = 2;
         let furnace = matrix(&cart_block(&cart).unwrap().1).transform_point3(Vec3::ZERO);
         assert!((chest.y - furnace.y - 0.75 * 2.0 / 16.0).abs() < 1e-4);
+    }
+
+    fn cart_meta(
+        objects: Vec<umicraft_protocol::packets::play::metadata::WatchedObject>,
+    ) -> umicraft_game::entity::EntityMeta {
+        let mut meta = umicraft_game::entity::EntityMeta::default();
+        meta.apply(
+            EntityKind::Minecart,
+            &umicraft_protocol::packets::play::Metadata { objects },
+        );
+        meta
+    }
+
+    fn watched(
+        type_id: u8,
+        index: u8,
+        value: Vec<u8>,
+    ) -> umicraft_protocol::packets::play::metadata::WatchedObject {
+        umicraft_protocol::packets::play::metadata::WatchedObject {
+            type_id,
+            index,
+            value,
+        }
+    }
+
+    #[test]
+    fn a_burning_furnace_cart_shows_the_lit_furnace() {
+        let mut cart = entity(EntityKind::Minecart);
+        cart.object_data = 2;
+        assert_eq!(cart_block(&cart).expect("furnace").0.item_id, FURNACE);
+        cart.meta = cart_meta(vec![watched(0, 16, vec![1])]);
+        assert_eq!(cart_block(&cart).expect("lit").0.item_id, LIT_FURNACE);
+    }
+
+    #[test]
+    fn a_custom_tile_replaces_the_block_of_the_type_and_air_hides_it() {
+        let mut cart = entity(EntityKind::Minecart);
+        cart.object_data = 1;
+        // Red wool (35:14) two pixels over the floor.
+        cart.meta = cart_meta(vec![
+            watched(2, 20, (35_i32 | 14 << 12).to_be_bytes().to_vec()),
+            watched(2, 21, 2_i32.to_be_bytes().to_vec()),
+            watched(0, 22, vec![1]),
+        ]);
+        let (item, pose) = cart_block(&cart).expect("wool");
+        assert_eq!((item.item_id, item.damage), (35, 14));
+        let low = matrix(&pose).transform_point3(Vec3::ZERO).y;
+        assert!(
+            (low - (70.0 + 0.375 + 0.75 * (2.0 - 8.0) / 16.0)).abs() < 0.0021,
+            "{low}"
+        );
+        // Even an empty cart shows a custom tile; air shows nothing.
+        cart.object_data = 0;
+        assert!(cart_block(&cart).is_some());
+        cart.meta = cart_meta(vec![watched(2, 20, vec![0; 4]), watched(0, 22, vec![1])]);
+        assert!(cart_block(&cart).is_none());
+    }
+
+    #[test]
+    fn the_flash_of_a_tnt_cart_covers_its_block() {
+        let mut cart = entity(EntityKind::Minecart);
+        cart.object_data = 3;
+        cart.meta.ignite_cart();
+        let (flash, _) = cart_flash(&cart).expect("flashing at fuse 80");
+        let block = matrix(&cart_block(&cart).expect("tnt").1);
+        let centre = |m: Mat4| m.transform_point3(Vec3::splat(0.5));
+        assert!((centre(flash) - centre(block)).length() < 1e-5);
+    }
+
+    #[test]
+    fn a_lit_tnt_cart_swells_at_the_end_of_its_fuse() {
+        let mut cart = entity(EntityKind::Minecart);
+        cart.object_data = 3;
+        let size = |cart: &EntityRenderSnapshot| {
+            matrix(&cart_block(cart).expect("tnt").1)
+                .transform_vector3(Vec3::X)
+                .length()
+        };
+        assert!((size(&cart) - 0.75).abs() < 1e-5, "unlit");
+        cart.meta.ignite_cart();
+        assert!((size(&cart) - 0.75).abs() < 1e-5, "80 ticks left");
+        for _ in 0..78 {
+            cart.meta.tick();
+        }
+        let grown = size(&cart) / 0.75;
+        assert!(grown > 1.0 && grown <= 1.3 + 1e-5, "{grown}");
+    }
+
+    #[test]
+    fn only_a_spawner_cart_showing_its_spawner_has_a_mob() {
+        let mut cart = entity(EntityKind::Minecart);
+        cart.object_data = 4;
+        assert!(cart_spawner_frame(&cart).is_some());
+        cart.object_data = 6;
+        assert!(cart_spawner_frame(&cart).is_none());
+    }
+
+    #[test]
+    fn the_jitter_of_a_cart_stays_within_two_thousandths() {
+        for id in [0, 1, 7, 12_345, -3, i32::MAX] {
+            let jitter = cart_jitter(id);
+            assert!(jitter.abs().max_element() <= 0.002, "{id}: {jitter}");
+        }
+        assert_ne!(cart_jitter(1), cart_jitter(2));
     }
 
     #[test]
@@ -412,6 +649,86 @@ mod tests {
             .expect("render");
         let image = renderer.read_pixels().expect("readback");
         if let Ok(path) = std::env::var("UMICRAFT_OBJECT_DUMP") {
+            let file = std::fs::File::create(path).expect("dump file");
+            let mut encoder = png::Encoder::new(file, image.width, image.height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .and_then(|mut writer| writer.write_image_data(&image.rgba))
+                .expect("png");
+        }
+    }
+
+    /// Renders every kind of minecart with its block: a lit TNT cart at the
+    /// end of its fuse (swollen and flashing), a burning furnace cart, a
+    /// spawner cart with its pig, a hopper, a command block, a chest and a
+    /// custom wool tile. Set `UMICRAFT_CART_DUMP` to a path to keep the PNG.
+    #[test]
+    #[ignore = "requires the official 1.8.8 client jar and a GPU adapter"]
+    fn minecarts_with_their_blocks() {
+        use crate::resources::models::ModelResources;
+        use crate::scene::entity::EntityTextures;
+        use crate::scene::item_world::WorldItems;
+        use umicraft_render::{Camera, Overlay, Renderer};
+
+        let resources = ModelResources::load().expect("official resources");
+        let items = resources.items();
+        let atlas = resources.atlas();
+        let mut renderer = Renderer::new_offscreen(960, 320).expect("renderer");
+        renderer
+            .set_block_atlas(
+                atlas.width(),
+                atlas.height(),
+                atlas.layers(),
+                atlas.pixels(),
+            )
+            .expect("atlas");
+        let cart = |id: i32, x: f32, data: i32| {
+            let mut ent = EntityRenderSnapshot::new(
+                EntityId(id),
+                EntityKind::Minecart,
+                Vec3::new(x, 64.0, 0.0),
+            );
+            ent.object_data = data;
+            ent.age = 40.0;
+            ent.yaw = 90.0;
+            ent
+        };
+        let mut tnt = cart(1, 4.2, 3);
+        tnt.meta.ignite_cart();
+        for _ in 0..78 {
+            tnt.meta.tick();
+        }
+        let mut furnace = cart(2, 3.0, 2);
+        furnace.meta = cart_meta(vec![watched(0, 16, vec![1])]);
+        let mut wool = cart(7, -3.0, 0);
+        wool.meta = cart_meta(vec![
+            watched(2, 20, (35_i32 | 14 << 12).to_be_bytes().to_vec()),
+            watched(0, 22, vec![1]),
+        ]);
+        let snapshots = [
+            tnt,
+            furnace,
+            cart(3, 1.8, 4),
+            cart(4, 0.6, 5),
+            cart(5, -0.6, 6),
+            cart(6, -1.8, 1),
+            wool,
+            cart(8, -4.2, 2),
+        ];
+        let mut world = WorldItems::default();
+        world.set_view(std::f32::consts::PI, 0.0);
+        renderer.set_world_items(&world.build(&snapshots, &items).items);
+        EntityTextures::load(&renderer).mesh_and_upload(&snapshots, &mut renderer);
+        let mut camera = Camera::new(Vec3::new(2.0, 65.6, -3.2), std::f32::consts::PI, -0.35);
+        camera.set_aspect(960, 320);
+        camera.pin_render_origin(glam::DVec3::ZERO);
+        renderer
+            .render(&camera, &Overlay::new(960, 320))
+            .expect("render");
+        let image = renderer.read_pixels().expect("readback");
+        if let Ok(path) = std::env::var("UMICRAFT_CART_DUMP") {
             let file = std::fs::File::create(path).expect("dump file");
             let mut encoder = png::Encoder::new(file, image.width, image.height);
             encoder.set_color(png::ColorType::Rgba);

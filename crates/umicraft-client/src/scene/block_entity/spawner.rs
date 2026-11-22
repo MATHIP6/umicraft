@@ -88,7 +88,7 @@ fn spawned_mob(nbt: &[u8]) -> Option<EntityKind> {
 }
 
 /// The spin of the mob in degrees at `ticks` game ticks of the clock.
-fn spin_degrees(ticks: f64) -> f32 {
+pub(crate) fn spin_degrees(ticks: f64) -> f32 {
     // Reduced as the reference does (`% 360` on the rotation) before the
     // factor, so the angle keeps its precision however long the client runs.
     let rotation = (ticks * DEGREES_PER_TICK) % 360.0;
@@ -96,10 +96,15 @@ fn spin_degrees(ticks: f64) -> f32 {
 }
 
 /// The matrix from the mob's model space (at the origin, upright) to the
-/// world: the renderer's `translate(.5, 0, .5)`, `translate(0, .4, 0)`,
-/// `rotate(spin, y)`, `rotate(-30, x)`, `translate(0, -.4, 0)`, `scale(f)`.
+/// world: the renderer's `translate(.5, 0, .5)`, then [`mob_pose`].
 fn mob_matrix(origin: Vec3, spin_degrees: f32) -> Mat4 {
-    Mat4::from_translation(origin + Vec3::new(0.5, 0.4, 0.5))
+    Mat4::from_translation(origin + Vec3::new(0.5, 0.0, 0.5)) * mob_pose(spin_degrees)
+}
+
+/// `TileEntityMobSpawnerRenderer.renderMob`: `translate(0, .4, 0)`,
+/// `rotate(spin, y)`, `rotate(-30, x)`, `translate(0, -.4, 0)`, `scale(f)`.
+pub(crate) fn mob_pose(spin_degrees: f32) -> Mat4 {
+    Mat4::from_translation(Vec3::new(0.0, 0.4, 0.0))
         * Mat4::from_rotation_y(spin_degrees.to_radians())
         * Mat4::from_rotation_x((-30.0_f32).to_radians())
         * Mat4::from_translation(Vec3::new(0.0, -0.4, 0.0))

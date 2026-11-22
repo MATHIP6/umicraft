@@ -6,6 +6,7 @@
 use glam::DVec3;
 
 use super::angle::wrap_degrees;
+use super::boat::EMPTY_BOAT_INTERPOLATION_TICKS;
 use super::kind::EntityKind;
 use super::meta::Variant;
 use super::mob_state::MobTick;
@@ -14,6 +15,20 @@ use super::record::EntityRecord;
 /// Ticks over which a movement or teleport packet is applied
 /// (MCP `NetHandlerPlayClient`: `setPositionAndRotation2(…, 3, …)`).
 pub const INTERPOLATION_TICKS: u8 = 3;
+
+/// Ticks a minecart takes to reach a reported position: the 3 of the packet
+/// plus 2 (`EntityMinecart.setPositionAndRotation2`: `turnProgress`).
+pub const MINECART_INTERPOLATION_TICKS: u8 = 3 + 2;
+
+/// Ticks `kind` takes to reach a reported position: boats and minecarts
+/// override `setPositionAndRotation2` with longer glides.
+const fn interpolation_ticks(kind: EntityKind) -> u8 {
+    match kind {
+        EntityKind::Minecart => MINECART_INTERPOLATION_TICKS,
+        EntityKind::Boat => EMPTY_BOAT_INTERPOLATION_TICKS,
+        _ => INTERPOLATION_TICKS,
+    }
+}
 
 /// A teleport this close to the current position keeps it, per axis
 /// (MCP `handleEntityTeleport`: 1/32 block horizontally, 1/64 vertically).
@@ -29,14 +44,28 @@ impl EntityRecord {
         self.body_yaw.begin_tick();
     }
 
-    /// Starts gliding to `target` and the given rotation over
-    /// [`INTERPOLATION_TICKS`] (MCP `Entity.setPositionAndRotation2`).
+    /// Starts gliding to `target` and the given rotation over the
+    /// interpolation ticks of the kind (MCP `Entity.setPositionAndRotation2`
+    /// and its overrides). A boat also takes its velocity back as its motion.
+    ///
+    /// A boat the client drives ignores a position within a block of its own
+    /// and only takes the server's velocity for a farther one
+    /// (`EntityBoat.setPositionAndRotation2` while not `isBoatEmpty`).
     pub(super) fn retarget(&mut self, target: DVec3, yaw: f32, pitch: f32, on_ground: bool) {
+        self.on_ground = on_ground;
+        if self.kind == EntityKind::Boat && self.boat.driven {
+            if self.position.distance_squared(target) > 1.0 {
+                self.boat.set_velocity(self.velocity);
+            }
+            return;
+        }
         self.target_position = target;
         self.target_yaw = yaw;
         self.target_pitch = pitch;
-        self.on_ground = on_ground;
-        self.interpolation_steps = INTERPOLATION_TICKS;
+        self.interpolation_steps = interpolation_ticks(self.kind);
+        if self.kind == EntityKind::Boat {
+            self.boat.set_velocity(self.velocity);
+        }
     }
 
     /// Applies an absolute position from `Entity Teleport`.
@@ -53,10 +82,32 @@ impl EntityRecord {
         self.retarget(target, yaw, pitch, on_ground);
     }
 
+    /// Puts a ridden boat at a teleport's position at once, at rest
+    /// (`EntityBoat.setPositionAndRotation2` with a rider and the teleport
+    /// flag of `handleEntityTeleport`).
+    pub(super) fn snap_to(&mut self, position: DVec3, yaw: f32, pitch: f32) {
+        self.position = position;
+        self.previous_position = position;
+        self.target_position = position;
+        self.yaw = yaw;
+        self.target_yaw = yaw;
+        self.pitch = pitch;
+        self.target_pitch = pitch;
+        self.interpolation_steps = 0;
+        self.velocity = glam::Vec3::ZERO;
+        self.boat.motion = DVec3::ZERO;
+    }
+
     /// Moves one step towards the target: each tick covers `1 / steps` of
     /// what remains (MCP `EntityLivingBase.onLivingUpdate`).
+    ///
+    /// A boat with no step left drifts on with its motion
+    /// ([`super::boat::BoatMotion::drift`]).
     pub(super) fn glide_to_target(&mut self) {
         if self.interpolation_steps == 0 {
+            if self.kind == EntityKind::Boat {
+                self.position = self.boat.drift(self.position, self.on_ground);
+            }
             return;
         }
         let steps = f32::from(self.interpolation_steps);
@@ -73,7 +124,11 @@ impl EntityRecord {
             self.position.x - self.previous_position.x,
             self.position.z - self.previous_position.z,
         );
-        self.limbs.update(moved.0.hypot(moved.1) as f32);
+        // A rider's limbs keep their swing: the reference only updates it in
+        // `moveEntityWithHeading`, which a riding entity never runs.
+        if self.vehicle.is_none() {
+            self.limbs.update(moved.0.hypot(moved.1) as f32);
+        }
         self.cape.update(self.position);
         if matches!(self.kind, EntityKind::Slime | EntityKind::MagmaCube) {
             self.squish.tick(self.on_ground);
@@ -184,6 +239,43 @@ mod tests {
     }
 
     #[test]
+    fn a_minecart_glides_over_five_ticks_and_a_boat_over_eight() {
+        for (kind, ticks) in [(EntityKind::Minecart, 5), (EntityKind::Boat, 8)] {
+            let mut entity = record(kind);
+            entity.retarget(DVec3::new(8.0, 64.0, 0.0), 0.0, 0.0, false);
+            for _ in 0..ticks {
+                entity.begin_tick();
+                entity.glide_to_target();
+            }
+            assert!((entity.position.x - 8.0).abs() < 1e-9, "{kind:?}");
+            entity.begin_tick();
+            entity.glide_to_target();
+            assert!((entity.position.x - 8.0).abs() < 1e-9, "{kind:?} at rest");
+        }
+    }
+
+    #[test]
+    fn a_boat_drifts_on_with_its_velocity_after_the_glide() {
+        let mut boat = record(EntityKind::Boat);
+        boat.velocity = glam::Vec3::new(0.1, 0.0, 0.0);
+        boat.retarget(DVec3::new(0.0, 64.0, 0.0), 0.0, 0.0, false);
+        for _ in 0..8 {
+            boat.glide_to_target();
+        }
+        assert_eq!(boat.position.x, 0.0);
+        boat.glide_to_target();
+        assert!((boat.position.x - 0.1).abs() < 1e-6, "{}", boat.position.x);
+        // A minecart does not drift.
+        let mut cart = record(EntityKind::Minecart);
+        cart.velocity = glam::Vec3::new(0.1, 0.0, 0.0);
+        cart.retarget(DVec3::new(0.0, 64.0, 0.0), 0.0, 0.0, false);
+        for _ in 0..6 {
+            cart.glide_to_target();
+        }
+        assert_eq!(cart.position.x, 0.0);
+    }
+
+    #[test]
     fn a_teleport_within_a_sixteenth_of_a_block_stays_put() {
         let mut entity = record(EntityKind::Zombie);
         entity.teleport_to(DVec3::new(0.02, 64.01, -0.02), 0.0, 0.0, true);
@@ -202,6 +294,17 @@ mod tests {
         // 0.1 blocks this tick: target amplitude 0.4, smoothed by 0.4.
         assert!((entity.limbs.amount - 0.16).abs() < 1e-5);
         assert!((entity.limbs.swing - 0.16).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_rider_carried_by_its_vehicle_does_not_swing_its_limbs() {
+        let mut entity = record(EntityKind::Player);
+        entity.vehicle = Some(EntityId(9));
+        entity.retarget(DVec3::new(0.3, 64.0, 0.0), 0.0, 0.0, true);
+        entity.begin_tick();
+        entity.glide_to_target();
+        entity.animate();
+        assert_eq!(entity.limbs.amount, 0.0);
     }
 
     #[test]

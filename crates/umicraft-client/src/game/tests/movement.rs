@@ -265,3 +265,182 @@ fn a_boat_holds_the_player_up() {
         "standing on the boat"
     );
 }
+
+/// Seats the local player (entity 7) on a boat (entity 9) on the floor of
+/// [`placed_game`].
+fn boarded_boat() -> (Game, CommandQueue) {
+    let mut game = placed_game();
+    game.entity_id = 7;
+    game.state = Some(GameState::new(DVec3::new(3.5, 65.0, 3.5)));
+    game.entities.spawn_object(
+        EntityId(9),
+        1,
+        DVec3::new(3.5, 64.0, 3.5),
+        0.0,
+        0.0,
+        Vec3::ZERO,
+        0,
+    );
+    let mut queue = CommandQueue::default();
+    let (frames, _) = mpsc::sync_channel(64);
+    let attach = PlayEvent::AttachEntity(
+        umicraft_protocol::packets::play::clientbound::AttachEntity {
+            leash: 0,
+            entity_id: 7,
+            vehicle_id: 9,
+        },
+    );
+    handle_net(&mut game, attach, &mut queue, &frames);
+    (game, queue)
+}
+
+#[test]
+fn a_boarded_boat_answers_the_keys_on_the_client() {
+    // Regression: the client waited for the server to move the boat it rode,
+    // where `EntityBoat` simulates it locally once `isBoatEmpty` is false.
+    let (mut game, mut queue) = boarded_boat();
+    let (frames, _) = mpsc::sync_channel(256);
+    let (chunks, _) = mpsc::sync_channel(64);
+    game.controls.input.forward = 1.0;
+    for _ in 0..20 {
+        tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+        queue.ordered.clear();
+    }
+    let boat = &game.entities.entities()[&EntityId(9)];
+    assert!(boat.boat.driven && boat.boat.boarded);
+    // Yaw 0 paddles towards +z, slowly on dry land.
+    assert!(boat.position.z > 3.5 + 0.01, "{}", boat.position.z);
+    let player = game.state.as_ref().expect("placed").player();
+    assert!(
+        (player.position.z - boat.position.z).abs() < 0.5,
+        "seated on it"
+    );
+}
+
+#[test]
+fn a_driven_boat_ignores_a_server_position_within_a_block() {
+    use umicraft_protocol::packets::play::clientbound::EntityTeleport;
+
+    let (mut game, mut queue) = boarded_boat();
+    let (frames, _) = mpsc::sync_channel(64);
+    let relative = PlayEvent::EntityRelativeMove(
+        umicraft_protocol::packets::play::clientbound::EntityRelativeMove {
+            entity_id: 9,
+            dx: 16,
+            dy: 0,
+            dz: 0,
+            on_ground: true,
+        },
+    );
+    handle_net(&mut game, relative, &mut queue, &frames);
+    game.entities.tick();
+    let boat = &game.entities.entities()[&EntityId(9)];
+    assert_eq!(
+        boat.position,
+        DVec3::new(3.5, 64.0, 3.5),
+        "half a block off: kept"
+    );
+    // A teleport of a ridden boat puts it there at once.
+    let teleport = PlayEvent::EntityTeleport(EntityTeleport {
+        entity_id: 9,
+        x: 10 * 32,
+        y: 64 * 32,
+        z: 3 * 32,
+        yaw: 0,
+        pitch: 0,
+        on_ground: true,
+    });
+    handle_net(&mut game, teleport, &mut queue, &frames);
+    let boat = &game.entities.entities()[&EntityId(9)];
+    assert_eq!(boat.position, DVec3::new(10.0, 64.0, 3.0));
+}
+
+#[test]
+fn another_rider_makes_the_boat_an_empty_one_again() {
+    let (mut game, mut queue) = boarded_boat();
+    let (frames, _) = mpsc::sync_channel(64);
+    let other = PlayEvent::AttachEntity(
+        umicraft_protocol::packets::play::clientbound::AttachEntity {
+            leash: 0,
+            entity_id: 30,
+            vehicle_id: 9,
+        },
+    );
+    handle_net(&mut game, other, &mut queue, &frames);
+    assert!(!game.entities.entities()[&EntityId(9)].boat.driven);
+}
+
+#[test]
+fn the_local_body_sits_in_its_boat() {
+    // Regression: the local body never knew it rode, so it stood in the boat
+    // in the second and third person.
+    let (mut game, _) = boarded_boat();
+    follow_body(&mut game);
+    assert!(game.body.frame_data().riding);
+    game.vehicle = None;
+    follow_body(&mut game);
+    assert!(!game.body.frame_data().riding);
+}
+
+#[test]
+fn the_published_local_body_sits_in_its_boat_in_the_third_person() {
+    let (mut game, mut queue) = boarded_boat();
+    game.perspective = Perspective::ThirdPersonBack;
+    let (frames, received) = mpsc::sync_channel(256);
+    let (chunks, _) = mpsc::sync_channel(64);
+    tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+    let frame = received
+        .try_iter()
+        .find_map(|event| match event {
+            RenderEvent::Frame(frame) => Some(frame),
+            _ => None,
+        })
+        .expect("a frame");
+    let body = frame
+        .entities
+        .iter()
+        .find(|entity| entity.id == EntityId(7))
+        .expect("the local body in the third person");
+    assert!(body.riding);
+}
+
+#[test]
+fn a_boat_that_breaks_under_the_player_lets_it_stand_up() {
+    // Regression: a destroyed boat kept the player seated on the client
+    // (`World.removeEntity` dismounts the rider).
+    use umicraft_protocol::packets::play::clientbound::DestroyEntities;
+
+    let (mut game, mut queue) = boarded_boat();
+    let (frames, _) = mpsc::sync_channel(64);
+    let destroy = PlayEvent::DestroyEntities(DestroyEntities {
+        entity_ids: vec![9],
+    });
+    handle_net(&mut game, destroy, &mut queue, &frames);
+    assert_eq!(game.vehicle, None);
+    follow_body(&mut game);
+    assert!(!game.body.frame_data().riding);
+    // Stood on top of where the boat was (0.6 high).
+    let feet = game.state.as_ref().expect("placed").position();
+    assert_eq!(feet, DVec3::new(3.5, 64.0 + f64::from(0.6_f32), 3.5));
+}
+
+#[test]
+fn leaving_a_boat_stands_the_player_on_top_of_it() {
+    let (mut game, mut queue) = boarded_boat();
+    let (frames, _) = mpsc::sync_channel(64);
+    let leave = PlayEvent::AttachEntity(
+        umicraft_protocol::packets::play::clientbound::AttachEntity {
+            leash: 0,
+            entity_id: 7,
+            vehicle_id: -1,
+        },
+    );
+    handle_net(&mut game, leave, &mut queue, &frames);
+    assert_eq!(game.vehicle, None);
+    assert!(!game.entities.entities()[&EntityId(9)].boat.boarded);
+    let feet = game.state.as_ref().expect("placed").position();
+    assert!(
+        (feet.y - (64.0 + f64::from(0.6_f32))).abs() < 1e-9,
+        "{feet}"
+    );
+}

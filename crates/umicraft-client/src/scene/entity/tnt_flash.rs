@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The white flash of a primed TNT (MCP `RenderTntPrimed.doRender`).
+//! The white flash of a primed TNT and of a lit TNT minecart (MCP
+//! `RenderTntPrimed.doRender`, `RenderTntMinecart.func_180560_a`).
 //!
-//! Every second 5 ticks of its fuse the block is drawn a second time in white,
+//! Every second 5 ticks of the fuse the block is drawn a second time in white,
 //! added over itself, a little more strongly as the fuse runs out: `0.15` at the
 //! start to `0.8` at the end. The block itself is the item pass's; this is
 //! only the white cube over it.
@@ -14,41 +15,31 @@ use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::TextureSlot;
 use umicraft_render::EntityVertex;
 
-use crate::scene::item_world::objects::tnt_matrix;
+use crate::scene::item_world::objects::{cart_flash, primed_flash};
 
 /// How much bigger than the block the cube is, so that it is not the same
 /// surface (the reference uses a polygon offset).
 const GROWTH: f32 = 1.001;
-/// The fuse of a primed TNT when it is created, in ticks.
-const FUSE: f32 = 80.0;
 
-/// How strongly the flash is added at `age` ticks, or `None` between flashes
-/// (`entity.fuse / 5 % 2 == 0`, `(1 - (fuse - partial + 1) / 100) * 0.8`).
-fn strength(age: f32) -> Option<f32> {
-    let fuse = (FUSE - age.floor()) as i32;
-    if fuse < 0 || (fuse / 5) % 2 != 0 {
-        return None;
-    }
-    let remaining = FUSE - age + 1.0;
-    Some(((1.0 - remaining / 100.0) * 0.8).clamp(0.0, 1.0))
-}
-
-/// Adds the flash of the primed TNT `ent` to `additive` when it is on.
+/// Adds the flash of the primed TNT or TNT cart `ent` to `additive` when it
+/// is on.
 pub(super) fn add_flash(
     additive: &mut HashMap<TextureSlot, Vec<EntityVertex>>,
     ent: &EntityRenderSnapshot,
 ) {
-    if ent.kind != EntityKind::PrimedTnt {
-        return;
-    }
-    let Some(strength) = strength(ent.age) else {
+    let flash = match ent.kind {
+        EntityKind::PrimedTnt => primed_flash(ent),
+        EntityKind::Minecart => cart_flash(ent),
+        _ => None,
+    };
+    let Some((block, strength)) = flash else {
         return;
     };
     // The light word of an additive vertex is the tint: this adds `strength`
     // to the frame as stored, like the reference's white at that alpha.
     let channel = (strength * 255.0).round() as u32;
     let light = channel | (channel << 8) | (channel << 16);
-    let cube = tnt_matrix(ent)
+    let cube = block
         * Mat4::from_translation(Vec3::splat(0.5))
         * Mat4::from_scale(Vec3::splat(GROWTH))
         * Mat4::from_translation(Vec3::splat(-0.5));
@@ -91,6 +82,11 @@ mod tests {
         );
         ent.age = age;
         ent
+    }
+
+    /// The strength of the flash of a primed TNT of `age` ticks.
+    fn strength(age: f32) -> Option<f32> {
+        primed_flash(&tnt(age)).map(|(_, strength)| strength)
     }
 
     fn flash(ent: &EntityRenderSnapshot) -> Vec<EntityVertex> {
@@ -138,5 +134,19 @@ mod tests {
         let mut other = tnt(8.0);
         other.kind = EntityKind::Pig;
         assert!(flash(&other).is_empty());
+    }
+
+    #[test]
+    fn a_lit_tnt_cart_flashes_and_an_unlit_one_does_not() {
+        let mut cart =
+            EntityRenderSnapshot::new(EntityId(2), EntityKind::Minecart, Vec3::new(0.0, 64.0, 0.0));
+        cart.object_data = 3;
+        assert!(flash(&cart).is_empty(), "not lit");
+        cart.meta.ignite_cart();
+        // Fuse 80: 80 / 5 is even.
+        assert_eq!(flash(&cart).len(), 36);
+        // A chest cart lit by a stray status does not flash.
+        cart.object_data = 1;
+        assert!(flash(&cart).is_empty());
     }
 }

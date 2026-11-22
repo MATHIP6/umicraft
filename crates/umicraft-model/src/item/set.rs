@@ -19,6 +19,8 @@ use crate::model::ResourceSource;
 const FRAME_MODEL: &str = "block/item_frame";
 /// The model of an item frame holding a map (variant `map`).
 const MAP_FRAME_MODEL: &str = "block/item_frame_map";
+/// The burning furnace, which has no item but shows in a furnace minecart.
+const LIT_FURNACE_MODEL: &str = "block/lit_furnace";
 
 use super::generated::{generate_elements, SpriteMask, MAX_LAYERS};
 use super::names::ITEM_MODEL_NAMES;
@@ -72,6 +74,7 @@ pub struct ItemModelSet {
     texture_keys: BTreeSet<String>,
     frame: Vec<ModelQuad>,
     map_frame: Vec<ModelQuad>,
+    lit_furnace: Vec<ModelQuad>,
 }
 
 impl ItemModelSet {
@@ -98,6 +101,10 @@ impl ItemModelSet {
         }
         set.frame = set.bake_block_model(&mut loader, FRAME_MODEL)?;
         set.map_frame = set.bake_block_model(&mut loader, MAP_FRAME_MODEL)?;
+        // Optional: a source without it only loses the lit furnace of carts.
+        set.lit_furnace = set
+            .bake_block_model(&mut loader, LIT_FURNACE_MODEL)
+            .unwrap_or_default();
         Ok(set)
     }
 
@@ -212,6 +219,13 @@ impl ItemModelSet {
         } else {
             &self.frame
         }
+    }
+
+    /// The quads of the burning furnace block (`block/lit_furnace`, facing
+    /// north), in block space; empty when the source has no such model.
+    #[must_use]
+    pub fn lit_furnace_quads(&self) -> &[ModelQuad] {
+        &self.lit_furnace
     }
 
     /// The model with a given name, e.g. the in-use `bow_pulling_1`.

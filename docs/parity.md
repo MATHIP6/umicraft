@@ -61,7 +61,7 @@ session is [`parity-harness.md`](parity-harness.md).
 | Movement | hunger sprint rule, effects (Speed/Slowness/Jump), Depth Strider | Partial | P2 | Unit tests (`physics`, `game`) | Depth Strider reads the `ench` NBT of the boots. Not compared with vanilla on a live server. |
 | Movement | flying, creative, spectator | Partial | P2 | Unit tests (`physics`, `gamemode`, `game`) | `Player Abilities`, double-tap-space flight, no-clip and the `Camera` view (ADR-0021). Not compared with vanilla on a live server. |
 | Movement | knockback (velocity, explosion) | Partial | P2 | Unit tests (`game`) | `Entity Velocity` and `Explosion` change the local motion (ADR-0021). Not compared with vanilla on a live server. |
-| Movement | riding (boat, minecart, horse, pig) | Partial | P2 | Unit tests (`riding`, `game`) | The rider has no physics and sits on the seat of the vehicle (`umicraft_game::riding`, ADR-0027); `Steer Vehicle` is sent. Horse rearing offset, horse jump (`Entity Action` 5), the sitting body pose and the vehicle rendering (P5) are missing. Not run on a live server. |
+| Movement | riding (boat, minecart, horse, pig) | Partial | P2 | Unit tests (`riding`, `entity::boat`, `game`) | The rider sits on the seat of the vehicle (`umicraft_game::riding`, ADR-0027); `Steer Vehicle` is sent. A boarded boat is simulated by the client like `EntityBoat` (ADR-0091); minecarts glide over 5 ticks, empty boats over 8 then drift. Riders sit (`ModelBiped.isRiding`), the local body included, and their limbs stop swinging. Horse rearing offset and horse jump (`Entity Action` 5) are missing. Not run on a live server. |
 | Movement | serverbound traffic identical to vanilla (0x03, 0x0B, no 0x0C) | Partial | P1 | P1 run, 2026-10-26 ([parity-harness.md](parity-harness.md#p1-run-2026-10-26)) | Implemented in `umicraft_game::traffic`: 0x03 on idle ticks, 0x0B sprint/sneak transitions before the movement packet, 0x0C only while riding, silence until the player's column loads. The live run had the player blocked by terrain, so the moving and sprint ticks still have to be compared from a clear spot. |
 
 ## Interaction
@@ -119,7 +119,7 @@ session is [`parity-harness.md`](parity-harness.md).
 | Entities | typed metadata and variants | Missing | P5 | — |  |
 | Entities | player skins, capes, layers | Missing | P5 | — | `fetch_mojang_skin` implemented but unused. |
 | Entities | armour, held items, name tags, shadows, fire | Missing | P5 | — |  |
-| Entities | objects (projectiles, vehicles, orbs, paintings, frames, stands) | Missing | P5 | — |  |
+| Entities | objects (projectiles, vehicles, orbs, paintings, frames, stands) | Partial | P5 | Unit tests (`item_world::objects`, `entity::vehicles`, `tnt_flash`), offscreen renders | Boats and minecarts: models, shake, rail snapping, the block of each cart type, the custom display tile, the burning furnace and its smoke, the lit TNT cart (swell, flash, smoke), the spinning pig of a spawner cart. Not yet: the rolling sounds of carts (`MovingSoundMinecart`), boat splash particles. |
 | Entities | entity lighting | Missing | P5 | — | Fullbright today. |
 
 ## World render

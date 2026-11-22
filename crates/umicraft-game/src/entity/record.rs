@@ -8,6 +8,7 @@ use glam::{DVec3, Vec3};
 use umicraft_world::LightLevel;
 
 use super::anim::Animation;
+use super::boat::BoatMotion;
 use super::body_yaw::BodyYaw;
 use super::cape::CapeChase;
 use super::flags::EntityFlags;
@@ -39,6 +40,8 @@ pub struct EntityRecord {
     pub target_position: DVec3,
     /// Velocity in blocks per tick.
     pub velocity: Vec3,
+    /// The motion a boat drifts with once it reached its reported position.
+    pub boat: BoatMotion,
     /// Facing direction (MCP `rotationYaw`) in degrees.
     pub yaw: f32,
     /// Previous facing direction for interpolation.
@@ -260,6 +263,7 @@ impl EntityRecord {
             server_position: position,
             target_position: position,
             velocity: Vec3::ZERO,
+            boat: BoatMotion::default(),
             yaw,
             previous_yaw: yaw,
             target_yaw: yaw,
