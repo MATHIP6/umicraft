@@ -3,13 +3,13 @@
 //! `Attach Entity` (0x1B, clientbound, play): attaches an entity to another
 //! (mounting or leashing).
 //!
-//! Layout (MCP `S1BPacketAttachEntity`, `readPacketData`):
+//! Layout (MCP `S1BPacketEntityAttach.readPacketData`):
 //!
 //! | field | width |
 //! |---|---|
-//! | leash | u8 (0 = riding, 1 = leash) |
 //! | entity id | i32 |
 //! | vehicle entity id | i32 |
+//! | leash | u8 (0 = riding, 1 = leash) |
 
 use std::io::{Read, Write};
 
@@ -37,11 +37,11 @@ impl AttachEntity {
     /// # Errors
     /// [`ProtocolError`] on truncation.
     pub fn decode(reader: &mut impl Read) -> Result<Self, ProtocolError> {
+        let entity_id = read_i32(reader)?;
+        let vehicle_id = read_i32(reader)?;
         let mut leash_buf = [0u8; 1];
         reader.read_exact(&mut leash_buf)?;
         let leash = leash_buf[0];
-        let entity_id = read_i32(reader)?;
-        let vehicle_id = read_i32(reader)?;
         Ok(Self {
             leash,
             entity_id,
@@ -56,9 +56,9 @@ impl EncodablePacket for AttachEntity {
     }
 
     fn encode_body(&self, writer: &mut impl Write) -> Result<(), ProtocolError> {
-        writer.write_all(&[self.leash])?;
         writer.write_all(&self.entity_id.to_be_bytes())?;
         writer.write_all(&self.vehicle_id.to_be_bytes())?;
+        writer.write_all(&[self.leash])?;
         Ok(())
     }
 }
@@ -66,6 +66,22 @@ impl EncodablePacket for AttachEntity {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_leash_flag_comes_last_on_the_wire() {
+        // Regression: the flag was read first, so a real server's mount of
+        // player 7 on boat 42 decoded as garbage and the client never rode.
+        let wire = [0, 0, 0, 7, 0, 0, 0, 42, 0];
+        let packet = AttachEntity::decode(&mut wire.as_slice()).unwrap();
+        assert_eq!(
+            packet,
+            AttachEntity {
+                leash: 0,
+                entity_id: 7,
+                vehicle_id: 42,
+            }
+        );
+    }
 
     #[test]
     fn attach_entity_roundtrip() {

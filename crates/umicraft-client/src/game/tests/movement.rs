@@ -381,3 +381,25 @@ fn the_local_body_sits_in_its_boat() {
     follow_body(&mut game);
     assert!(!game.body.frame_data().riding);
 }
+
+#[test]
+fn the_published_local_body_sits_in_its_boat_in_the_third_person() {
+    let (mut game, mut queue) = boarded_boat();
+    game.perspective = Perspective::ThirdPersonBack;
+    let (frames, received) = mpsc::sync_channel(256);
+    let (chunks, _) = mpsc::sync_channel(64);
+    tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+    let frame = received
+        .try_iter()
+        .find_map(|event| match event {
+            RenderEvent::Frame(frame) => Some(frame),
+            _ => None,
+        })
+        .expect("a frame");
+    let body = frame
+        .entities
+        .iter()
+        .find(|entity| entity.id == EntityId(7))
+        .expect("the local body in the third person");
+    assert!(body.riding);
+}
