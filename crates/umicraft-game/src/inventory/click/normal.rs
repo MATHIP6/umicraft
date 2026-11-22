@@ -236,6 +236,30 @@ mod tests {
     }
 
     #[test]
+    fn an_outside_click_with_an_empty_cursor_changes_nothing() {
+        let mut w = TestWindow::player();
+        w.inv.set_slot(10, Some(stack(1, 5)));
+        let mut cursor = None;
+        for right in [false, true] {
+            let clicked = click_with(&mut w, &mut cursor, ClickRequest::outside_empty(right));
+            assert!(clicked.is_none());
+        }
+        assert!(cursor.is_none());
+        assert_eq!(w.inv.slot(10), Some(&stack(1, 5)));
+    }
+
+    #[test]
+    fn a_survival_pick_block_click_changes_nothing() {
+        let mut w = TestWindow::player();
+        w.inv.set_slot(10, Some(stack(1, 5)));
+        let mut cursor = None;
+        let clicked = click_with(&mut w, &mut cursor, ClickRequest::pick_block(10, 0));
+        assert!(clicked.is_none());
+        assert!(cursor.is_none());
+        assert_eq!(w.inv.slot(10), Some(&stack(1, 5)));
+    }
+
+    #[test]
     fn drop_key_removes_one_or_all() {
         let mut w = TestWindow::player();
         w.inv.set_slot(10, Some(stack(1, 5)));

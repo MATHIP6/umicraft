@@ -21,7 +21,7 @@ use crate::game::GameEvent;
 use crate::options::{Action, Binding};
 use crate::screens::anvil_field::Edit;
 use crate::screens::inventory::custom_gui::custom_region;
-use crate::screens::inventory::draw::{screen_input, ScreenFacts};
+use crate::screens::inventory::draw::{screen_input, slot_has_stack, ScreenFacts};
 use crate::screens::inventory::input::{
     Button, ContainerAction, Context, InventoryAction, InventoryKey,
 };
@@ -159,7 +159,6 @@ impl App {
         Some(screen_input(
             viewport,
             world.window_view(),
-            world.status().gamemode,
             !world.hud().effects.is_empty(),
         ))
     }
@@ -188,9 +187,11 @@ impl App {
         if let (ElementState::Pressed, Some(binding)) = (state, Binding::from_mouse(button)) {
             self.inventory_key(binding);
         }
-        let (Some((layout, context)), Some(button)) =
-            (self.inventory_screen(), winit_keys::button(button))
-        else {
+        let pick_block = self.options.keys.get(Action::PickBlock);
+        let (Some((layout, context)), Some(button)) = (
+            self.inventory_screen(),
+            winit_keys::button(button, pick_block),
+        ) else {
             return;
         };
         if state == ElementState::Pressed && button == Button::Left {
@@ -212,7 +213,9 @@ impl App {
     }
     /// Feeds a key or mouse button press to the inventory input through the
     /// key bindings: the hotbar bindings swap the hovered slot, the drop
-    /// binding drops it (`GuiContainer.checkHotbarKeys`).
+    /// binding drops it (`GuiContainer.checkHotbarKeys`, `keyTyped`). A
+    /// pick-block key acts here too; a pick-block mouse button is a click
+    /// instead (see [`Self::inventory_button`]).
     pub(super) fn inventory_key(&mut self, binding: Binding) {
         let Some(key) = self
             .options
@@ -220,6 +223,9 @@ impl App {
             .actions_for(binding)
             .find_map(|action| match action {
                 Action::Drop => Some(InventoryKey::Drop),
+                Action::PickBlock if matches!(binding, Binding::Key(_)) => {
+                    Some(InventoryKey::PickBlock)
+                }
                 other => other
                     .hotbar_slot()
                     .map(|slot| InventoryKey::Number(slot + 1)),
@@ -227,10 +233,16 @@ impl App {
         else {
             return;
         };
-        let Some((layout, context)) = self.inventory_screen() else {
+        let (Some((layout, context)), Some(world)) = (self.inventory_screen(), self.world.as_ref())
+        else {
             return;
         };
-        let action = self.inventory_input.key_pressed(&layout, key, context);
+        let view = world.window_view();
+        let action = self
+            .inventory_input
+            .key_pressed(&layout, key, context, |slot| {
+                slot_has_stack(view, &layout, slot)
+            });
         self.send_inventory(action);
     }
     /// Opens the book or sign screen the game thread asked for.

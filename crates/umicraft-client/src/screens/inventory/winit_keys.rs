@@ -5,25 +5,55 @@
 
 use winit::event::MouseButton;
 
+use crate::options::Binding;
 use crate::screens::inventory::input::Button;
 
 /// The inventory button of a winit mouse button, if it uses it.
-pub fn button(button: MouseButton) -> Option<Button> {
-    match button {
-        MouseButton::Left => Some(Button::Left),
-        MouseButton::Right => Some(Button::Right),
-        MouseButton::Middle => Some(Button::Middle),
+///
+/// `GuiContainer.mouseClicked` reacts to the left and right buttons and to
+/// the one bound to pick block (`keyBindPickBlock.getKeyCode() + 100`, the
+/// middle button by default). The pick-block test comes first, as there.
+pub fn button(button: MouseButton, pick_block: Binding) -> Option<Button> {
+    let binding = Binding::from_mouse(button)?;
+    match binding {
+        Binding::Mouse(index) if binding == pick_block => {
+            i8::try_from(index).ok().map(Button::PickBlock)
+        }
+        Binding::Mouse(0) => Some(Button::Left),
+        Binding::Mouse(1) => Some(Button::Right),
         _ => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use winit::keyboard::KeyCode;
+
     use super::*;
 
+    const MIDDLE: Binding = Binding::Mouse(2);
+
     #[test]
-    fn only_the_three_main_buttons_are_used() {
-        assert_eq!(button(MouseButton::Middle), Some(Button::Middle));
-        assert_eq!(button(MouseButton::Back), None);
+    fn left_and_right_are_always_used() {
+        assert_eq!(button(MouseButton::Left, MIDDLE), Some(Button::Left));
+        assert_eq!(button(MouseButton::Right, MIDDLE), Some(Button::Right));
+        assert_eq!(button(MouseButton::Back, MIDDLE), None);
+    }
+
+    #[test]
+    fn the_pick_block_button_follows_its_binding() {
+        assert_eq!(
+            button(MouseButton::Middle, MIDDLE),
+            Some(Button::PickBlock(2))
+        );
+        let side = Binding::Mouse(3);
+        assert_eq!(button(MouseButton::Middle, side), None);
+        assert_eq!(button(MouseButton::Back, side), Some(Button::PickBlock(3)));
+    }
+
+    #[test]
+    fn a_keyboard_pick_block_frees_the_middle_button() {
+        let key = Binding::Key(KeyCode::KeyR);
+        assert_eq!(button(MouseButton::Middle, key), None);
     }
 }

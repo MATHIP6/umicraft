@@ -13,7 +13,10 @@
 //!   between turns it into a drag split;
 //! - a second left click on the same slot within 250 ms while the cursor
 //!   holds an item collects matching items (mode 6) instead of clicking;
-//! - number keys and Q act on the hovered slot.
+//! - number keys and Q act on the hovered slot;
+//! - the pick-block binding (the middle button by default) sends mode 3 in
+//!   every game mode: the server only clones in creative, but vanilla sends
+//!   the click anyway.
 //!
 //! What the machine cannot know (whether a slot accepts the dragged item, how
 //! many items are left to share) is decided by the game thread, see
@@ -38,8 +41,9 @@ pub enum Button {
     Left,
     /// Secondary button.
     Right,
-    /// Wheel button (creative clone).
-    Middle,
+    /// The mouse button bound to pick block (the wheel by default); its
+    /// index is the button field of the click.
+    PickBlock(i8),
 }
 
 impl Button {
@@ -47,7 +51,7 @@ impl Button {
         match self {
             Self::Left => DragButton::Left,
             Self::Right => DragButton::Right,
-            Self::Middle => DragButton::Middle,
+            Self::PickBlock(_) => DragButton::Middle,
         }
     }
 }
@@ -59,6 +63,8 @@ pub enum InventoryKey {
     Number(u8),
     /// The drop key (Q); Ctrl drops the whole stack.
     Drop,
+    /// The pick-block binding when it is a keyboard key.
+    PickBlock,
 }
 
 /// What the game knows and the machine needs with every event.
@@ -66,8 +72,6 @@ pub enum InventoryKey {
 pub struct Context {
     /// Whether the cursor holds an item right now.
     pub cursor_has_item: bool,
-    /// Whether the player is in creative mode (unlocks the middle button).
-    pub creative: bool,
 }
 
 /// What the player asked the inventory to do.
@@ -185,10 +189,6 @@ impl InventoryInput {
         now: Instant,
     ) -> Option<InventoryAction> {
         let point = self.pointer?;
-        // MCP only clones in creative: the server ignores mode 3 otherwise.
-        if button == Button::Middle && !context.creative {
-            return None;
-        }
         let slot = layout.slot_at(point);
         let double = self.last_click.is_some_and(|last| {
             last.slot == slot
@@ -212,7 +212,9 @@ impl InventoryInput {
                 press.drag = Some(Vec::new());
             } else {
                 press.ignore_release = true;
-                action = self.click_for(button, target).map(InventoryAction::Click);
+                action = Some(InventoryAction::Click(
+                    self.click_for(button, target, context),
+                ));
             }
         }
         self.press = Some(press);
@@ -242,7 +244,7 @@ impl InventoryInput {
         }
         let plain = target_at(layout, point)
             .filter(|_| context.cursor_has_item)
-            .and_then(|target| self.click_for(button, target));
+            .map(|target| self.click_for(button, target, context));
         let slots = press.and_then(|p| p.drag).unwrap_or_default();
         if !context.cursor_has_item {
             self.last_click = None;
@@ -259,20 +261,27 @@ impl InventoryInput {
     }
 
     /// A key went down while the screen is open (`keyTyped`).
+    ///
+    /// `has_stack` tells whether a window slot holds a stack: the drop and
+    /// pick-block keys only act on a slot that does (`theSlot.getHasStack()`).
     pub fn key_pressed(
         &mut self,
         layout: &ScreenLayout,
         key: InventoryKey,
         context: Context,
+        has_stack: impl Fn(usize) -> bool,
     ) -> Option<InventoryAction> {
-        let slot = slot_id(layout.slot_at(self.pointer?)?)?;
+        let index = layout.slot_at(self.pointer?)?;
+        let slot = slot_id(index)?;
         let request = match key {
             // `checkHotbarKeys` only swaps while the cursor is empty.
             InventoryKey::Number(n) if (1..=9).contains(&n) && !context.cursor_has_item => {
                 ClickRequest::number_key(slot, n - 1)
             }
-            InventoryKey::Drop => ClickRequest::drop_key(slot, self.ctrl),
             InventoryKey::Number(_) => return None,
+            _ if !has_stack(index) => return None,
+            InventoryKey::Drop => ClickRequest::drop_key(slot, self.ctrl),
+            InventoryKey::PickBlock => ClickRequest::pick_block(slot, 0),
         };
         Some(InventoryAction::Click(request))
     }
@@ -302,19 +311,19 @@ impl InventoryInput {
     }
 
     /// The click a button makes on `target` (a slot or [`OUTSIDE_SLOT`]).
-    fn click_for(&self, button: Button, target: i16) -> Option<ClickRequest> {
-        let outside = target == OUTSIDE_SLOT;
+    ///
+    /// Outside the window an empty cursor sends mode 4 and a held stack mode
+    /// 0, which drops it (`mouseClicked` and `mouseReleased`); Shift does not
+    /// count there.
+    fn click_for(&self, button: Button, target: i16, context: Context) -> ClickRequest {
+        let right = button == Button::Right;
         match button {
-            Button::Middle => (!outside).then(|| ClickRequest::middle(target)),
-            Button::Left | Button::Right if outside => {
-                Some(ClickRequest::outside(button == Button::Right))
-            }
-            Button::Left | Button::Right if self.shift => Some(ClickRequest::shift(
-                target,
-                i8::from(button == Button::Right),
-            )),
-            Button::Left => Some(ClickRequest::left(target)),
-            Button::Right => Some(ClickRequest::right(target)),
+            Button::PickBlock(index) => ClickRequest::pick_block(target, index),
+            _ if target == OUTSIDE_SLOT && context.cursor_has_item => ClickRequest::outside(right),
+            _ if target == OUTSIDE_SLOT => ClickRequest::outside_empty(right),
+            _ if self.shift => ClickRequest::shift(target, i8::from(right)),
+            Button::Left => ClickRequest::left(target),
+            Button::Right => ClickRequest::right(target),
         }
     }
 }
@@ -340,16 +349,12 @@ mod tests {
 
     const EMPTY: Context = Context {
         cursor_has_item: false,
-        creative: false,
     };
     const HOLDING: Context = Context {
         cursor_has_item: true,
-        creative: false,
     };
-    const CREATIVE: Context = Context {
-        cursor_has_item: false,
-        creative: true,
-    };
+    const MIDDLE: Button = Button::PickBlock(2);
+    const FULL: fn(usize) -> bool = |_| true;
     const OUTSIDE: Point = (1.0, 1.0);
 
     fn layout() -> ScreenLayout {
@@ -549,18 +554,82 @@ mod tests {
         );
     }
 
+    /// Regression: the middle button was dropped outside creative, while
+    /// vanilla sends mode 3 in every game mode.
     #[test]
-    fn the_middle_button_clones_in_creative_only() {
+    fn the_pick_block_button_clicks_in_every_game_mode() {
         let (layout, now) = (layout(), Instant::now());
         let mut input = InventoryInput::new();
         at(&mut input, &layout, 10, EMPTY);
         assert_eq!(
-            input.button_pressed(&layout, Button::Middle, EMPTY, now),
-            None
-        );
-        assert_eq!(
-            input.button_pressed(&layout, Button::Middle, CREATIVE, now),
+            input.button_pressed(&layout, MIDDLE, EMPTY, now),
             click(ClickRequest::middle(10))
+        );
+        assert_eq!(input.button_released(&layout, MIDDLE, EMPTY), None);
+    }
+
+    #[test]
+    fn the_pick_block_button_sends_its_own_index() {
+        let (layout, now) = (layout(), Instant::now());
+        let mut input = InventoryInput::new();
+        at(&mut input, &layout, 10, EMPTY);
+        assert_eq!(
+            input.button_pressed(&layout, Button::PickBlock(4), EMPTY, now),
+            click(ClickRequest::pick_block(10, 4))
+        );
+    }
+
+    #[test]
+    fn the_pick_block_button_clicks_outside_too() {
+        let (layout, now) = (layout(), Instant::now());
+        let mut input = InventoryInput::new();
+        input.pointer_moved(&layout, OUTSIDE, EMPTY);
+        assert_eq!(
+            input.button_pressed(&layout, MIDDLE, EMPTY, now),
+            click(ClickRequest::middle(OUTSIDE_SLOT))
+        );
+    }
+
+    #[test]
+    fn the_pick_block_button_with_a_held_stack_clicks_on_the_release() {
+        let (layout, now) = (layout(), Instant::now());
+        let mut input = InventoryInput::new();
+        at(&mut input, &layout, 10, HOLDING);
+        assert_eq!(input.button_pressed(&layout, MIDDLE, HOLDING, now), None);
+        assert_eq!(
+            input.button_released(&layout, MIDDLE, HOLDING),
+            click(ClickRequest::middle(10))
+        );
+    }
+
+    /// Regression: an empty cursor clicking outside the window sent mode 0;
+    /// vanilla sends mode 4, with Shift held too.
+    #[test]
+    fn an_empty_cursor_clicking_outside_sends_mode_4() {
+        let (layout, now) = (layout(), Instant::now());
+        let mut input = InventoryInput::new();
+        input.pointer_moved(&layout, OUTSIDE, EMPTY);
+        assert_eq!(
+            input.button_pressed(&layout, Button::Left, EMPTY, now),
+            click(ClickRequest::outside_empty(false))
+        );
+        input.set_modifiers(true, false);
+        assert_eq!(
+            input.button_pressed(&layout, Button::Right, EMPTY, now + Duration::from_secs(1)),
+            click(ClickRequest::outside_empty(true))
+        );
+    }
+
+    #[test]
+    fn shift_does_not_change_a_drop_outside() {
+        let (layout, now) = (layout(), Instant::now());
+        let mut input = InventoryInput::new();
+        input.set_modifiers(true, false);
+        input.pointer_moved(&layout, OUTSIDE, HOLDING);
+        input.button_pressed(&layout, Button::Left, HOLDING, now);
+        assert_eq!(
+            input.button_released(&layout, Button::Left, HOLDING),
+            click(ClickRequest::outside(false))
         );
     }
 
@@ -570,15 +639,15 @@ mod tests {
         let mut input = InventoryInput::new();
         at(&mut input, &layout, 12, EMPTY);
         assert_eq!(
-            input.key_pressed(&layout, InventoryKey::Number(3), EMPTY),
+            input.key_pressed(&layout, InventoryKey::Number(3), EMPTY, FULL),
             click(ClickRequest::number_key(12, 2))
         );
         assert_eq!(
-            input.key_pressed(&layout, InventoryKey::Number(3), HOLDING),
+            input.key_pressed(&layout, InventoryKey::Number(3), HOLDING, FULL),
             None
         );
         assert_eq!(
-            input.key_pressed(&layout, InventoryKey::Number(0), EMPTY),
+            input.key_pressed(&layout, InventoryKey::Number(0), EMPTY, FULL),
             None
         );
     }
@@ -589,12 +658,12 @@ mod tests {
         let mut input = InventoryInput::new();
         at(&mut input, &layout, 12, EMPTY);
         assert_eq!(
-            input.key_pressed(&layout, InventoryKey::Drop, EMPTY),
+            input.key_pressed(&layout, InventoryKey::Drop, EMPTY, FULL),
             click(ClickRequest::drop_key(12, false))
         );
         input.set_modifiers(false, true);
         assert_eq!(
-            input.key_pressed(&layout, InventoryKey::Drop, EMPTY),
+            input.key_pressed(&layout, InventoryKey::Drop, EMPTY, FULL),
             click(ClickRequest::drop_key(12, true))
         );
     }
@@ -604,6 +673,32 @@ mod tests {
         let layout = layout();
         let mut input = InventoryInput::new();
         input.pointer_moved(&layout, OUTSIDE, EMPTY);
-        assert_eq!(input.key_pressed(&layout, InventoryKey::Drop, EMPTY), None);
+        assert_eq!(
+            input.key_pressed(&layout, InventoryKey::Drop, EMPTY, FULL),
+            None
+        );
+    }
+
+    /// Regression: Q over an empty slot sent a click; vanilla only drops
+    /// from a slot that holds a stack.
+    #[test]
+    fn drop_and_pick_block_keys_skip_an_empty_slot() {
+        let layout = layout();
+        let mut input = InventoryInput::new();
+        at(&mut input, &layout, 12, EMPTY);
+        for key in [InventoryKey::Drop, InventoryKey::PickBlock] {
+            assert_eq!(input.key_pressed(&layout, key, EMPTY, |_| false), None);
+        }
+    }
+
+    #[test]
+    fn the_pick_block_key_sends_mode_3_with_button_0() {
+        let layout = layout();
+        let mut input = InventoryInput::new();
+        at(&mut input, &layout, 12, EMPTY);
+        assert_eq!(
+            input.key_pressed(&layout, InventoryKey::PickBlock, EMPTY, FULL),
+            click(ClickRequest::pick_block(12, 0))
+        );
     }
 }

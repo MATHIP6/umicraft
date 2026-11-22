@@ -83,18 +83,16 @@ fn screen_layout(viewport: Rect, kind: ScreenKind, has_effects: bool) -> ScreenL
 pub(crate) const CREATIVE_GAMEMODE: u8 = 1;
 
 /// The layout of the open screen in `viewport` and what the input layer needs
-/// to know about the window (`gamemode` is the wire id of the game mode,
-/// `has_effects` whether the player has a potion effect).
+/// to know about the window (`has_effects` whether the player has a potion
+/// effect).
 pub fn screen_input(
     viewport: Rect,
     view: &WindowView,
-    gamemode: u8,
     has_effects: bool,
 ) -> (ScreenLayout, Context) {
     let layout = screen_layout(viewport, screen_kind(view.container.as_ref()), has_effects);
     let context = Context {
         cursor_has_item: view.cursor.is_some(),
-        creative: gamemode == CREATIVE_GAMEMODE,
     };
     (layout, context)
 }
@@ -352,6 +350,13 @@ fn stack_at(view: &WindowView, own_len: usize, index: usize) -> Option<&ItemStac
         SlotTarget::Container(i) => container.slots.get(i)?.as_ref(),
         SlotTarget::Player(i) => view.player_slots.get(i)?.as_ref(),
     }
+}
+
+/// Whether window slot `index` of the open screen holds a stack
+/// (`Slot.getHasStack`, which the pick-block and drop keys need).
+pub(crate) fn slot_has_stack(view: &WindowView, layout: &ScreenLayout, index: usize) -> bool {
+    let own_len = own_slot_count(layout, screen_kind(view.container.as_ref()));
+    stack_at(view, own_len, index).is_some()
 }
 
 /// Draws the inventory or container screen as a modal overlay, including the

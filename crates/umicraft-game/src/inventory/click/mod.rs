@@ -35,9 +35,12 @@ pub enum ClickMode {
     Shift = 1,
     /// A number key, the button being the hotbar index.
     NumberKey = 2,
-    /// Middle click (creative only).
+    /// Pick-block click (the middle button by default). It clones the stack
+    /// in creative and does nothing otherwise, but the client sends it in
+    /// every game mode (`GuiContainer.mouseClicked` does not check the mode).
     Middle = 3,
-    /// Drop key (Q), the button 1 meaning the whole stack.
+    /// Drop key (Q), the button 1 meaning the whole stack. A click outside
+    /// the window with an empty cursor is sent in this mode too.
     Drop = 4,
     /// A drag split; the button encodes the phase.
     Drag = 5,
@@ -92,9 +95,17 @@ impl ClickRequest {
     /// A middle click.
     #[must_use]
     pub fn middle(slot: i16) -> Self {
+        Self::pick_block(slot, 2)
+    }
+
+    /// A pick-block click on `slot` (or [`OUTSIDE_SLOT`]). `button` is the
+    /// mouse button the binding uses, or 0 when a keyboard key is bound
+    /// (`GuiContainer.keyTyped`).
+    #[must_use]
+    pub fn pick_block(slot: i16, button: i8) -> Self {
         Self {
             slot,
-            button: 2,
+            button,
             mode: ClickMode::Middle,
         }
     }
@@ -124,6 +135,18 @@ impl ClickRequest {
     #[must_use]
     pub fn outside(right: bool) -> Self {
         Self::normal(OUTSIDE_SLOT, i8::from(right))
+    }
+
+    /// A click outside the window while the cursor is empty. Vanilla sends it
+    /// in mode 4 (`GuiContainer.mouseClicked`: `l == -999` gives `i1 = 4`).
+    /// The server ignores it, but it uses up an action number.
+    #[must_use]
+    pub fn outside_empty(right: bool) -> Self {
+        Self {
+            slot: OUTSIDE_SLOT,
+            button: i8::from(right),
+            mode: ClickMode::Drop,
+        }
     }
 
     fn normal(slot: i16, button: i8) -> Self {

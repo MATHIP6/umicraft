@@ -358,8 +358,10 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
   double click and Shift + double click in every tab, and the middle-button
   drag are done. The lists hold plain banners, as in 1.8; patterned banners
   from a server show their layers in the tooltip.
-- **Survival gaps:** pick
-  block key over a slot, touchscreen mode, empty-cursor outside click (mode 4).
+- **Survival gaps (done 2026-11-22):** the pick-block binding (mouse button
+  or key) and the empty-cursor outside click (mode 4) send what vanilla sends,
+  and the drop and pick-block keys only act on a filled slot. Touchscreen mode
+  is out by owner decision.
 - **Language keys of item names (done 2026-11-07):** the loader itself
   existed (P10); the item names used registry keys that the vanilla `.lang`
   does not contain. `items::unlocalized_name` now gives the 1.8 keys with the
