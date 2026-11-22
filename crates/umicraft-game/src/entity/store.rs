@@ -372,7 +372,8 @@ impl EntityStore {
 
     /// Teleports an entity to an absolute location (`Entity Teleport`).
     ///
-    /// Interpolated over 3 ticks like a relative move, as in vanilla.
+    /// Interpolated like a relative move (3 ticks, more for boats and
+    /// minecarts), as in vanilla.
     pub fn teleport(
         &mut self,
         id: EntityId,
@@ -394,10 +395,12 @@ impl EntityStore {
         }
     }
 
-    /// Sets an entity's velocity.
+    /// Sets an entity's velocity; a boat also drifts with it
+    /// (`EntityBoat.setVelocity` sets the motion too).
     pub fn set_velocity(&mut self, id: EntityId, velocity: Vec3) {
         if let Some(entity) = self.entities.get_mut(&id) {
             entity.velocity = velocity;
+            entity.boat.set_velocity(velocity);
         }
     }
 

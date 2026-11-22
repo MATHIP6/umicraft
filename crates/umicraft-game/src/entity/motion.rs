@@ -6,6 +6,7 @@
 use glam::DVec3;
 
 use super::angle::wrap_degrees;
+use super::boat::EMPTY_BOAT_INTERPOLATION_TICKS;
 use super::kind::EntityKind;
 use super::meta::Variant;
 use super::mob_state::MobTick;
@@ -14,6 +15,20 @@ use super::record::EntityRecord;
 /// Ticks over which a movement or teleport packet is applied
 /// (MCP `NetHandlerPlayClient`: `setPositionAndRotation2(…, 3, …)`).
 pub const INTERPOLATION_TICKS: u8 = 3;
+
+/// Ticks a minecart takes to reach a reported position: the 3 of the packet
+/// plus 2 (`EntityMinecart.setPositionAndRotation2`: `turnProgress`).
+pub const MINECART_INTERPOLATION_TICKS: u8 = 3 + 2;
+
+/// Ticks `kind` takes to reach a reported position: boats and minecarts
+/// override `setPositionAndRotation2` with longer glides.
+const fn interpolation_ticks(kind: EntityKind) -> u8 {
+    match kind {
+        EntityKind::Minecart => MINECART_INTERPOLATION_TICKS,
+        EntityKind::Boat => EMPTY_BOAT_INTERPOLATION_TICKS,
+        _ => INTERPOLATION_TICKS,
+    }
+}
 
 /// A teleport this close to the current position keeps it, per axis
 /// (MCP `handleEntityTeleport`: 1/32 block horizontally, 1/64 vertically).
@@ -29,14 +44,18 @@ impl EntityRecord {
         self.body_yaw.begin_tick();
     }
 
-    /// Starts gliding to `target` and the given rotation over
-    /// [`INTERPOLATION_TICKS`] (MCP `Entity.setPositionAndRotation2`).
+    /// Starts gliding to `target` and the given rotation over the
+    /// interpolation ticks of the kind (MCP `Entity.setPositionAndRotation2`
+    /// and its overrides). A boat also takes its velocity back as its motion.
     pub(super) fn retarget(&mut self, target: DVec3, yaw: f32, pitch: f32, on_ground: bool) {
         self.target_position = target;
         self.target_yaw = yaw;
         self.target_pitch = pitch;
         self.on_ground = on_ground;
-        self.interpolation_steps = INTERPOLATION_TICKS;
+        self.interpolation_steps = interpolation_ticks(self.kind);
+        if self.kind == EntityKind::Boat {
+            self.boat.set_velocity(self.velocity);
+        }
     }
 
     /// Applies an absolute position from `Entity Teleport`.
@@ -55,8 +74,14 @@ impl EntityRecord {
 
     /// Moves one step towards the target: each tick covers `1 / steps` of
     /// what remains (MCP `EntityLivingBase.onLivingUpdate`).
+    ///
+    /// A boat with no step left drifts on with its motion
+    /// ([`super::boat::BoatMotion::drift`]).
     pub(super) fn glide_to_target(&mut self) {
         if self.interpolation_steps == 0 {
+            if self.kind == EntityKind::Boat {
+                self.position = self.boat.drift(self.position, self.on_ground);
+            }
             return;
         }
         let steps = f32::from(self.interpolation_steps);
@@ -181,6 +206,43 @@ mod tests {
             xs.push(entity.position.x);
         }
         assert_eq!(xs, vec![3.0, 6.0, 9.0, 9.0]);
+    }
+
+    #[test]
+    fn a_minecart_glides_over_five_ticks_and_a_boat_over_eight() {
+        for (kind, ticks) in [(EntityKind::Minecart, 5), (EntityKind::Boat, 8)] {
+            let mut entity = record(kind);
+            entity.retarget(DVec3::new(8.0, 64.0, 0.0), 0.0, 0.0, false);
+            for _ in 0..ticks {
+                entity.begin_tick();
+                entity.glide_to_target();
+            }
+            assert!((entity.position.x - 8.0).abs() < 1e-9, "{kind:?}");
+            entity.begin_tick();
+            entity.glide_to_target();
+            assert!((entity.position.x - 8.0).abs() < 1e-9, "{kind:?} at rest");
+        }
+    }
+
+    #[test]
+    fn a_boat_drifts_on_with_its_velocity_after_the_glide() {
+        let mut boat = record(EntityKind::Boat);
+        boat.velocity = glam::Vec3::new(0.1, 0.0, 0.0);
+        boat.retarget(DVec3::new(0.0, 64.0, 0.0), 0.0, 0.0, false);
+        for _ in 0..8 {
+            boat.glide_to_target();
+        }
+        assert_eq!(boat.position.x, 0.0);
+        boat.glide_to_target();
+        assert!((boat.position.x - 0.1).abs() < 1e-6, "{}", boat.position.x);
+        // A minecart does not drift.
+        let mut cart = record(EntityKind::Minecart);
+        cart.velocity = glam::Vec3::new(0.1, 0.0, 0.0);
+        cart.retarget(DVec3::new(0.0, 64.0, 0.0), 0.0, 0.0, false);
+        for _ in 0..6 {
+            cart.glide_to_target();
+        }
+        assert_eq!(cart.position.x, 0.0);
     }
 
     #[test]
