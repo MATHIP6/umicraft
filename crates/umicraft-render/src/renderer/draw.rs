@@ -103,6 +103,7 @@ impl Renderer {
         self.world_items.draw(&mut pass);
         self.world_glint
             .draw_world(&mut pass, &self.local_terrain_bind_group);
+        draw_stats.entities += self.draw_entity_overlays(&mut pass);
         self.stamp(&mut pass, 3);
 
         // `renderWorldPass` draws the selection box right after the entities,
@@ -262,14 +263,23 @@ impl Renderer {
                 .render_apparition(pass, &self.local_camera_bind_group, batches);
         }
 
-        // The glow of the entities is added over them, without writing depth.
+        draws
+    }
+
+    /// The glow and the glint added over the entities, without writing depth.
+    ///
+    /// They come after the blocks the item pass draws for objects (primed TNT,
+    /// the block in a minecart): the white flash of TNT is added over its
+    /// block, which would otherwise paint over it, and an item in front of a
+    /// glow now hides it. Returns the draw calls.
+    fn draw_entity_overlays<'a>(&'a self, pass: &mut wgpu::RenderPass<'a>) -> u32 {
+        let mut draws = 0;
         if !self.additive_batches.is_empty() {
             draws += self.additive_batches.batch_count();
             let batches = self.additive_batches.iter();
             self.entity_renderer
                 .render_additive(pass, &self.local_camera_bind_group, batches);
         }
-
         if !self.glint_batches.is_empty() {
             draws += self.glint_batches.batch_count();
             let batches = self.glint_batches.iter();

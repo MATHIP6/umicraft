@@ -3,10 +3,12 @@
 //! The white flash of a primed TNT and of a lit TNT minecart (MCP
 //! `RenderTntPrimed.doRender`, `RenderTntMinecart.func_180560_a`).
 //!
-//! Every second 5 ticks of the fuse the block is drawn a second time in white,
-//! added over itself, a little more strongly as the fuse runs out: `0.15` at the
-//! start to `0.8` at the end. The block itself is the item pass's; this is
-//! only the white cube over it.
+//! Every second 5 ticks of the fuse the block is drawn a second time, added
+//! over itself in full white. The reference sets a colour whose alpha grows
+//! from `0.15` to `0.8`, but `renderBlockBrightness` gives every vertex its
+//! own opaque white (`putColorRGB_F` writes an alpha of 255), which wins: with
+//! `blendFunc(SRC_ALPHA, DST_ALPHA)` the block turns plain white. The block
+//! itself is the item pass's; this is only the white cube over it.
 
 use std::collections::HashMap;
 
@@ -32,13 +34,11 @@ pub(super) fn add_flash(
         EntityKind::Minecart => cart_flash(ent),
         _ => None,
     };
-    let Some((block, strength)) = flash else {
+    let Some(block) = flash else {
         return;
     };
-    // The light word of an additive vertex is the tint: this adds `strength`
-    // to the frame as stored, like the reference's white at that alpha.
-    let channel = (strength * 255.0).round() as u32;
-    let light = channel | (channel << 8) | (channel << 16);
+    // The light word of an additive vertex is the tint: full white.
+    let light = 0x00FF_FFFF;
     let cube = block
         * Mat4::from_translation(Vec3::splat(0.5))
         * Mat4::from_scale(Vec3::splat(GROWTH))
@@ -84,9 +84,9 @@ mod tests {
         ent
     }
 
-    /// The strength of the flash of a primed TNT of `age` ticks.
-    fn strength(age: f32) -> Option<f32> {
-        primed_flash(&tnt(age)).map(|(_, strength)| strength)
+    /// Whether the flash of a primed TNT of `age` ticks shows.
+    fn flashing(age: f32) -> bool {
+        primed_flash(&tnt(age)).is_some()
     }
 
     fn flash(ent: &EntityRenderSnapshot) -> Vec<EntityVertex> {
@@ -98,19 +98,17 @@ mod tests {
     #[test]
     fn it_flashes_for_five_ticks_out_of_ten() {
         // `fuse / 5` is even: fuse 80, then 74 to 70, 64 to 60, ...
-        let on: Vec<u32> = (0..=20u32)
-            .filter(|age| strength(*age as f32).is_some())
-            .collect();
+        let on: Vec<u32> = (0..=20u32).filter(|age| flashing(*age as f32)).collect();
         assert_eq!(on, [0, 6, 7, 8, 9, 10, 16, 17, 18, 19, 20]);
     }
 
     #[test]
-    fn it_grows_stronger_as_the_fuse_runs_out() {
-        let early = strength(0.0).unwrap();
-        let late = strength(78.0).unwrap();
-        assert!((early - 0.152).abs() < 1e-3, "{early}");
-        assert!(late > 0.75 && late <= 0.8, "{late}");
-        assert!(strength(81.0).is_none(), "the fuse is spent");
+    fn the_flash_is_plain_white_from_the_first_tick() {
+        // Regression: the flash added the 0.15 to 0.8 alpha of the reference's
+        // colour, which its vertex colours override, so it barely showed.
+        let cube = flash(&tnt(0.0));
+        assert!(cube.iter().all(|vertex| vertex.light == 0x00FF_FFFF));
+        assert!(!flashing(81.0), "the fuse is spent");
     }
 
     #[test]
