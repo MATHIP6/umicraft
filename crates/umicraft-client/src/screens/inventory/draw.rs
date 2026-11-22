@@ -10,7 +10,9 @@
 use umicraft_assets::GuiAtlas;
 use umicraft_game::entity::EntityId;
 use umicraft_game::inventory::effect_list::EffectLine;
-use umicraft_game::inventory::tooltip::{effect_name_key, TooltipColor, TooltipLine, TooltipText};
+use umicraft_game::inventory::tooltip::{
+    effect_name_key, enchant_row_lines, EnchantRow, TooltipColor, TooltipLine, TooltipText,
+};
 use umicraft_game::inventory::{
     resolve_container_slot, ContainerView, DragPreview, SlotTarget, WindowKind, WindowView,
 };
@@ -521,6 +523,9 @@ pub(crate) fn draw_inventory_overlay(
     if let Some(tooltip) = hover.and_then(|hotspot| beacon_tooltip(hotspot, &state)) {
         draw_beacon_tooltip(ui, atlas, viewport, &layout, tooltip);
     }
+    if let Some(Hotspot::Enchant(row)) = hover {
+        draw_enchant_tooltip(ui, atlas, viewport, &layout, &state, row);
+    }
     // `InventoryEffectRenderer.drawScreen` draws the list after the rest of
     // the screen, the held stack and the tooltip included.
     if kind == ScreenKind::Player {
@@ -644,6 +649,43 @@ fn draw_beacon_tooltip(
         }
     };
     draw_text_tooltip(ui, atlas, viewport, layout, text);
+}
+
+/// Top of the first enchanting row and the distance between rows.
+const ENCHANT_ROW_TOP: f32 = 14.0;
+const ENCHANT_ROW_STEP: f32 = 19.0;
+/// Height of the part of a row that shows its tooltip: 17 of its 19 pixels
+/// (`isPointInRegion(60, 14 + 19 * j, 108, 17)`).
+const ENCHANT_TOOLTIP_HEIGHT: f32 = 17.0;
+
+/// Shows the clue and the cost of a hovered enchanting row
+/// (`GuiEnchantment.drawScreen`).
+fn draw_enchant_tooltip(
+    ui: &mut Ui,
+    atlas: &FontAtlas,
+    viewport: Rect,
+    layout: &ScreenLayout,
+    state: &ScreenState<'_>,
+    row: u8,
+) {
+    let Some(pointer) = ui.pointer() else {
+        return;
+    };
+    let scale = layout.scale as f32;
+    let top = layout.background.y + (ENCHANT_ROW_TOP + f32::from(row) * ENCHANT_ROW_STEP) * scale;
+    if pointer[1] >= top + ENCHANT_TOOLTIP_HEIGHT * scale {
+        return;
+    }
+    let lines = enchant_row_lines(EnchantRow {
+        properties: state.properties,
+        row,
+        lapis: state.lapis,
+        xp_level: state.xp_level,
+        creative: state.creative,
+    });
+    if let Some(lines) = lines {
+        draw_tooltip(ui, atlas, viewport, scale, pointer, &lines);
+    }
 }
 
 /// Draws a one-line white tooltip at the pointer

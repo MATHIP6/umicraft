@@ -45,8 +45,10 @@ use crate::items::{self, ItemKind, Tier, ToolKind};
 use crate::nbt::Nbt;
 
 mod banner;
+mod enchant_clue;
 mod name;
 mod potion;
+pub use enchant_clue::{enchant_row_lines, EnchantRow};
 pub(crate) use potion::elapsed_time;
 pub use potion::{effect_name_key, has_effects as potion_has_effects};
 
@@ -430,18 +432,24 @@ pub(crate) fn stored_enchantments(root: Option<&Nbt>) -> Vec<Enchantment> {
 /// One enchantment line (`Enchantment.getTranslatedName`), `None` for an id
 /// the 1.8 table does not know (vanilla skips those).
 fn enchantment_line(enchantment: &Enchantment) -> Option<TooltipLine> {
-    let key = enchantment_key(enchantment.id)?;
-    let level = if (1..=MAX_NAMED_LEVEL).contains(&enchantment.level) {
-        TooltipText::key(format!("enchantment.level.{}", enchantment.level))
+    let text = enchantment_name(enchantment.id, enchantment.level)?;
+    Some(TooltipLine::plain(text, TooltipColor::Gray))
+}
+
+/// `Enchantment.getTranslatedName(level)`: the name and the level in roman
+/// numerals, `None` for an id the 1.8 table does not know.
+fn enchantment_name(id: i16, level: u16) -> Option<TooltipText> {
+    let key = enchantment_key(id)?;
+    let level = if (1..=MAX_NAMED_LEVEL).contains(&level) {
+        TooltipText::key(format!("enchantment.level.{level}"))
     } else {
-        TooltipText::literal(enchantment.level.to_string())
+        TooltipText::literal(level.to_string())
     };
-    let text = TooltipText::Concat(vec![
+    Some(TooltipText::Concat(vec![
         TooltipText::key(key),
         TooltipText::literal(" "),
         level,
-    ]);
-    Some(TooltipLine::plain(text, TooltipColor::Gray))
+    ]))
 }
 
 /// The language key of an enchantment id (`Enchantment.getName`).
