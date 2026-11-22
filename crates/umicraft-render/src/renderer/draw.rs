@@ -211,6 +211,10 @@ impl Renderer {
             pass.set_pipeline(&self.terrain_pipeline);
             draws += self.draw_visible_opaque(pass, false);
         }
+        // The moving blocks need the cutout pipeline whatever came before:
+        // with no chunk in view, the pipeline left from the sky pass was still
+        // set, and wgpu aborted on its incompatible bind group.
+        pass.set_pipeline(&self.terrain_pipeline);
         self.moving_blocks.draw_opaque(pass);
         draws
     }
