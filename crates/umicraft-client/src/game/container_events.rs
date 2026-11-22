@@ -39,7 +39,13 @@ pub(super) fn apply_container_action(
 ) {
     match action {
         ContainerAction::Press(hotspot) => press(game, hotspot, queue),
-        ContainerAction::Rename(name) => rename(&name, queue),
+        ContainerAction::Rename(name) => {
+            // `GuiRepair.renameItem` renames the client's container too.
+            let creative = game.gamemode == GameMode::Creative;
+            game.windows.set_player(creative, game.vitals.level);
+            game.windows.rename_anvil(&name);
+            rename(&name, queue);
+        }
     }
     publish_inventory(game, frames);
 }

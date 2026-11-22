@@ -36,8 +36,11 @@ pub enum SlotKind {
         /// Number of grid slots after the result slot.
         grid_len: u8,
     },
-    /// A take-only slot (furnace and anvil results).
+    /// A take-only slot (the furnace result).
     Output,
+    /// The anvil result: take-only, only with the levels to pay it, and
+    /// taking it uses the inputs (see [`super::anvil`]).
+    AnvilResult,
     /// The villager result: take-only, and taking it pays the offer
     /// (`SlotMerchantResult`, see [`super::merchant`]).
     MerchantResult,
@@ -59,7 +62,10 @@ impl SlotKind {
     pub fn accepts(self, stack: &ItemStack) -> bool {
         match self {
             Self::Normal => true,
-            Self::CraftingResult { .. } | Self::Output | Self::MerchantResult => false,
+            Self::CraftingResult { .. }
+            | Self::Output
+            | Self::MerchantResult
+            | Self::AnvilResult => false,
             Self::Armor(slot) => accepts_armor(slot, stack),
             Self::PotionBottle => matches!(stack.item_id, POTION | GLASS_BOTTLE),
             Self::EnchantLapis => stack.item_id == DYE && stack.damage == BLUE_DYE_DAMAGE,
@@ -110,7 +116,7 @@ fn own_slot_kinds(kind: WindowKind, count: usize) -> Vec<SlotKind> {
             Normal,
         ],
         WindowKind::EnchantingTable => &[Normal, SlotKind::EnchantLapis],
-        WindowKind::Anvil => &[Normal, Normal, Output],
+        WindowKind::Anvil => &[Normal, Normal, SlotKind::AnvilResult],
         WindowKind::Villager => &[Normal, Normal, SlotKind::MerchantResult],
         WindowKind::Beacon => &[SlotKind::BeaconPayment],
         WindowKind::Horse => &[SlotKind::Saddle, SlotKind::HorseArmor],

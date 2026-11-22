@@ -14,6 +14,7 @@
 //! own slots first, then the 27 backpack and the 9 hotbar slots
 //! ([`kind::resolve_container_slot`]).
 
+pub mod anvil;
 pub mod armor;
 pub mod click;
 pub mod creative;

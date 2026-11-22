@@ -4,6 +4,7 @@
 
 use umicraft_protocol::packets::play::ItemStack;
 
+use super::anvil::{self, AnvilState};
 use super::armor;
 use super::click::{drag_targets, slot_click, ClickMode, ClickRequest, DragState};
 use super::kind::{
@@ -45,6 +46,8 @@ pub struct ContainerWindow {
     pub selected_trade: usize,
     /// The horse of a horse window, see [`WindowManager::set_horse`].
     pub horse: Option<HorseWindow>,
+    /// The name, cost and player of an anvil window.
+    anvil: Option<AnvilState>,
     kinds: Vec<SlotKind>,
 }
 
@@ -139,9 +142,9 @@ impl WindowManager {
             match resolve_container_slot(slot, container.container_slots.len()) {
                 Some(SlotTarget::Container(idx)) => {
                     container.container_slots[idx] = value;
-                    // `Slot.putStack` into a wanted slot resets the result.
+                    // `Slot.putStack` into an input slot redoes the result.
                     if idx != merchant::RESULT {
-                        self.reset_merchant();
+                        self.refresh_result();
                     }
                 }
                 Some(SlotTarget::Player(idx)) => {
@@ -166,6 +169,7 @@ impl WindowManager {
             trades: Vec::new(),
             selected_trade: 0,
             horse: None,
+            anvil: (kind == WindowKind::Anvil).then(AnvilState::default),
             kinds: container_window_kinds(kind, own),
         });
         self.reset_transactions();
@@ -222,6 +226,10 @@ impl WindowManager {
             container.properties.resize(idx + 1, 0);
         }
         container.properties[idx] = value;
+        // `ContainerRepair.updateProgressBar(0)` sets `maximumCost`.
+        if let (0, Some(anvil)) = (idx, container.anvil.as_mut()) {
+            anvil.cost = i32::from(value);
+        }
     }
 
     /// Stores the offers of the villager window `list` belongs to; offers for
@@ -254,7 +262,7 @@ impl WindowManager {
         }
         container.selected_trade = next;
         // `ContainerMerchant.setCurrentRecipeIndex` resets the result.
-        self.reset_merchant();
+        self.refresh_result();
         Some(next)
     }
 
@@ -307,40 +315,83 @@ impl WindowManager {
         if request.mode == ClickMode::Shift && self.cursor.is_none() {
             self.remember_shift_reference(request.slot);
         }
-        let wanted = self.merchant_inputs();
+        if let Some(anvil) = self.container.as_mut().and_then(|c| c.anvil.as_mut()) {
+            anvil.creative = creative;
+        }
+        let inputs = self.result_inputs();
         let clicked = self
             .with_space(|space, cursor, drag| slot_click(space, cursor, drag, request, creative));
-        if self.merchant_inputs() != wanted {
-            self.reset_merchant();
+        if self.result_inputs() != inputs {
+            self.refresh_result();
         }
+        self.sync_anvil_cost();
         clicked
     }
 
-    /// The two wanted-item slots of an open villager window
-    /// (`InventoryMerchant` resets its result whenever they change).
-    fn merchant_inputs(&self) -> Option<[Option<ItemStack>; 2]> {
+    /// The two input slots of an open villager or anvil window, whose result
+    /// the client computes (`InventoryMerchant` and `ContainerRepair` redo
+    /// it whenever they change).
+    fn result_inputs(&self) -> Option<[Option<ItemStack>; 2]> {
         let container = self
             .container
             .as_ref()
-            .filter(|c| c.kind == WindowKind::Villager)?;
+            .filter(|c| matches!(c.kind, WindowKind::Villager | WindowKind::Anvil))?;
         let slot = |index: usize| container.container_slots.get(index).cloned().flatten();
         Some([slot(0), slot(1)])
     }
 
     /// Fills the result slot of an open villager window from its offers
-    /// (`InventoryMerchant.resetRecipeAndSlots`).
-    fn reset_merchant(&mut self) {
-        if let Some(container) = self
-            .container
-            .as_mut()
-            .filter(|c| c.kind == WindowKind::Villager)
-        {
-            merchant::reset(
+    /// (`InventoryMerchant.resetRecipeAndSlots`), or of an anvil from its
+    /// inputs and name (`ContainerRepair.updateRepairOutput`).
+    fn refresh_result(&mut self) {
+        let Some(container) = self.container.as_mut() else {
+            return;
+        };
+        match (container.kind, container.anvil.as_mut()) {
+            (WindowKind::Villager, _) => merchant::reset(
                 &mut container.container_slots,
                 &container.trades,
                 container.selected_trade,
-            );
+            ),
+            (_, Some(anvil)) => anvil::update_output(&mut container.container_slots, anvil),
+            _ => return,
         }
+        self.sync_anvil_cost();
+    }
+
+    /// Shows the anvil's computed cost as window property 0, which the cost
+    /// line reads (`GuiRepair` reads `maximumCost`; the server sends it only
+    /// when the window opens).
+    fn sync_anvil_cost(&mut self) {
+        let Some(container) = self.container.as_mut() else {
+            return;
+        };
+        let Some(anvil) = container.anvil.as_ref() else {
+            return;
+        };
+        if container.properties.is_empty() {
+            container.properties.push(0);
+        }
+        container.properties[0] = i16::try_from(anvil.cost).unwrap_or(i16::MAX);
+    }
+
+    /// Tells an open anvil the player's game mode and level, which decide
+    /// whether its result can be taken and how dear it may be.
+    pub fn set_player(&mut self, creative: bool, level: i32) {
+        if let Some(anvil) = self.container.as_mut().and_then(|c| c.anvil.as_mut()) {
+            anvil.creative = creative;
+            anvil.level = level;
+        }
+    }
+
+    /// The name typed into an open anvil (`ContainerRepair.updateItemName`,
+    /// with the text `MC|ItemName` sends): the result is computed again.
+    pub fn rename_anvil(&mut self, name: &str) {
+        let Some(anvil) = self.container.as_mut().and_then(|c| c.anvil.as_mut()) else {
+            return;
+        };
+        anvil.name = name.to_string();
+        self.refresh_result();
     }
 
     /// Remembers the stack a shift-click starts on (`shiftClickedSlot`), the
@@ -424,13 +475,14 @@ impl WindowManager {
                     kinds,
                     trades,
                     selected_trade,
+                    anvil,
                     ..
                 } = window;
                 let space = ClickSpace::container_window(inventory, container_slots, kinds);
-                let mut space = if *kind == WindowKind::Villager {
-                    space.with_merchant(trades, *selected_trade)
-                } else {
-                    space
+                let mut space = match (kind, anvil) {
+                    (WindowKind::Villager, _) => space.with_merchant(trades, *selected_trade),
+                    (_, Some(anvil)) => space.with_anvil(anvil),
+                    _ => space,
                 };
                 f(&mut space, cursor, drag)
             }
@@ -708,6 +760,66 @@ mod tests {
         wm.click(ClickRequest::right(2), false);
         assert_eq!(wm.cursor(), Some(&stack(388, 1)));
         assert_eq!(villager_slot(&wm, 0), None);
+    }
+
+    /// An anvil window (id 5) with a worn diamond sword in its first slot and
+    /// the cursor holding two diamonds.
+    fn anvil_window(level: i32) -> WindowManager {
+        let mut wm = WindowManager::new();
+        wm.open_window(5, WindowKind::Anvil, "Repair".into(), 3);
+        wm.set_player(false, level);
+        let sword = ItemStack {
+            damage: 1000,
+            ..stack(276, 1)
+        };
+        wm.apply_set_slot(5, 0, sword);
+        wm.set_cursor(Some(stack(264, 2)));
+        wm
+    }
+
+    /// Regression: the anvil result and its cost showed up only after the
+    /// next click; the server sends neither for an accepted click.
+    #[test]
+    fn placing_the_material_shows_the_anvil_result_and_cost_at_once() {
+        let mut wm = anvil_window(30);
+        wm.click(ClickRequest::left(1), false);
+        let container = wm.view().container.expect("an anvil");
+        assert_eq!(container.slots[2].as_ref().map(|s| s.item_id), Some(276));
+        assert_eq!(container.properties.first(), Some(&2));
+    }
+
+    #[test]
+    fn the_anvil_result_needs_the_levels() {
+        let mut wm = anvil_window(1);
+        wm.click(ClickRequest::left(1), false);
+        wm.click(ClickRequest::left(2), false);
+        assert_eq!(wm.cursor(), None);
+        let container = wm.view().container.expect("an anvil");
+        assert!(container.slots[2].is_some(), "the result stays");
+    }
+
+    #[test]
+    fn taking_the_anvil_result_uses_the_inputs() {
+        let mut wm = anvil_window(30);
+        wm.click(ClickRequest::left(1), false);
+        wm.click(ClickRequest::left(2), false);
+        assert_eq!(
+            wm.cursor().map(|s| (s.item_id, s.damage)),
+            Some((276, 1000 - 2 * 390))
+        );
+        let container = wm.view().container.expect("an anvil");
+        assert!(container.slots.iter().all(Option::is_none));
+        assert_eq!(container.properties.first(), Some(&0));
+    }
+
+    #[test]
+    fn renaming_the_anvil_item_costs_a_level() {
+        let mut wm = anvil_window(30);
+        wm.set_cursor(None);
+        wm.rename_anvil("Excalibur");
+        let container = wm.view().container.expect("an anvil");
+        assert!(container.slots[2].as_ref().is_some_and(|s| s.nbt.is_some()));
+        assert_eq!(container.properties.first(), Some(&1));
     }
 
     /// A horse window (id 3) with iron horse armour in the first backpack slot.

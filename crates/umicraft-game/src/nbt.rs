@@ -91,6 +91,40 @@ impl Nbt {
         }
     }
 
+    /// Mutable access to the entry `key` of a compound.
+    pub fn get_mut(&mut self, key: &str) -> Option<&mut Self> {
+        match self {
+            Self::Compound(entries) => entries
+                .iter_mut()
+                .find_map(|(name, value)| (name == key).then_some(value)),
+            _ => None,
+        }
+    }
+
+    /// Sets the entry `key` of a compound (`NBTTagCompound.setTag`): an
+    /// existing entry keeps its place, a new one goes last. Does nothing on
+    /// another tag.
+    pub fn insert(&mut self, key: &str, value: Self) {
+        if let Some(slot) = self.get_mut(key) {
+            *slot = value;
+        } else if let Self::Compound(entries) = self {
+            entries.push((key.to_string(), value));
+        }
+    }
+
+    /// Removes the entry `key` of a compound (`removeTag`).
+    pub fn remove(&mut self, key: &str) {
+        if let Self::Compound(entries) = self {
+            entries.retain(|(name, _)| name != key);
+        }
+    }
+
+    /// Whether a compound has no entry (`hasNoTags`); `false` for another tag.
+    #[must_use]
+    pub fn is_empty_compound(&self) -> bool {
+        matches!(self, Self::Compound(entries) if entries.is_empty())
+    }
+
     /// The text of a `TAG_String`.
     pub fn as_str(&self) -> Option<&str> {
         match self {
@@ -382,5 +416,20 @@ mod tests {
     #[test]
     fn only_a_compound_can_be_a_root() {
         assert_eq!(Nbt::Int(1).to_root_bytes(), None);
+    }
+
+    #[test]
+    fn compound_entries_can_be_set_replaced_and_removed() {
+        let mut tag = Nbt::Compound(vec![("a".into(), Nbt::Byte(1))]);
+        tag.insert("b", Nbt::Int(2));
+        tag.insert("a", Nbt::Short(3));
+        assert_eq!(
+            tag,
+            Nbt::Compound(vec![("a".into(), Nbt::Short(3)), ("b".into(), Nbt::Int(2))])
+        );
+        tag.remove("a");
+        tag.remove("b");
+        assert!(tag.is_empty_compound());
+        assert!(!Nbt::Int(0).is_empty_compound());
     }
 }

@@ -59,6 +59,8 @@ pub(super) fn apply_inventory_action(
     frames: &SyncSender<RenderEvent>,
 ) {
     let creative = game.gamemode == GameMode::Creative;
+    // An anvil result may only be taken with the levels to pay it.
+    game.windows.set_player(creative, game.vitals.level);
     if let InventoryAction::ShiftDoubleClick(slot) = action {
         // Each click depends on what the previous ones left in the window, so
         // the window decides the requests as it goes.

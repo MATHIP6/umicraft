@@ -9,6 +9,7 @@
 
 use umicraft_protocol::packets::play::ItemStack;
 
+use super::anvil::{self, AnvilState};
 use super::kind::{resolve_container_slot, SlotTarget, HOTBAR_START, PLAYER_SLOT_COUNT};
 use super::merchant;
 use super::payload::Trade;
@@ -24,6 +25,8 @@ pub struct ClickSpace<'a> {
     player_window: bool,
     /// The offers and the selected one of a villager window.
     merchant: Option<(&'a mut [Trade], usize)>,
+    /// The cost and name of an anvil window.
+    anvil: Option<&'a mut AnvilState>,
 }
 
 impl<'a> ClickSpace<'a> {
@@ -35,6 +38,7 @@ impl<'a> ClickSpace<'a> {
             kinds,
             player_window: true,
             merchant: None,
+            anvil: None,
         }
     }
 
@@ -50,6 +54,25 @@ impl<'a> ClickSpace<'a> {
             kinds,
             player_window: false,
             merchant: None,
+            anvil: None,
+        }
+    }
+
+    /// Gives an anvil window its state, so that the result is only taken
+    /// with the levels for it and taking it uses the inputs.
+    #[must_use]
+    pub fn with_anvil(mut self, state: &'a mut AnvilState) -> Self {
+        self.anvil = Some(state);
+        self
+    }
+
+    /// `Slot.canTakeStack`: true except for an anvil result the player cannot
+    /// pay for.
+    #[must_use]
+    pub fn can_take(&self, index: usize) -> bool {
+        match self.kind(index) {
+            SlotKind::AnvilResult => self.anvil.as_ref().is_some_and(|state| state.can_take()),
+            _ => true,
         }
     }
 
@@ -169,7 +192,7 @@ impl<'a> ClickSpace<'a> {
     pub fn decrease(&mut self, index: usize, amount: i32) -> Option<ItemStack> {
         let whole = matches!(
             self.kind(index),
-            SlotKind::CraftingResult { .. } | SlotKind::MerchantResult
+            SlotKind::CraftingResult { .. } | SlotKind::MerchantResult | SlotKind::AnvilResult
         );
         let stack = self.get_mut(index)?;
         let amount = if whole { count(stack) } else { amount };
@@ -202,6 +225,11 @@ impl<'a> ClickSpace<'a> {
             SlotKind::MerchantResult => {
                 if let Some((trades, selected)) = self.merchant.as_mut() {
                     merchant::take_result(self.own, trades, *selected);
+                }
+            }
+            SlotKind::AnvilResult => {
+                if let Some(state) = self.anvil.as_mut() {
+                    anvil::take_result(self.own, state);
                 }
             }
             _ => {}

@@ -29,6 +29,10 @@ pub(super) fn click(
     button: i8,
 ) -> Option<ItemStack> {
     let before = space.get(slot).cloned();
+    // `canTakeStack` guards every click on a slot that holds something.
+    if before.is_some() && !space.can_take(slot) {
+        return before;
+    }
     let held_fits = cursor.as_ref().map(|held| space.kind(slot).accepts(held));
     match (&before, held_fits) {
         (None, _) => place_into_empty(space, cursor, slot, button),
@@ -125,6 +129,9 @@ pub(super) fn clone_stack(space: &ClickSpace<'_>, cursor: &mut Option<ItemStack>
 
 /// Mode 4: the drop key removes one item (button 0) or the whole stack.
 pub(super) fn drop_from_slot(space: &mut ClickSpace<'_>, slot: usize, button: i8) {
+    if !space.can_take(slot) {
+        return;
+    }
     let Some(stack) = space.get(slot) else { return };
     let amount = if button == 0 { 1 } else { count(stack) };
     if space.decrease(slot, amount).is_some() {
