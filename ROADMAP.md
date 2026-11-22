@@ -45,7 +45,7 @@ First assessed on `main` at `27838a4` (details in `docs/roadmap-review.md`
 | Milestone | Status | Remaining work moves to |
 |---|---|---|
 | M0 Foundations | Done (`umicraft-core` not used yet) | F3 |
-| M1 Protocol & offline login | Fuzzing (10 min per target) and packet round-trips done in P1; the P1 trace acceptance is open | P1 |
+| M1 Protocol & offline login | **Done**: fuzzing (10 min per target) and packet round-trips in P1, which was accepted on 2026-11-22 (ADR-0093) | — |
 | M2 World data & first pixels | Done | — |
 | M3 Movement & interaction | Vanilla traffic (P1), hold-to-break, respawn, knockback, effects and gamemodes (P2) are code complete; the live survival session is open | P1, P2 |
 | M4 Interface foundation | Done | — |
@@ -132,13 +132,13 @@ P0 ─► P1 ─┬─► P2 ─────────────┬─► P4
 (failing on the known gaps); `docs/parity.md` exists; the spec reflects this
 roadmap.
 
-**Status (2026-11-22): done apart from one owner decision.** The tools exist
+**Status (2026-11-22): done** (accepted by the owner, ADR-0093). The tools exist
 (`umicraft-packet-logger`, `-trace-diff`, `-trajectory-diff`,
 `-screenshot-diff`; procedure in `docs/parity-harness.md`), the serverbound
 diff of the movement script ran against a vanilla capture on 2026-10-26, the
 coverage test exists, `docs/parity.md` exists and the spec states the parity
-goal. Open: the trajectory and screenshot tolerances of ADR-0019 are still
-"proposed" (open point §8.1).
+goal. The owner approved the ADR-0019 tolerances, which closes open point
+§8.1.
 
 ### P1 — Protocol completeness & vanilla traffic
 
@@ -176,15 +176,15 @@ goal. Open: the trajectory and screenshot tolerances of ADR-0019 are still
 trace diff of the movement script shows the same packet ids in the same
 order as vanilla; the fuzzers run 10 minutes without a panic (documented).
 
-**Status (2026-11-22): code complete, one live run open.** Every listed packet
+**Status (2026-11-22): done** (accepted by the owner on field use, ADR-0093). Every listed packet
 is decoded or sent, and the coverage test, gap audit included
 (`--include-ignored`), passes. The fuzzers ran 600 s per target without a
 crash (`docs/fuzzing.md`), and the round-trips are in
 `umicraft-protocol/tests/roundtrip.rs`. The 2026-10-26 P1 run matches vanilla
-on idle ticks, `Steer Vehicle` and the sneak transitions. Open: a run from a
-clear spot so that the moving ticks and the sprint `Entity Action` can be
-compared (the player was blocked by terrain in that run, see
-`docs/parity-harness.md` "P1 run").
+on idle ticks, `Steer Vehicle` and the sneak transitions. The owner waived the
+last harness run, which would have compared the moving ticks and the sprint
+`Entity Action` from a clear spot. Several players have used the client on
+public 1.8 servers with normal traffic, and that use is accepted instead.
 
 ### P2 — Game-logic extraction & core player loop
 
@@ -738,7 +738,7 @@ With parity as the goal, RND-10 (particles), AUD-2 (music), NET-10
 
 ## 8. Open points
 
-1. **Tolerances** for the harness: trajectory error per tick and screenshot
-   diff threshold (to fix in P0).
+1. ~~**Tolerances** for the harness~~: closed on 2026-11-22 (ADR-0019 values
+   approved, ADR-0093).
 2. **Accepted deviations**, e.g. F2 opening the Umicraft debug screen
    instead of taking a screenshot (to record in `docs/parity.md`).

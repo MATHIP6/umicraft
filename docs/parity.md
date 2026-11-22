@@ -36,7 +36,7 @@ that have not yet been compared with vanilla.
 
 Trajectory and screenshot tolerances are defined in
 [`decisions/0019-parity-harness.md`](decisions/0019-parity-harness.md)
-(proposed, pending owner approval). The procedure to record and compare a
+(approved by the owner on 2026-11-22, ADR-0093). The procedure to record and compare a
 session is [`parity-harness.md`](parity-harness.md).
 
 

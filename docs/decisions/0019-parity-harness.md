@@ -1,6 +1,6 @@
 # ADR-0019 — Parity harness
 
-**Status:** accepted for the tooling; the tolerances are **proposed**, pending owner approval
+**Status:** accepted (the tolerances were approved by the owner on 2026-11-22, ADR-0093)
 **Date:** 2026-10-26
 **Milestone:** P0 (ROADMAP.md)
 
@@ -40,7 +40,7 @@ ROADMAP §8.1 leaves the tolerances open "to fix in P0".
    runs its consistency checks in CI; the gap audit is `#[ignore]`d so CI
    stays green, fails today, and P1 removes the `#[ignore]` when it passes.
 
-## Proposed tolerances (ROADMAP §8.1) — owner approval needed
+## Tolerances (ROADMAP §8.1) — approved 2026-11-22 (ADR-0093)
 
 | Check | Proposal | Why |
 |---|---|---|
