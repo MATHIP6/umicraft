@@ -256,6 +256,14 @@ pub(super) fn spawn_painting(game: &mut Game, packet: &SpawnPainting) {
 
 /// `Destroy Entities`, which may take the local player's bobber.
 pub(super) fn destroy_entities(game: &mut Game, packet: &DestroyEntities) {
+    // `World.removeEntity`: the rider of a removed entity leaves it, the
+    // local player included (a boat that breaks under it).
+    if game
+        .vehicle
+        .is_some_and(|vehicle| packet.entity_ids.contains(&vehicle))
+    {
+        dismount_local(game);
+    }
     game.entities.destroy(&packet.entity_ids);
     if game
         .body
@@ -337,24 +345,36 @@ pub(super) fn attach_entity(game: &mut Game, packet: &AttachEntity) {
     // MCP `NetHandlerPlayClient.handleEntityAttach`: leash 0 mounts
     // (vehicle -1 dismounts); only the local player's riding changes
     // the serverbound traffic. Passengers of other entities are P5.
-    if packet.leash == 0 && packet.entity_id == game.entity_id {
-        game.vehicle = (packet.vehicle_id != -1).then_some(packet.vehicle_id);
-    }
-    // Leash 1 ties the entity to the holder (-1 frees it).
-    if packet.leash == 1 {
-        let holder = (packet.vehicle_id != -1).then_some(EntityId(packet.vehicle_id));
-        game.entities.set_leash(EntityId(packet.entity_id), holder);
-    }
-    if packet.leash == 0 {
-        let vehicle = (packet.vehicle_id != -1).then_some(EntityId(packet.vehicle_id));
+    let target = (packet.vehicle_id != -1).then_some(EntityId(packet.vehicle_id));
+    match packet.leash {
+        // Leash 1 ties the entity to the holder (-1 frees it).
+        1 => game.entities.set_leash(EntityId(packet.entity_id), target),
         // The local player is not in the store: boarding a boat hands it to
         // the client's own simulation instead.
-        if packet.entity_id == game.entity_id {
-            game.entities.board(vehicle);
-        } else {
-            game.entities.attach(EntityId(packet.entity_id), vehicle);
-        }
+        0 if packet.entity_id == game.entity_id => match target {
+            Some(vehicle) => {
+                game.vehicle = Some(vehicle.0);
+                game.entities.board(Some(vehicle));
+            }
+            None => dismount_local(game),
+        },
+        0 => game.entities.attach(EntityId(packet.entity_id), target),
+        _ => {}
     }
+}
+
+/// The local player leaves its vehicle (`Entity.mountEntity(null)`): it
+/// stands on top of the vehicle when the client tracks it, and the boat it
+/// rode stops taking its keys.
+fn dismount_local(game: &mut Game) {
+    let top = game
+        .vehicle
+        .and_then(|vehicle| game.entities.dismount_point(EntityId(vehicle)));
+    if let (Some(top), Some(state)) = (top, game.state.as_mut()) {
+        state.dismount(top);
+    }
+    game.vehicle = None;
+    game.entities.board(None);
 }
 
 /// Feeds a hurt of `entity` to the combat log of the combo counter mod.

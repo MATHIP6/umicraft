@@ -94,13 +94,8 @@ pub fn size_of(kind: EntityKind, meta: &EntityMeta) -> Option<(f64, f64)> {
             Some((side, side))
         }
         EntityKind::Other(id) => object_size(id),
-        // The objects with a body (MCP `canBeCollidedWith`, sizes of their
-        // constructors).
-        EntityKind::Boat => Some((1.5, 0.6)),
-        EntityKind::Minecart => Some((0.98, 0.7)),
-        EntityKind::EnderCrystal => Some((2.0, 2.0)),
-        EntityKind::LargeFireball => Some((1.0, 1.0)),
-        EntityKind::PrimedTnt | EntityKind::FallingBlock => Some((0.98, 0.98)),
+        // The objects with a body (MCP `canBeCollidedWith`) fall through to
+        // the sizes of their constructors in `EntityKind`.
         // Everything else the ray passes through: small fireballs and wither
         // skulls answer false, thrown objects, rockets, orbs and bolts never
         // collide.
@@ -308,8 +303,9 @@ mod tests {
                 bounds.max.y - bounds.min.y - 0.2,
             )
         };
+        // The sizes are `float`s in the reference (`setSize`), widened here.
         let close =
-            |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-9 && (a.1 - b.1).abs() < 1e-9;
+            |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6;
         assert!(close(width(EntityKind::Boat), (1.5, 0.6)));
         assert!(close(width(EntityKind::Minecart), (0.98, 0.7)));
         assert!(close(width(EntityKind::EnderCrystal), (2.0, 2.0)));

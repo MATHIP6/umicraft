@@ -215,6 +215,15 @@ impl EntityStore {
         }
     }
 
+    /// Where a rider of `vehicle` stands when it leaves it, `None` when the
+    /// vehicle is not tracked ([`crate::riding::dismount_position`]).
+    #[must_use]
+    pub fn dismount_point(&self, vehicle: EntityId) -> Option<DVec3> {
+        self.entities
+            .get(&vehicle)
+            .map(crate::riding::dismount_position)
+    }
+
     /// `Entity.mountEntity(null)`: the rider leaves its vehicle and is put
     /// right over it, where it stays until it moves or falls. Nothing happens
     /// to an entity that rides nothing.

@@ -403,3 +403,44 @@ fn the_published_local_body_sits_in_its_boat_in_the_third_person() {
         .expect("the local body in the third person");
     assert!(body.riding);
 }
+
+#[test]
+fn a_boat_that_breaks_under_the_player_lets_it_stand_up() {
+    // Regression: a destroyed boat kept the player seated on the client
+    // (`World.removeEntity` dismounts the rider).
+    use umicraft_protocol::packets::play::clientbound::DestroyEntities;
+
+    let (mut game, mut queue) = boarded_boat();
+    let (frames, _) = mpsc::sync_channel(64);
+    let destroy = PlayEvent::DestroyEntities(DestroyEntities {
+        entity_ids: vec![9],
+    });
+    handle_net(&mut game, destroy, &mut queue, &frames);
+    assert_eq!(game.vehicle, None);
+    follow_body(&mut game);
+    assert!(!game.body.frame_data().riding);
+    // Stood on top of where the boat was (0.6 high).
+    let feet = game.state.as_ref().expect("placed").position();
+    assert_eq!(feet, DVec3::new(3.5, 64.0 + f64::from(0.6_f32), 3.5));
+}
+
+#[test]
+fn leaving_a_boat_stands_the_player_on_top_of_it() {
+    let (mut game, mut queue) = boarded_boat();
+    let (frames, _) = mpsc::sync_channel(64);
+    let leave = PlayEvent::AttachEntity(
+        umicraft_protocol::packets::play::clientbound::AttachEntity {
+            leash: 0,
+            entity_id: 7,
+            vehicle_id: -1,
+        },
+    );
+    handle_net(&mut game, leave, &mut queue, &frames);
+    assert_eq!(game.vehicle, None);
+    assert!(!game.entities.entities()[&EntityId(9)].boat.boarded);
+    let feet = game.state.as_ref().expect("placed").position();
+    assert!(
+        (feet.y - (64.0 + f64::from(0.6_f32))).abs() < 1e-9,
+        "{feet}"
+    );
+}
