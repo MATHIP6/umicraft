@@ -56,6 +56,8 @@ const POTION: i16 = 373;
 const ENCHANTED_BOOK: i16 = 403;
 const EXPERIENCE_BOTTLE: i16 = 384;
 const NETHER_STAR: i16 = 399;
+/// The written book (`ItemEditableBook.hasEffect` is always true).
+const WRITTEN_BOOK: i16 = 387;
 
 /// The baked item models and the atlas layer layout they index.
 #[derive(Debug)]
@@ -416,14 +418,14 @@ fn unpack_key(key: u64) -> (i16, i16, Option<u32>) {
 }
 
 /// Whether the stack shows the enchantment glint (MCP `Item.hasEffect` and
-/// its overrides for the golden apple, enchanted book, experience bottle and
-/// nether star, and potions with an effect).
+/// its overrides for the golden apple, enchanted and written books,
+/// experience bottle and nether star, and potions with an effect).
 fn has_glint(item_id: i16, damage: i16, nbt: Option<&[u8]>, display: &ItemDisplay) -> bool {
     display.has_glint()
         || match item_id {
             POTION => potion_has_effects(damage, nbt),
             GOLDEN_APPLE => damage > 0,
-            ENCHANTED_BOOK | EXPERIENCE_BOTTLE | NETHER_STAR => true,
+            ENCHANTED_BOOK | WRITTEN_BOOK | EXPERIENCE_BOTTLE | NETHER_STAR => true,
             _ => false,
         }
 }
@@ -482,6 +484,9 @@ mod tests {
         assert!(!has_glint(322, 0, None, &none));
         assert!(has_glint(322, 1, None, &none));
         assert!(has_glint(399, 0, None, &none));
+        // Regression: the signed book had no glint.
+        assert!(has_glint(WRITTEN_BOOK, 0, None, &none));
+        assert!(!has_glint(386, 0, None, &none), "book and quill");
         assert!(!has_glint(1, 0, None, &none));
         // Potions glint when they carry an effect: swiftness, splash healing,
         // but not the water bottle or an unbrewed one.
