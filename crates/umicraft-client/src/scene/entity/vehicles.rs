@@ -20,7 +20,7 @@ use umicraft_model::entity::{ChestModel, ModelBox, ModelPart, ModelVertex, Textu
 use umicraft_render::EntityVertex;
 
 use super::transform::x_mirror;
-use crate::scene::block_entity::{mob_pose, spin_degrees};
+use crate::scene::block_entity::{mob_pose, spin_degrees, ENDER_CHEST, TRAPPED_CHEST};
 use crate::scene::item_world::objects::{cart_block, cart_jitter, cart_spawner_frame, Pose, CHEST};
 
 /// How high above the position of the entity the model is drawn.
@@ -157,12 +157,13 @@ pub(super) fn add_vehicle(
         placed,
         light,
     );
-    // A chest minecart carries a chest, which the item pass cannot draw: it
-    // is a block entity with its own model.
+    // A chest in a cart (its own, or a tile a command set) is a block entity
+    // with its own model, which the item pass cannot draw
+    // (`TileEntityRendererChestHelper.renderByItem`).
     if let Some((item, Pose::Block(frame))) = cart_block(ent) {
-        if item.item_id == CHEST {
+        if let Some(sheet) = chest_sheet(item.item_id) {
             push(
-                batches.entry(TextureSlot::Chest).or_default(),
+                batches.entry(sheet).or_default(),
                 ChestModel::emit_mesh(),
                 frame,
                 light,
@@ -171,6 +172,17 @@ pub(super) fn add_vehicle(
     }
     if let Some(frame) = cart_spawner_frame(ent) {
         add_spawner_pig(batches, ent, frame, light);
+    }
+}
+
+/// The texture of the chest block `block_id` draws with, `None` for a block
+/// that is not a chest.
+fn chest_sheet(block_id: i16) -> Option<TextureSlot> {
+    match block_id {
+        CHEST => Some(TextureSlot::Chest),
+        TRAPPED_CHEST => Some(TextureSlot::ChestTrapped),
+        ENDER_CHEST => Some(TextureSlot::ChestEnder),
+        _ => None,
     }
 }
 
@@ -308,6 +320,38 @@ mod tests {
             vertices(&at(EntityKind::Minecart, 0.0, 0.0), TextureSlot::Minecart).len(),
             6 * 36
         );
+    }
+
+    #[test]
+    fn a_cart_draws_the_chest_of_its_custom_tile_with_its_own_sheet() {
+        use umicraft_protocol::packets::play::metadata::WatchedObject;
+        use umicraft_protocol::packets::play::Metadata;
+
+        for (block, sheet) in [
+            (54_i32, TextureSlot::Chest),
+            (146, TextureSlot::ChestTrapped),
+            (130, TextureSlot::ChestEnder),
+        ] {
+            let mut cart = at(EntityKind::Minecart, 0.0, 0.0);
+            cart.meta.apply(
+                EntityKind::Minecart,
+                &Metadata {
+                    objects: vec![
+                        WatchedObject {
+                            type_id: 2,
+                            index: 20,
+                            value: block.to_be_bytes().to_vec(),
+                        },
+                        WatchedObject {
+                            type_id: 0,
+                            index: 22,
+                            value: vec![1],
+                        },
+                    ],
+                },
+            );
+            assert!(!vertices(&cart, sheet).is_empty(), "{block}");
+        }
     }
 
     #[test]

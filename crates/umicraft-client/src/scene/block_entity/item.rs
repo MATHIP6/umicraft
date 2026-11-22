@@ -33,9 +33,9 @@ const BANNER: i16 = 425;
 /// `Blocks.chest` as an item.
 const CHEST: i16 = 54;
 /// `Blocks.ender_chest` as an item.
-const ENDER_CHEST: i16 = 130;
+pub(crate) const ENDER_CHEST: i16 = 130;
 /// `Blocks.trapped_chest` as an item.
-const TRAPPED_CHEST: i16 = 146;
+pub(crate) const TRAPPED_CHEST: i16 = 146;
 /// `renderByItem` scales a skull by 2 about the origin of its renderer.
 const SKULL_SCALE: f32 = 2.0;
 
