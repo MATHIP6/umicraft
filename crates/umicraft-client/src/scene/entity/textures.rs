@@ -24,6 +24,7 @@ use super::armor::armor_texture;
 use super::banner_cache::BannerCache;
 use super::capes::{CapeSet, CapeSettings};
 use super::custom_models::CustomModels;
+use super::fire::{FireStrip, FireStrips};
 use super::hand::hand_vertices;
 use super::horse_coat::horse_coat;
 use super::mesh_entities_with;
@@ -87,6 +88,8 @@ pub struct EntityTextures {
     custom_models: CustomModels,
     /// The alternative mob textures of the packs (ADR-0089).
     random_entities: RandomEntities,
+    /// How the flames on a burning entity play the fire strips of the packs.
+    fire_strips: FireStrips,
     /// The composed banner designs among `textures`.
     banners: RefCell<BannerCache>,
     /// The font atlas the sign text texture was made from: the glyph UVs of
@@ -130,8 +133,15 @@ impl EntityTextures {
     #[must_use]
     pub fn from_files(renderer: &Renderer, files: GameFiles) -> Self {
         let mut textures = HashMap::new();
+        let mut fire_strips = FireStrips::default();
         for spec in texture_specs() {
             let (rgba, w, h) = load_or_fallback(&files, spec.jar_path, spec.fallback);
+            if let TextureSlot::Fire(sprite) = spec.slot {
+                let mcmeta = files.read(&format!("{}.mcmeta", spec.jar_path));
+                if let Some(strip) = fire_strips.0.get_mut(usize::from(sprite)) {
+                    *strip = FireStrip::new(w, h, mcmeta.as_deref());
+                }
+            }
             // The glowing layers and the guardian beam scroll their
             // coordinates past the edge.
             let texture = if spec.slot.repeats() {
@@ -159,6 +169,7 @@ impl EntityTextures {
             textures: RefCell::new(textures),
             custom_models,
             random_entities,
+            fire_strips,
             files,
             skins: RefCell::new(SkinSet::new()),
             capes: RefCell::new(CapeSet::new()),
@@ -597,6 +608,10 @@ impl SkinLookup for EntityTextures {
 
     fn random_entities(&self) -> Option<&RandomEntities> {
         Some(&self.random_entities)
+    }
+
+    fn fire_strips(&self) -> Option<&FireStrips> {
+        Some(&self.fire_strips)
     }
 }
 

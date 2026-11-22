@@ -146,6 +146,11 @@ impl EntityRecord {
     /// Moves the entity to where the simulation put it this tick, without
     /// interpolation, and animates its limbs and body. For the local player, whose
     /// position is already the predicted one.
+    ///
+    /// It counts one tick of age (`ticksExisted`), as [`EntityStore`] does for
+    /// the tracked entities: the flames of a burning entity step with it.
+    ///
+    /// [`EntityStore`]: super::EntityStore
     pub fn follow(&mut self, position: DVec3, yaw: f32, pitch: f32, flags: EntityFlags) {
         self.begin_tick();
         self.position = position;
@@ -154,6 +159,7 @@ impl EntityRecord {
         self.pitch = pitch;
         self.flags = flags;
         self.animate();
+        self.age_ticks = self.age_ticks.saturating_add(1);
     }
 
     /// Snaps the entity immediately to the exact position and angles without
@@ -300,6 +306,15 @@ impl EntityRecord {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn following_the_simulation_ages_the_entity_one_tick() {
+        let mut record = EntityRecord::new(EntityId(1), EntityKind::Player, DVec3::ZERO, 0.0, 0.0);
+        for _ in 0..3 {
+            record.follow(DVec3::ZERO, 0.0, 0.0, EntityFlags::default());
+        }
+        assert_eq!(record.frame_data().age_ticks, 3);
+    }
 
     #[test]
     fn teleport_to_exact_resets_position_without_limb_swing_explosion() {

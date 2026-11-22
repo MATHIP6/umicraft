@@ -16,6 +16,7 @@ use umicraft_model::entity::TextureSlot;
 use umicraft_render::{EntityTexture, Renderer};
 
 use super::custom_models::CustomModels;
+use super::fire::FireStrips;
 use super::random_entities::RandomEntities;
 
 /// What a mesher may ask about downloaded textures.
@@ -38,6 +39,11 @@ pub(crate) trait SkinLookup {
     /// The alternative mob textures of the packs (Random Entities). None by
     /// default: only the world's textures hold them.
     fn random_entities(&self) -> Option<&RandomEntities> {
+        None
+    }
+    /// The fire sprite strips of the packs, which the flames on a burning
+    /// entity play. None by default: the vanilla strip is assumed.
+    fn fire_strips(&self) -> Option<&FireStrips> {
         None
     }
 }
