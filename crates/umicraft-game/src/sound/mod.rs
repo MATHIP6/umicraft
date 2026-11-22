@@ -27,6 +27,7 @@ mod block_sounds;
 pub mod cue;
 pub mod effect_packet;
 pub mod entity_sounds;
+pub mod looping;
 pub mod queue;
 pub mod sound_packet;
 pub mod step;

@@ -8,11 +8,12 @@
 //!
 //! [`NullBackend`]: crate::backend::NullBackend
 
+use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
 use crate::attenuation::distance_gain;
-use crate::backend::AudioBackend;
+use crate::backend::{AudioBackend, Voice};
 use crate::cache::SoundCache;
 use crate::category::{CategoryVolumes, SoundCategory};
 use crate::decode::{decode_ogg, DecodedSound};
@@ -35,6 +36,14 @@ pub trait SoundLoader: Send {
     fn load(&mut self, resource_path: &str) -> io::Result<Vec<u8>>;
 }
 
+/// A looping sound that plays: what it was asked with and what was picked.
+struct Loop {
+    request: SoundRequest,
+    /// The volume of the picked `sounds.json` entry.
+    entry_volume: f32,
+    category: SoundCategory,
+}
+
 /// The audio state: index, cache, limits and the backend.
 pub struct Engine<B: AudioBackend> {
     backend: B,
@@ -52,6 +61,8 @@ pub struct Engine<B: AudioBackend> {
     music: Arc<MusicActivity>,
     /// Bumped by every stop; a stream decoded for an older one is discarded.
     stop_generation: u32,
+    /// The looping sounds that play, by their key.
+    loops: HashMap<u64, Loop>,
 }
 
 impl<B: AudioBackend> Engine<B> {
@@ -73,6 +84,7 @@ impl<B: AudioBackend> Engine<B> {
             streams: StreamDecoder::default(),
             music: Arc::default(),
             stop_generation: 0,
+            loops: HashMap::new(),
         }
     }
 
@@ -98,6 +110,8 @@ impl<B: AudioBackend> Engine<B> {
     pub fn handle(&mut self, message: AudioMessage) -> bool {
         match message {
             AudioMessage::Play(request) => self.request(request),
+            AudioMessage::Loop { key, request } => self.set_loop(key, request),
+            AudioMessage::EndLoop(key) => self.end_loop(key),
             AudioMessage::Listener(listener) => self.listener = listener,
             AudioMessage::Volume(category, volume) => self.volumes.set(category, volume),
             AudioMessage::Index(index) => self.index = *index,
@@ -126,6 +140,110 @@ impl<B: AudioBackend> Engine<B> {
         for request in due {
             self.play_now(&request);
         }
+        self.adjust_loops();
+    }
+
+    /// Starts the looping sound `key`, or takes its new volume and position.
+    ///
+    /// A loop starts even when it is silent for now, as the reference starts a
+    /// tickable sound at its default volume and sets the real one on the next
+    /// tick (`SoundManager.playSound`, `updateAllSounds`). It needs a free
+    /// normal channel; one that finds none is tried again on its next update.
+    fn set_loop(&mut self, key: u64, request: SoundRequest) {
+        if let Some(playing) = self.loops.get_mut(&key) {
+            playing.request = request;
+            self.adjust_loop(key);
+            return;
+        }
+        if self.volumes.get(SoundCategory::Master) <= 0.0 {
+            return;
+        }
+        let Some(picked) = self.index.pick(&request.event, &mut self.rng) else {
+            tracing::debug!(event = &*request.event, "unknown or empty sound event");
+            return;
+        };
+        if picked.stream {
+            tracing::debug!(event = &*request.event, "a streamed sound cannot loop");
+            return;
+        }
+        let category = request.category.unwrap_or(picked.category);
+        let Some(sound) = self.sound(&picked.resource_path()) else {
+            return;
+        };
+        if !self.limit.try_acquire(false) {
+            return;
+        }
+        let (volume, pan) = self.gains(&request, picked.volume, category);
+        let voice = Voice {
+            sound,
+            volume,
+            pitch: (request.pitch * picked.pitch).clamp(0.5, 2.0),
+            pan,
+            streaming: false,
+            loop_key: Some(key),
+        };
+        if let Err(error) = self.backend.play(voice) {
+            self.limit.release(false);
+            tracing::warn!(%error, event = &*request.event, "cannot play looping sound");
+            return;
+        }
+        self.loops.insert(
+            key,
+            Loop {
+                request,
+                entry_volume: picked.volume,
+                category,
+            },
+        );
+    }
+
+    /// Ends the looping sound `key`; its channel comes free when it is reaped.
+    fn end_loop(&mut self, key: u64) {
+        if self.loops.remove(&key).is_some() {
+            if let Err(error) = self.backend.stop_loop(key) {
+                tracing::warn!(%error, "cannot stop looping sound");
+            }
+        }
+    }
+
+    /// Hands every loop the gains of the listener's current place, which
+    /// moves between their updates (`updateAllSounds` sets them each tick).
+    fn adjust_loops(&mut self) {
+        let keys: Vec<u64> = self.loops.keys().copied().collect();
+        for key in keys {
+            self.adjust_loop(key);
+        }
+    }
+
+    /// Hands the loop `key` the gains of its request where the listener is.
+    fn adjust_loop(&mut self, key: u64) {
+        let Some(playing) = self.loops.get(&key) else {
+            return;
+        };
+        let (volume, pan) = self.gains(&playing.request, playing.entry_volume, playing.category);
+        if let Err(error) = self.backend.adjust_loop(key, volume, pan) {
+            tracing::debug!(%error, "cannot adjust looping sound");
+        }
+    }
+
+    /// The loudness and the stereo position of `request` with the entry
+    /// volume `entry_volume` in `category`, where the listener is now.
+    fn gains(
+        &self,
+        request: &SoundRequest,
+        entry_volume: f32,
+        category: SoundCategory,
+    ) -> (f32, f32) {
+        // `getNormalizedVolume`: clamp(sound volume * entry volume) * category volume.
+        let mut volume =
+            (request.volume * entry_volume).clamp(0.0, 1.0) * self.volumes.effective(category);
+        let mut pan = 0.0;
+        if let Some(position) = request.position {
+            let distance = self.listener.distance_to(position);
+            volume *= distance_gain(distance, request.volume);
+            pan = self.listener.pan_to(position);
+        }
+        (volume, pan)
     }
 
     fn request(&mut self, request: SoundRequest) {
@@ -184,15 +302,7 @@ impl<B: AudioBackend> Engine<B> {
         picked: &PickedSound,
         category: SoundCategory,
     ) -> Option<PlayParams> {
-        // `getNormalizedVolume`: clamp(sound volume * entry volume) * category volume.
-        let mut volume =
-            (request.volume * picked.volume).clamp(0.0, 1.0) * self.volumes.effective(category);
-        let mut pan = 0.0;
-        if let Some(position) = request.position {
-            let distance = self.listener.distance_to(position);
-            volume *= distance_gain(distance, request.volume);
-            pan = self.listener.pan_to(position);
-        }
+        let (volume, pan) = self.gains(request, picked.volume, category);
         if volume <= 0.0 {
             return None; // "Skipped playing sound, volume was zero"
         }
@@ -361,6 +471,62 @@ mod tests {
             1,
             "beyond 16 blocks is silent"
         );
+    }
+
+    fn set_loop(engine: &mut Engine<NullBackend>, key: u64, request: SoundRequest) {
+        engine.handle(AudioMessage::Loop { key, request });
+    }
+
+    #[test]
+    fn a_loop_starts_even_silent_and_follows_its_updates() {
+        let mut engine = engine();
+        set_loop(&mut engine, 4, SoundRequest::new("tone").with_volume(0.0));
+        let voice = &engine.backend().played[0];
+        assert_eq!((voice.volume, voice.loop_key), (0.0, Some(4)));
+        // A second message for the same key changes the gains, no new voice.
+        set_loop(
+            &mut engine,
+            4,
+            SoundRequest::new("tone").at([-8.0, 0.0, 0.0]),
+        );
+        assert_eq!(engine.backend().played.len(), 1);
+        let (key, volume, pan) = *engine.backend().adjusted.last().expect("adjusted");
+        assert_eq!((key, volume), (4, 0.25));
+        assert!(pan > 0.99);
+    }
+
+    #[test]
+    fn a_loop_follows_the_listener_every_tick() {
+        let mut engine = engine();
+        set_loop(
+            &mut engine,
+            1,
+            SoundRequest::new("tone").at([8.0, 0.0, 0.0]),
+        );
+        engine.handle(AudioMessage::Listener(Listener {
+            position: [8.0, 0.0, 0.0],
+            yaw: 0.0,
+        }));
+        engine.tick();
+        let (_, volume, _) = *engine.backend().adjusted.last().expect("adjusted");
+        assert_eq!(volume, 0.5, "the listener stands on it now");
+    }
+
+    #[test]
+    fn ending_a_loop_stops_it_and_frees_its_channel() {
+        let mut engine = engine();
+        for key in 0..28 {
+            set_loop(&mut engine, key, SoundRequest::new("tone"));
+        }
+        set_loop(&mut engine, 99, SoundRequest::new("tone"));
+        assert_eq!(engine.backend().played.len(), 28, "no channel left");
+        engine.handle(AudioMessage::EndLoop(0));
+        assert!(!engine.backend().looping.contains(&0));
+        engine.tick();
+        // The loop without a channel starts on its next update.
+        set_loop(&mut engine, 99, SoundRequest::new("tone"));
+        assert_eq!(engine.backend().played.len(), 29);
+        assert!(engine.backend().looping.contains(&99));
     }
 
     #[test]

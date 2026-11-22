@@ -43,7 +43,7 @@ use umicraft_ui::FontAtlas;
 use umicraft_world::LightLevel;
 
 pub(crate) use flower_pot::push_pot_plants;
-pub(crate) use item::{entity_item_mesh, is_entity_item};
+pub(crate) use item::{entity_item_mesh, is_entity_item, ENDER_CHEST, TRAPPED_CHEST};
 pub(crate) use spawner::{mob_pose, spin_degrees};
 
 use crate::scene::entity::SkinLookup;

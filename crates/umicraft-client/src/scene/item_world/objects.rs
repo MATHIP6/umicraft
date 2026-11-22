@@ -246,18 +246,20 @@ pub(crate) fn cart_block(entity: &EntityRenderSnapshot) -> Option<(EntityItem, P
     Some((item, Pose::Block(matrix)))
 }
 
-/// Where the white flash of a lit TNT cart goes and how strongly
+/// Where the white flash of a lit TNT cart goes
 /// (`RenderTntMinecart.func_180560_a`: every second 5 ticks of the fuse, a
 /// unit TNT cube in the swollen frame of the block), `None` between flashes.
-pub(crate) fn cart_flash(entity: &EntityRenderSnapshot) -> Option<(Mat4, f32)> {
+pub(crate) fn cart_flash(entity: &EntityRenderSnapshot) -> Option<Mat4> {
     let (fuse, remaining) = cart_fuse_remaining(entity)?;
-    let strength = flash_strength(fuse, remaining)?;
+    if !flash_on(fuse) {
+        return None;
+    }
     let offset = display_tile(entity).map_or(6, |(_, offset)| offset);
     // `renderBlockBrightness` turns the white TNT a quarter, as the block.
     let matrix = cart_frame(entity, offset)
         * Mat4::from_scale(Vec3::splat(swell(remaining)))
         * Mat4::from_rotation_y(90.0_f32.to_radians());
-    Some((matrix, strength))
+    Some(matrix)
 }
 
 /// The frame of the spinning mob of a spawner cart that shows its spawner
@@ -281,14 +283,10 @@ fn swell(remaining: f32) -> f32 {
     }
 }
 
-/// How strongly the white flash of TNT is added with `fuse` whole ticks and
-/// `remaining` exact ticks left, or `None` between flashes (`fuse / 5 % 2 ==
-/// 0`, `(1 - remaining / 100) * 0.8`).
-pub(crate) fn flash_strength(fuse: i32, remaining: f32) -> Option<f32> {
-    if fuse < 0 || (fuse / 5) % 2 != 0 {
-        return None;
-    }
-    Some(((1.0 - remaining / 100.0) * 0.8).clamp(0.0, 1.0))
+/// Whether the white flash of TNT shows with `fuse` whole ticks left: every
+/// second 5 ticks (`fuse / 5 % 2 == 0`).
+fn flash_on(fuse: i32) -> bool {
+    fuse >= 0 && (fuse / 5) % 2 == 0
 }
 
 /// `RenderSnowball.doRender`: half size, turned to face the camera.
@@ -352,12 +350,11 @@ fn fuse_remaining(age: f32) -> f32 {
     TNT_FUSE - age + 1.0
 }
 
-/// The flash of a primed TNT of `age` ticks: where and how strongly
+/// Where the flash of a primed TNT of `age` ticks goes
 /// (`RenderTntPrimed.doRender`), `None` between flashes.
-pub(crate) fn primed_flash(entity: &EntityRenderSnapshot) -> Option<(Mat4, f32)> {
+pub(crate) fn primed_flash(entity: &EntityRenderSnapshot) -> Option<Mat4> {
     let fuse = (TNT_FUSE - entity.age.floor()) as i32;
-    let strength = flash_strength(fuse, fuse_remaining(entity.age))?;
-    Some((tnt_matrix(entity), strength))
+    flash_on(fuse).then(|| tnt_matrix(entity))
 }
 
 #[cfg(test)]
@@ -521,7 +518,7 @@ mod tests {
         let mut cart = entity(EntityKind::Minecart);
         cart.object_data = 3;
         cart.meta.ignite_cart();
-        let (flash, _) = cart_flash(&cart).expect("flashing at fuse 80");
+        let flash = cart_flash(&cart).expect("flashing at fuse 80");
         let block = matrix(&cart_block(&cart).expect("tnt").1);
         let centre = |m: Mat4| m.transform_point3(Vec3::splat(0.5));
         assert!((centre(flash) - centre(block)).length() < 1e-5);
@@ -729,6 +726,64 @@ mod tests {
             .expect("render");
         let image = renderer.read_pixels().expect("readback");
         if let Ok(path) = std::env::var("UMICRAFT_CART_DUMP") {
+            let file = std::fs::File::create(path).expect("dump file");
+            let mut encoder = png::Encoder::new(file, image.width, image.height);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .and_then(|mut writer| writer.write_image_data(&image.rgba))
+                .expect("png");
+        }
+    }
+
+    /// Renders primed TNT at ages 0, 2, ..., 18 (fuse 80 to 62), left to
+    /// right: the flash is on for `fuse / 5` even, so the blocks go white,
+    /// plain, plain, white, white, plain, ... Set `UMICRAFT_TNT_DUMP` to keep
+    /// the PNG.
+    #[test]
+    #[ignore = "requires the official 1.8.8 client jar and a GPU adapter"]
+    fn primed_tnt_flashes_every_five_ticks() {
+        use crate::resources::models::ModelResources;
+        use crate::scene::entity::EntityTextures;
+        use crate::scene::item_world::WorldItems;
+        use umicraft_render::{Camera, Overlay, Renderer};
+
+        let resources = ModelResources::load().expect("official resources");
+        let items = resources.items();
+        let atlas = resources.atlas();
+        let mut renderer = Renderer::new_offscreen(960, 240).expect("renderer");
+        renderer
+            .set_block_atlas(
+                atlas.width(),
+                atlas.height(),
+                atlas.layers(),
+                atlas.pixels(),
+            )
+            .expect("atlas");
+        let snapshots: Vec<EntityRenderSnapshot> = (0..10)
+            .map(|step| {
+                let mut tnt = EntityRenderSnapshot::new(
+                    EntityId(step + 1),
+                    EntityKind::PrimedTnt,
+                    Vec3::new(6.75 - step as f32 * 1.5, 64.0, 0.0),
+                );
+                tnt.age = step as f32 * 2.0;
+                tnt
+            })
+            .collect();
+        let mut world = WorldItems::default();
+        world.set_view(std::f32::consts::PI, 0.0);
+        renderer.set_world_items(&world.build(&snapshots, &items).items);
+        EntityTextures::load(&renderer).mesh_and_upload(&snapshots, &mut renderer);
+        let mut camera = Camera::new(Vec3::new(0.0, 64.5, -9.0), std::f32::consts::PI, 0.0);
+        camera.set_aspect(960, 240);
+        camera.pin_render_origin(glam::DVec3::ZERO);
+        renderer
+            .render(&camera, &Overlay::new(960, 240))
+            .expect("render");
+        let image = renderer.read_pixels().expect("readback");
+        if let Ok(path) = std::env::var("UMICRAFT_TNT_DUMP") {
             let file = std::fs::File::create(path).expect("dump file");
             let mut encoder = png::Encoder::new(file, image.width, image.height);
             encoder.set_color(png::ColorType::Rgba);

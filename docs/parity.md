@@ -119,7 +119,7 @@ session is [`parity-harness.md`](parity-harness.md).
 | Entities | typed metadata and variants | Missing | P5 | — |  |
 | Entities | player skins, capes, layers | Missing | P5 | — | `fetch_mojang_skin` implemented but unused. |
 | Entities | armour, held items, name tags, shadows, fire | Missing | P5 | — |  |
-| Entities | objects (projectiles, vehicles, orbs, paintings, frames, stands) | Partial | P5 | Unit tests (`item_world::objects`, `entity::vehicles`, `tnt_flash`), offscreen renders | Boats and minecarts: models, shake, rail snapping, the block of each cart type, the custom display tile, the burning furnace and its smoke, the lit TNT cart (swell, flash, smoke), the spinning pig of a spawner cart. Not yet: the rolling sounds of carts (`MovingSoundMinecart`), boat splash particles. |
+| Entities | objects (projectiles, vehicles, orbs, paintings, frames, stands) | Partial | P5 | Unit tests (`item_world::objects`, `entity::vehicles`, `tnt_flash`), offscreen renders | Boats and minecarts: models, shake, rail snapping, the block of each cart type, the custom display tile, the burning furnace and its smoke, the lit TNT cart (swell, flash, smoke), the spinning pig of a spawner cart and the smoke and flames of active spawners (blocks and carts). The carts roll with `minecart.base` and, for the ridden one, `minecart.inside` (ADR-0092). Not yet: boat splash particles. |
 | Entities | entity lighting | Missing | P5 | — | Fullbright today. |
 
 ## World render

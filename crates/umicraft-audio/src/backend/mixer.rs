@@ -23,6 +23,14 @@ struct Active {
     gain_left: f32,
     gain_right: f32,
     streaming: bool,
+    /// The key of a looping voice, which starts over at its end.
+    loop_key: Option<u64>,
+}
+
+/// The gains of the left and right sides for `volume` at `pan`: a linear pan
+/// keeps the near side at full volume and fades the far one.
+fn side_gains(volume: f32, pan: f32) -> (f32, f32) {
+    (volume * (1.0 - pan).min(1.0), volume * (1.0 + pan).min(1.0))
 }
 
 /// Mixes [`Voice`]s into an interleaved `f32` buffer.
@@ -47,9 +55,7 @@ impl Mixer {
             return false;
         }
         let ratio = f64::from(voice.sound.sample_rate) / f64::from(self.output_rate);
-        // A linear pan keeps the near side at full volume and fades the far one.
-        let gain_left = voice.volume * (1.0 - voice.pan).min(1.0);
-        let gain_right = voice.volume * (1.0 + voice.pan).min(1.0);
+        let (gain_left, gain_right) = side_gains(voice.volume, voice.pan);
         self.voices.push(Active {
             sound: voice.sound,
             position: 0.0,
@@ -57,8 +63,31 @@ impl Mixer {
             gain_left,
             gain_right,
             streaming: voice.streaming,
+            loop_key: voice.loop_key,
         });
         true
+    }
+
+    /// Sets the loudness and the stereo position of the looping voice `key`.
+    pub fn adjust_loop(&mut self, key: u64, volume: f32, pan: f32) {
+        if let Some(voice) = self
+            .voices
+            .iter_mut()
+            .find(|voice| voice.loop_key == Some(key))
+        {
+            (voice.gain_left, voice.gain_right) = side_gains(volume, pan);
+        }
+    }
+
+    /// Removes the looping voice `key` and reports it as a normal voice that
+    /// ended.
+    pub fn stop_loop(&mut self, key: u64) -> Reaped {
+        let before = self.voices.len();
+        self.voices.retain(|voice| voice.loop_key != Some(key));
+        Reaped {
+            normal: before - self.voices.len(),
+            streaming: 0,
+        }
     }
 
     /// The number of voices still playing.
@@ -106,13 +135,21 @@ impl Mixer {
     }
 }
 
-/// Adds one voice into `out`; `false` once its last frame was read.
+/// Adds one voice into `out`; `false` once its last frame was read. A
+/// looping voice starts over instead and never ends here.
 fn mix_voice(voice: &mut Active, out: &mut [f32], channels: usize) -> bool {
     let frames = voice.sound.frames.len();
+    if frames == 0 {
+        return false;
+    }
     for frame in out.chunks_exact_mut(channels) {
-        let index = voice.position as usize;
+        let mut index = voice.position as usize;
         if index >= frames {
-            return false;
+            if voice.loop_key.is_none() {
+                return false;
+            }
+            voice.position %= frames as f64;
+            index = voice.position as usize;
         }
         let [left, right] = interpolate(&voice.sound.frames, index, voice.position.fract());
         frame[0] += left * voice.gain_left;
@@ -121,7 +158,7 @@ fn mix_voice(voice: &mut Active, out: &mut [f32], channels: usize) -> bool {
         }
         voice.position += voice.step;
     }
-    (voice.position as usize) < frames
+    voice.loop_key.is_some() || (voice.position as usize) < frames
 }
 
 /// Linear interpolation between a frame and the next (the last one holds).
@@ -146,6 +183,7 @@ mod tests {
             pitch: 1.0,
             pan: 0.0,
             streaming: false,
+            loop_key: None,
         }
     }
 
@@ -220,6 +258,36 @@ mod tests {
         mixer.add(voice(vec![[0.5, 0.5]; 6], 100));
         assert_eq!(mixer.stop_streaming().streaming, 1);
         assert_eq!(mixer.len(), 1);
+    }
+
+    #[test]
+    fn a_looping_voice_starts_over_until_it_is_stopped() {
+        let mut mixer = Mixer::new(100);
+        let mut rolling = voice(vec![[0.1, 0.1], [0.2, 0.2]], 100);
+        rolling.loop_key = Some(7);
+        mixer.add(rolling);
+        let mut out = [0.0; 10];
+        assert_eq!(mixer.render(&mut out, 2), Reaped::default());
+        assert_eq!(out, [0.1, 0.1, 0.2, 0.2, 0.1, 0.1, 0.2, 0.2, 0.1, 0.1]);
+        assert_eq!(mixer.stop_loop(8).normal, 0, "another key");
+        assert_eq!(mixer.stop_loop(7).normal, 1);
+        assert!(mixer.is_empty());
+    }
+
+    #[test]
+    fn a_looping_voice_takes_new_gains() {
+        let mut mixer = Mixer::new(100);
+        let mut rolling = voice(vec![[1.0, 1.0]; 4], 100);
+        rolling.loop_key = Some(3);
+        mixer.add(rolling);
+        mixer.adjust_loop(3, 0.5, -1.0);
+        let mut out = [0.0; 2];
+        mixer.render(&mut out, 2);
+        assert_eq!(out, [0.5, 0.0]);
+        // A silent loop keeps playing.
+        mixer.adjust_loop(3, 0.0, 0.0);
+        mixer.render(&mut out, 2);
+        assert_eq!((out, mixer.len()), ([0.0, 0.0], 1));
     }
 
     #[test]

@@ -34,6 +34,7 @@ mod kind;
 mod mobs;
 mod particle;
 mod spawn;
+mod spawner;
 
 pub use behaviours::{create, firework_spark, Behaviour, SparkStyle, TickContext};
 pub use crumbs::{is_bite_tick, Eater};
@@ -44,3 +45,4 @@ pub use kind::ParticleKind;
 pub use mobs::MobBody;
 pub use particle::{Layer, Lighting, Particle, Texture};
 pub use spawn::{ParticleSetting, SpawnFilter, SpawnRequest};
+pub use spawner::spawner_active;

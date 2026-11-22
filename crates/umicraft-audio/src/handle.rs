@@ -24,6 +24,17 @@ pub const QUEUE_CAPACITY: usize = 256;
 pub enum AudioMessage {
     /// Play a sound.
     Play(SoundRequest),
+    /// Start the looping sound `key`, or update its volume and position when
+    /// it already plays (`ITickableSound`, a rolling minecart).
+    Loop {
+        /// Picked by the caller, unique among the loops it keeps.
+        key: u64,
+        /// The event, position and volume; the pitch and the delay of a
+        /// loop that already plays are ignored.
+        request: SoundRequest,
+    },
+    /// End the looping sound `key`.
+    EndLoop(u64),
     /// The listener moved or turned.
     Listener(Listener),
     /// A category volume changed (the options page).
@@ -107,6 +118,18 @@ impl AudioHandle {
             self.music.finish();
         }
         sent
+    }
+
+    /// Starts or updates the looping sound `key` (see [`AudioMessage::Loop`]).
+    /// Returns `false` when the queue was full; the caller sends it again on
+    /// its next change.
+    pub fn set_loop(&self, key: u64, request: SoundRequest) -> bool {
+        self.send(AudioMessage::Loop { key, request })
+    }
+
+    /// Ends the looping sound `key`.
+    pub fn end_loop(&self, key: u64) -> bool {
+        self.send(AudioMessage::EndLoop(key))
     }
 
     /// Stops the music track now; dropped when the queue is full (the music

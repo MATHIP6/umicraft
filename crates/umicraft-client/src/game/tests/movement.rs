@@ -444,3 +444,43 @@ fn leaving_a_boat_stands_the_player_on_top_of_it() {
         "{feet}"
     );
 }
+
+#[test]
+fn a_ridden_rolling_minecart_publishes_its_two_rolling_sounds() {
+    use umicraft_game::sound::looping::{MINECART_BASE, MINECART_INSIDE};
+
+    let mut game = placed_game();
+    game.entity_id = 7;
+    game.state = Some(GameState::new(DVec3::new(3.5, 65.0, 3.5)));
+    game.entities.spawn_object(
+        EntityId(11),
+        10,
+        DVec3::new(3.5, 64.0, 3.5),
+        0.0,
+        0.0,
+        Vec3::new(0.4, 0.0, 0.0),
+        0,
+    );
+    let mut queue = CommandQueue::default();
+    let (frames, received) = mpsc::sync_channel(256);
+    let (chunks, _) = mpsc::sync_channel(64);
+    let attach = PlayEvent::AttachEntity(
+        umicraft_protocol::packets::play::clientbound::AttachEntity {
+            leash: 0,
+            entity_id: 7,
+            vehicle_id: 11,
+        },
+    );
+    handle_net(&mut game, attach, &mut queue, &frames);
+    tick(&mut game, &mut queue, &frames, &chunks, Instant::now());
+    let frame = received
+        .try_iter()
+        .find_map(|event| match event {
+            RenderEvent::Frame(frame) => Some(frame),
+            _ => None,
+        })
+        .expect("a frame");
+    let names: Vec<&str> = frame.loops.iter().map(|sound| sound.name).collect();
+    assert_eq!(names, [MINECART_BASE, MINECART_INSIDE]);
+    assert!(frame.loops.iter().all(|sound| sound.volume > 0.0));
+}

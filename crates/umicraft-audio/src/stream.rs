@@ -41,6 +41,7 @@ impl PlayParams {
             pitch: self.pitch,
             pan: self.pan,
             streaming,
+            loop_key: None,
         }
     }
 }

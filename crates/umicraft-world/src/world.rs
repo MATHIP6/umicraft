@@ -87,6 +87,65 @@ impl World {
             })
     }
 
+    /// Calls `found` with every block of id `id` in the cube of half-side
+    /// `radius` around `center`, in no particular order.
+    ///
+    /// Sections whose palette lacks the id are skipped whole, so looking for a
+    /// rare block (a mob spawner) near the player costs a palette check per
+    /// section in reach, not a read per block.
+    pub fn for_each_block_near(
+        &self,
+        center: BlockPos,
+        radius: i32,
+        id: u16,
+        mut found: impl FnMut(BlockPos),
+    ) {
+        let low = BlockPos::new(
+            center.x - radius,
+            (center.y - radius).max(0),
+            center.z - radius,
+        );
+        let high = BlockPos::new(
+            center.x + radius,
+            (center.y + radius).min(WORLD_HEIGHT as i32 - 1),
+            center.z + radius,
+        );
+        if low.y > high.y {
+            return;
+        }
+        for chunk_x in (low.x >> 4)..=(high.x >> 4) {
+            for chunk_z in (low.z >> 4)..=(high.z >> 4) {
+                let Some(column) = self.chunks.get(&ChunkPos::new(chunk_x, chunk_z)) else {
+                    continue;
+                };
+                for section_y in (low.y >> 4)..=(high.y >> 4) {
+                    let Some(section) = column.section(section_y as usize) else {
+                        continue;
+                    };
+                    if !section.may_contain(id) {
+                        continue;
+                    }
+                    let base = BlockPos::new(chunk_x << 4, section_y << 4, chunk_z << 4);
+                    for y in base.y.max(low.y)..=(base.y + 15).min(high.y) {
+                        for z in base.z.max(low.z)..=(base.z + 15).min(high.z) {
+                            for x in base.x.max(low.x)..=(base.x + 15).min(high.x) {
+                                let local = |v: i32, b: i32| (v - b) as usize;
+                                let state = section.block(
+                                    local(x, base.x),
+                                    local(y, base.y),
+                                    local(z, base.z),
+                                );
+                                if state.id() == id {
+                                    found(BlockPos::new(x, y, z));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     /// Biome id at a world position.
     ///
     /// Biomes are stored once per column: Y is ignored. `None` means the chunk
@@ -448,6 +507,28 @@ mod tests {
         assert_eq!(nether.light(BlockPos::new(0, 0, 0)), LightLevel::DARK);
         // The loaded overworld column can still be mutated by the test.
         assert_eq!(world.chunk_count(), 1);
+    }
+
+    #[test]
+    fn blocks_are_found_by_id_within_the_cube_only() {
+        let mut world = World::new(0);
+        for (x, z) in [(0, -1), (-2, 0), (1, 0)] {
+            world
+                .apply_chunk(ChunkPos::new(x, z), payload(&flat_payload(0x20)))
+                .unwrap();
+        }
+        for pos in [
+            BlockPos::new(3, 40, -2),
+            BlockPos::new(-20, 41, 5),
+            BlockPos::new(30, 40, 0),
+        ] {
+            world.set_block(pos, BlockState::new(52, 0));
+        }
+        world.set_block(BlockPos::new(4, 40, -2), BlockState::new(1, 0));
+        let mut found = Vec::new();
+        world.for_each_block_near(BlockPos::new(0, 40, 0), 20, 52, |pos| found.push(pos));
+        found.sort_by_key(|pos| pos.x);
+        assert_eq!(found, [BlockPos::new(-20, 41, 5), BlockPos::new(3, 40, -2)]);
     }
 
     #[test]
