@@ -447,6 +447,14 @@ mod tests {
                 cart
             },
             place(4, EntityKind::Minecart, 3.2, 90.0, 30.0),
+            // A player seated in the second boat (`rider_feet`: 0.3 and 0.35
+            // down, 0.4 along the boat's yaw).
+            {
+                let mut rider = place(20, EntityKind::Player, -0.8, 0.0, 0.0);
+                rider.position += Vec3::new(0.0, -0.65, 0.4);
+                rider.riding = true;
+                rider
+            },
             place(5, EntityKind::EnderCrystal, 5.2, 0.0, 0.0),
         ];
         // Orbs of growing value, a few ticks apart in colour.

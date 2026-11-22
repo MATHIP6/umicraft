@@ -124,7 +124,11 @@ impl EntityRecord {
             self.position.x - self.previous_position.x,
             self.position.z - self.previous_position.z,
         );
-        self.limbs.update(moved.0.hypot(moved.1) as f32);
+        // A rider's limbs keep their swing: the reference only updates it in
+        // `moveEntityWithHeading`, which a riding entity never runs.
+        if self.vehicle.is_none() {
+            self.limbs.update(moved.0.hypot(moved.1) as f32);
+        }
         self.cape.update(self.position);
         if matches!(self.kind, EntityKind::Slime | EntityKind::MagmaCube) {
             self.squish.tick(self.on_ground);
@@ -290,6 +294,17 @@ mod tests {
         // 0.1 blocks this tick: target amplitude 0.4, smoothed by 0.4.
         assert!((entity.limbs.amount - 0.16).abs() < 1e-5);
         assert!((entity.limbs.swing - 0.16).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_rider_carried_by_its_vehicle_does_not_swing_its_limbs() {
+        let mut entity = record(EntityKind::Player);
+        entity.vehicle = Some(EntityId(9));
+        entity.retarget(DVec3::new(0.3, 64.0, 0.0), 0.0, 0.0, true);
+        entity.begin_tick();
+        entity.glide_to_target();
+        entity.animate();
+        assert_eq!(entity.limbs.amount, 0.0);
     }
 
     #[test]

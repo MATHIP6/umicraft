@@ -53,6 +53,9 @@ pub(super) fn follow_body(game: &mut Game) {
         | if game.item_use.is_using() { 0x10 } else { 0 };
     game.body.id = EntityId(game.entity_id);
     game.body.local = true;
+    // Seated in the second and third person (`ModelBiped.isRiding`), with
+    // limbs that stop swinging while the vehicle carries the body.
+    game.body.vehicle = game.vehicle.map(EntityId);
     // The skin and the cape of the local player come from its own tab list
     // entry, which is found by name; until it arrives the body wears the
     // default skin.

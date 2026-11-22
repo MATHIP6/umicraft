@@ -369,3 +369,15 @@ fn another_rider_makes_the_boat_an_empty_one_again() {
     handle_net(&mut game, other, &mut queue, &frames);
     assert!(!game.entities.entities()[&EntityId(9)].boat.driven);
 }
+
+#[test]
+fn the_local_body_sits_in_its_boat() {
+    // Regression: the local body never knew it rode, so it stood in the boat
+    // in the second and third person.
+    let (mut game, _) = boarded_boat();
+    follow_body(&mut game);
+    assert!(game.body.frame_data().riding);
+    game.vehicle = None;
+    follow_body(&mut game);
+    assert!(!game.body.frame_data().riding);
+}
