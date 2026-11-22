@@ -291,7 +291,12 @@ fn void_layers(layers: &mut Vec<Layer>, input: &PlanInput<'_>) {
     }
     // Sky off also drops this horizon plane (`glSkyList2` under
     // `isSkyEnabled`); the black plane and box above stay, as in OptiFine.
-    if !input.details.sky {
+    //
+    // A custom sky drawn this frame drops it too. The OptiFine source draws
+    // it, but in the owner's OptiFine-based client (2026-11-21 screenshots)
+    // the pack's sky shows below the horizon around the terrain, while here
+    // the fogged plane covered it with the flat fog colour.
+    if !input.details.sky || !input.custom.is_empty() {
         return;
     }
     let [r, g, b] = input.state.sky_color;
@@ -631,5 +636,31 @@ mod tests {
     fn the_end_draws_no_custom_layers_it_has_none_of() {
         let end = plan_custom(RenderEnvironment::new(1, 0, 0.0, 8), &[], false);
         assert_eq!(meshes(&end), [Mesh::EndCube]);
+    }
+
+    #[test]
+    fn a_drawn_custom_sky_shows_below_the_horizon_instead_of_the_void_plane() {
+        // The bug: the fogged horizon plane covered the lower half of a custom
+        // sky with the flat fog colour.
+        use umicraft_packext::sky::Blend as B;
+        let void_planes = |layers: &[Layer]| {
+            layers
+                .iter()
+                .filter(|l| {
+                    l.mesh == Mesh::Grid && l.uniform.model != dome::sky_model().to_cols_array_2d()
+                })
+                .count()
+        };
+        let env = RenderEnvironment::DEFAULT;
+        assert_eq!(void_planes(&plan_custom(env, &[], false)), 1);
+        assert_eq!(
+            void_planes(&plan_custom(env, &[], true)),
+            1,
+            "all layers faded out"
+        );
+        assert_eq!(
+            void_planes(&plan_custom(env, &[frame(0, B::Replace)], true)),
+            0
+        );
     }
 }
