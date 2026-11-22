@@ -35,3 +35,31 @@ fn an_animal_in_love_shows_hearts() {
     handle_net(&mut game, hurt_status(7, 18), &mut queue, &frames);
     assert_eq!(game.particles.len(), 7);
 }
+
+#[test]
+fn a_spawner_near_the_player_puffs_smoke_and_a_flame_every_tick() {
+    // Regression: spawners gave off no particles.
+    let mut game = game_on_floor_with(BlockState::new(52, 0));
+    spawn_spawner_particles(&mut game);
+    assert_eq!(game.particles.len(), 2);
+    // A spawner cart puffs too.
+    game.entities.spawn_object(
+        EntityId(8),
+        10,
+        DVec3::new(4.5, 64.0, 4.5),
+        0.0,
+        0.0,
+        glam::Vec3::ZERO,
+        4,
+    );
+    spawn_spawner_particles(&mut game);
+    assert_eq!(game.particles.len(), 6);
+}
+
+#[test]
+fn a_spectator_wakes_no_spawner() {
+    let mut game = game_on_floor_with(BlockState::new(52, 0));
+    game.gamemode = GameMode::Spectator;
+    spawn_spawner_particles(&mut game);
+    assert_eq!(game.particles.len(), 0);
+}

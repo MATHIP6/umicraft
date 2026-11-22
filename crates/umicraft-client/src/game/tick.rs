@@ -27,7 +27,9 @@ use super::commands::{command_of, CommandQueue};
 use super::hud::tick_hud_view;
 use super::messages::{ChunkEvent, RenderEvent};
 use super::movement::report_movement;
-use super::particles::{spawn_ambient_particles, spawn_local_crumbs, spawn_mob_particles};
+use super::particles::{
+    spawn_ambient_particles, spawn_local_crumbs, spawn_mob_particles, spawn_spawner_particles,
+};
 use super::publish::{
     publish_chunks, publish_frame, publish_sounds, publish_status, publish_text_screens,
 };
@@ -258,6 +260,7 @@ pub(super) fn tick(
         game.entities.tick_objects(world);
     }
     spawn_mob_particles(game);
+    spawn_spawner_particles(game);
     spawn_local_crumbs(game);
     if let Some(world) = game.world.as_ref() {
         game.particles.tick(world);

@@ -148,6 +148,15 @@ impl Section {
         self.bits
     }
 
+    /// Whether a block with id `id` may be in the section: false when its
+    /// palette has no such state, which rules it out without reading a block.
+    /// The palette can keep states that were replaced, so true is only a
+    /// maybe.
+    #[must_use]
+    pub fn may_contain(&self, id: u16) -> bool {
+        self.palette.iter().any(|state| state.id() == id)
+    }
+
     /// True when the section contains only air.
     #[must_use]
     pub fn is_empty(&self) -> bool {

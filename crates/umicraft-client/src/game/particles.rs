@@ -3,10 +3,10 @@
 //! The client-side particles the world, the mobs and the packets create (P8).
 
 use glam::DVec3;
-use umicraft_game::entity::EntityId;
+use umicraft_game::entity::{EntityId, EntityKind};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::item_use::UseAction;
-use umicraft_game::particles::{is_bite_tick, Eater, EffectContext, SpawnFilter};
+use umicraft_game::particles::{is_bite_tick, spawner_active, Eater, EffectContext, SpawnFilter};
 use umicraft_game::raycast::RayHit;
 use umicraft_game::shapes::Aabb;
 use umicraft_world::{BlockPos, BlockState};
@@ -45,6 +45,54 @@ pub(super) fn spawn_ambient_particles(game: &mut Game) {
     );
     if let Some(state) = game.state.as_mut() {
         state.queue_sound_cues(rain);
+    }
+}
+
+/// The block id of a mob spawner.
+const MOB_SPAWNER: u16 = 52;
+/// The `data` of the spawn packet of a spawner minecart.
+const SPAWNER_CART: i32 = 4;
+/// Half the side of the cube searched for spawners: their activating range.
+const SPAWNER_REACH: i32 = 16;
+
+/// The smoke and flames of the spawners the local player wakes this tick:
+/// the spawner blocks and the spawner minecarts within 16 blocks
+/// (`MobSpawnerBaseLogic.updateSpawner`, `isActivated`). A spectator wakes
+/// none (`isAnyPlayerWithinRangeAt` skips them). Other players' range is not
+/// counted: their spawners are out of the local player's particle reach.
+pub(super) fn spawn_spawner_particles(game: &mut Game) {
+    if game.gamemode == GameMode::Spectator {
+        return;
+    }
+    let (Some(filter), Some(world)) = (particle_filter(game), game.world.as_ref()) else {
+        return;
+    };
+    let feet = filter.viewer;
+    let particles = &mut game.particles;
+    let center = BlockPos::new(
+        feet.x.floor() as i32,
+        feet.y.floor() as i32,
+        feet.z.floor() as i32,
+    );
+    world.for_each_block_near(center, SPAWNER_REACH, MOB_SPAWNER, |block| {
+        if spawner_active(block, feet) {
+            particles.spawn_spawner_puff(block, &filter);
+        }
+    });
+    // `EntityMinecartMobSpawner`: the logic sits in the block of the cart.
+    for cart in
+        game.entities.entities().values().filter(|entity| {
+            entity.kind == EntityKind::Minecart && entity.object_data == SPAWNER_CART
+        })
+    {
+        let block = BlockPos::new(
+            cart.position.x.floor() as i32,
+            cart.position.y.floor() as i32,
+            cart.position.z.floor() as i32,
+        );
+        if spawner_active(block, feet) {
+            particles.spawn_spawner_puff(block, &filter);
+        }
     }
 }
 
