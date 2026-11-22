@@ -15,6 +15,13 @@ const ARROW: (u32, u32) = (12, 19);
 /// Where the offer preview puts its items: the first and second wanted item
 /// and the result (`GuiMerchant.drawScreen`).
 pub const OFFER_ITEMS: [(u32, u32); 3] = [(36, 24), (62, 24), (120, 24)];
+/// Size of the cross over a used-up offer, from (212, 0) of the texture.
+const CROSS: (u32, u32) = (28, 21);
+/// Where `GuiMerchant` draws the two crosses of a used-up offer: over the
+/// arrow of the preview and over the arrow of the trade slots. Hovering them
+/// shows `merchant.deprecated`.
+pub const DISABLED_CROSSES: [(u32, u32, u32, u32); 2] =
+    [(83, 21, CROSS.0, CROSS.1), (83, 51, CROSS.0, CROSS.1)];
 
 /// Builds the villager screen: two buy slots, the result, backpack, hotbar.
 pub(super) fn spec() -> ScreenSpec {
@@ -41,9 +48,10 @@ pub(super) fn hotspots() -> Vec<HotspotSpec> {
         .collect()
 }
 
-/// The arrows, greyed out when there is no offer in that direction.
+/// The arrows, greyed out when there is no offer in that direction, and the
+/// crosses of a used-up offer (`drawGuiContainerBackgroundLayer`).
 pub(super) fn dynamic(state: &ScreenState<'_>) -> Dynamic {
-    let decorations = hotspots()
+    let mut decorations: Vec<Decoration> = hotspots()
         .into_iter()
         .map(|spec| {
             let enabled = match spec.hotspot {
@@ -65,6 +73,13 @@ pub(super) fn dynamic(state: &ScreenState<'_>) -> Dynamic {
             Decoration::full((176 + column * ARROW.0, row), ARROW, (spec.x, spec.y))
         })
         .collect();
+    if state.trade_disabled {
+        decorations.extend(
+            DISABLED_CROSSES
+                .iter()
+                .map(|&(x, y, w, h)| Decoration::full((212, 0), (w, h), (x, y))),
+        );
+    }
     Dynamic::sprites(decorations)
 }
 
@@ -105,5 +120,21 @@ mod tests {
         let sprites = dynamic(&state).decorations;
         assert_eq!(sprites[0].src.0, 176 + 12, "hovered");
         assert_eq!(sprites[1].src.0, 176 + 24, "no previous offer");
+    }
+
+    #[test]
+    fn a_used_up_offer_is_crossed_out_twice() {
+        let state = ScreenState {
+            trade_disabled: true,
+            ..ScreenState::default()
+        };
+        let crosses: Vec<_> = dynamic(&state)
+            .decorations
+            .into_iter()
+            .filter(|d| d.src == (212, 0))
+            .map(|d| d.dst)
+            .collect();
+        assert_eq!(crosses, [(83, 21), (83, 51)]);
+        assert_eq!(dynamic(&ScreenState::default()).decorations.len(), 2);
     }
 }

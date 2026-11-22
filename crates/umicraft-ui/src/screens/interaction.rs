@@ -63,6 +63,8 @@ pub struct ScreenState<'a> {
     pub trade_previous: bool,
     /// Whether the villager has an offer after the selected one.
     pub trade_next: bool,
+    /// Whether the offer on display ran out (`MerchantRecipe.isRecipeDisabled`).
+    pub trade_disabled: bool,
 }
 
 /// A line of text drawn over a screen, in unscaled GUI pixels.

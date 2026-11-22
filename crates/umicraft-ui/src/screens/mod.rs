@@ -48,7 +48,7 @@ pub use enchanting::row_available as enchant_row_available;
 pub use interaction::{Dynamic, Hotspot, HotspotSpec, Label, ScreenState};
 pub use scale::{gui_scale, gui_scale_option, set_gui_scale_option, ScaledResolution};
 pub use screen_layout::ScreenLayout;
-pub use villager::OFFER_ITEMS as TRADE_OFFER_ITEMS;
+pub use villager::{DISABLED_CROSSES as TRADE_DISABLED_CROSSES, OFFER_ITEMS as TRADE_OFFER_ITEMS};
 
 /// Which screen to show. More kinds are added as their windows are supported.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

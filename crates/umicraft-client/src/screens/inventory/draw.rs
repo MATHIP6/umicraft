@@ -10,6 +10,7 @@
 use umicraft_assets::GuiAtlas;
 use umicraft_game::entity::EntityId;
 use umicraft_game::inventory::effect_list::EffectLine;
+use umicraft_game::inventory::tooltip::{TooltipColor, TooltipLine, TooltipText};
 use umicraft_game::inventory::{
     resolve_container_slot, ContainerView, DragPreview, SlotTarget, WindowKind, WindowView,
 };
@@ -17,7 +18,7 @@ use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::PORTRAIT_KEY;
 use umicraft_ui::screens::{
     anvil_cost_line, CostText, Hotspot, Label, ScreenKind, ScreenLayout, ScreenState, Sheet,
-    SpriteRect, COST_RIGHT, COST_Y, TRADE_OFFER_ITEMS,
+    SpriteRect, COST_RIGHT, COST_Y, TRADE_DISABLED_CROSSES, TRADE_OFFER_ITEMS,
 };
 use umicraft_ui::styled_text::{draw_styled, styled_width, StyledRun};
 use umicraft_ui::widgets::slot;
@@ -151,6 +152,10 @@ pub(crate) fn screen_state<'a>(
         hover,
         trade_previous: container.selected_trade > 0,
         trade_next: container.selected_trade + 1 < trades,
+        trade_disabled: container
+            .trades
+            .get(container.selected_trade)
+            .is_some_and(|trade| trade.disabled),
     }
 }
 
@@ -509,6 +514,9 @@ pub(crate) fn draw_inventory_overlay(
         let hovered = hovered_stack(ui, &layout, view, own_len).or(offer);
         draw_hovered_tooltip(ui, atlas, viewport, &layout, hovered);
     }
+    if offer.is_none() && state.trade_disabled {
+        draw_deprecated_tooltip(ui, atlas, viewport, &layout);
+    }
     // `InventoryEffectRenderer.drawScreen` draws the list after the rest of
     // the screen, the held stack and the tooltip included.
     if kind == ScreenKind::Player {
@@ -580,6 +588,36 @@ fn draw_hovered_tooltip(
     };
     let lines = crate::screens::tooltip::item_lines(stack);
     draw_tooltip(ui, atlas, viewport, layout.scale as f32, pointer, &lines);
+}
+
+/// Shows `merchant.deprecated` over the crosses of a used-up offer
+/// (`GuiMerchant.drawScreen`, `drawCreativeTabHoveringText`: one white line).
+fn draw_deprecated_tooltip(ui: &mut Ui, atlas: &FontAtlas, viewport: Rect, layout: &ScreenLayout) {
+    let Some(pointer) = ui.pointer() else {
+        return;
+    };
+    let scale = layout.scale as f32;
+    let over_cross = TRADE_DISABLED_CROSSES.iter().any(|&(x, y, w, h)| {
+        Rect::new(
+            layout.background.x + x as f32 * scale,
+            layout.background.y + y as f32 * scale,
+            w as f32 * scale,
+            h as f32 * scale,
+        )
+        .contains(pointer)
+    });
+    if !over_cross {
+        return;
+    }
+    let line = TooltipLine {
+        text: TooltipText::Translation {
+            key: "merchant.deprecated".into(),
+            args: Vec::new(),
+        },
+        color: TooltipColor::White,
+        italic: false,
+    };
+    draw_tooltip(ui, atlas, viewport, scale, pointer, &[line]);
 }
 
 /// Draws one texture sub-rectangle.
@@ -718,6 +756,22 @@ mod tests {
         let last = view_of(villager);
         let state = screen_state(&last, &ScreenFacts::default(), None);
         assert!(state.trade_previous && !state.trade_next);
+        assert!(!state.trade_disabled);
+    }
+
+    #[test]
+    fn a_used_up_offer_reaches_the_screen_state() {
+        let mut villager = container(WindowKind::Villager, 3);
+        villager.trades = vec![umicraft_game::inventory::payload::Trade {
+            buy: stack(1),
+            buy_second: None,
+            sell: stack(2),
+            disabled: true,
+            uses: 7,
+            max_uses: 7,
+        }];
+        let view = view_of(villager);
+        assert!(screen_state(&view, &ScreenFacts::default(), None).trade_disabled);
     }
 
     #[test]
