@@ -73,6 +73,8 @@ pub(crate) enum Subject {
     LocalPlayer,
     /// A tracked entity, such as the horse of a horse window.
     Entity(EntityId),
+    /// The book of the enchanting table screen.
+    EnchantingBook,
 }
 
 /// Where a screen put the portrait in the last frame, for the render step that

@@ -53,6 +53,16 @@ impl BookModel {
     /// `-1/16` on y of the final scale undoes the flip (as in the chest).
     #[must_use]
     pub fn emit(pose: BookPose) -> Vec<ModelVertex> {
+        Self::emit_in(pose, Self::root(pose))
+    }
+
+    /// The book under another matrix stack, such as the enchanting screen's
+    /// (`GuiEnchantment`). `root` takes the reference's y-down model units
+    /// (sixteenths) to the target space; [`BookModel::MODEL_SCALE`] is that
+    /// last step and goes at its end. Only the pose's flips, spread and age
+    /// are used: `rotation` belongs to the table's own stack.
+    #[must_use]
+    pub fn emit_in(pose: BookPose, root: Mat4) -> Vec<ModelVertex> {
         let angle = cover_angle(pose.age, pose.spread);
         let page_x = angle.sin();
         let part = |pivot: [f32; 3], origin: [f32; 3], size: [f32; 3], uv: [f32; 2]| {
@@ -113,7 +123,6 @@ impl BookModel {
                 angle - angle * 2.0 * flip,
             )
         };
-        let root = Self::root(pose);
         let mut out = Vec::new();
         for part in [
             &cover_right,
@@ -135,8 +144,30 @@ impl BookModel {
         Mat4::from_translation(Vec3::new(0.5, 0.75 + bob, 0.5))
             * Mat4::from_rotation_y(-pose.rotation)
             * Mat4::from_rotation_z(80.0_f32.to_radians())
-            * Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0) / 16.0)
+            * Self::MODEL_SCALE
     }
+
+    /// The reference's `0.0625` model scale, with the y flip that takes its
+    /// y-down boxes to the crate's y-up vertices (every box is symmetric
+    /// about `y = 0`).
+    pub const MODEL_SCALE: Mat4 = Mat4::from_cols_array(&[
+        1.0 / 16.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        -1.0 / 16.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0 / 16.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+    ]);
 }
 
 #[cfg(test)]

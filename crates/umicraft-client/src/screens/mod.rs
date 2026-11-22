@@ -21,6 +21,7 @@ pub(crate) mod anvil_field;
 pub(crate) mod connection_end;
 pub(crate) mod creative;
 pub(crate) mod effect_list;
+pub(crate) mod enchant_book;
 pub(crate) mod inventory;
 pub(crate) mod menu_flow;
 pub(crate) mod menu_rows;

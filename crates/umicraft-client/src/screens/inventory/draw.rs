@@ -30,6 +30,7 @@ use umicraft_ui::{draw_item, FontAtlas, Rect, TextStyle, Ui};
 use crate::resources::item_icons::{slot_item, ItemView};
 use crate::screens::anvil_field::FieldView;
 use crate::screens::effect_list::draw_effect_list;
+use crate::screens::enchant_book;
 use crate::screens::inventory::galactic::draw_enchant_names;
 use crate::screens::inventory::input::Context;
 use crate::screens::portrait::{self, Spot, Subject};
@@ -408,7 +409,8 @@ fn stack_at(view: &WindowView, own_len: usize, index: usize) -> Option<&ItemStac
 }
 
 /// Where the screen shows a model: the player in the survival inventory,
-/// the horse in a horse window (`GuiScreenHorseInventory`).
+/// the horse in a horse window (`GuiScreenHorseInventory`), the book of the
+/// enchanting table (`GuiEnchantment`).
 fn portrait_spot(
     layout: &ScreenLayout,
     kind: ScreenKind,
@@ -420,6 +422,7 @@ fn portrait_spot(
             let horse = container?.horse?;
             (portrait::HORSE, Subject::Entity(EntityId(horse.entity_id)))
         }
+        ScreenKind::EnchantingTable => (enchant_book::BOOK, Subject::EnchantingBook),
         _ => return None,
     };
     Some(Spot {

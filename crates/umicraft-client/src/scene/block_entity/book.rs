@@ -120,7 +120,7 @@ fn seed(position: [i32; 3]) -> u64 {
 
 /// The triangles of `vertices` whose front side looks at `eye` (the winding
 /// is counter-clockwise seen from outside); degenerate ones go too.
-fn facing(vertices: Vec<ModelVertex>, eye: Vec3) -> Vec<ModelVertex> {
+pub(crate) fn facing(vertices: Vec<ModelVertex>, eye: Vec3) -> Vec<ModelVertex> {
     vertices
         .chunks_exact(3)
         .filter(|triangle| {
