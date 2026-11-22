@@ -9,6 +9,7 @@
 
 mod animals;
 mod armor_stand;
+mod cart;
 mod common;
 mod horse;
 mod monsters;
@@ -21,6 +22,7 @@ use super::kind::EntityKind;
 
 pub use animals::{OcelotMeta, RabbitMeta, SheepMeta, WolfMeta};
 pub use armor_stand::{ArmorStandMeta, Pose};
+pub use cart::{CartMeta, DisplayTile, TNT_CART_FUSE};
 pub use common::LivingMeta;
 pub use horse::HorseMeta;
 pub use monsters::{CreeperMeta, EndermanMeta, ZombieMeta};
@@ -123,6 +125,8 @@ pub enum Variant {
         direction: i32,
         /// The damage it took, which scales the shake.
         damage: f32,
+        /// What a minecart carries; the default for a boat.
+        cart: CartMeta,
     },
     /// Armour stand flags and pose.
     ArmorStand(ArmorStandMeta),
@@ -130,9 +134,35 @@ pub enum Variant {
 
 impl EntityMeta {
     /// Advances the state that runs down by itself, one tick (the shake of a
-    /// boat or a minecart that was hit).
+    /// boat or a minecart that was hit, the fuse of a lit TNT cart).
     pub fn tick(&mut self) {
         monsters::tick_vehicle(&mut self.variant);
+    }
+
+    /// Sets a TNT cart off (status 10). A cart lit before any metadata
+    /// arrived gets its vehicle state now, so its fuse still counts down.
+    pub fn ignite_cart(&mut self) {
+        if let Variant::Vehicle { cart, .. } = &mut self.variant {
+            cart.ignite();
+            return;
+        }
+        let mut cart = CartMeta::default();
+        cart.ignite();
+        self.variant = Variant::Vehicle {
+            amplitude: 0,
+            direction: 1,
+            damage: 0.0,
+            cart,
+        };
+    }
+
+    /// The cart state of a minecart, `None` before any vehicle state exists.
+    #[must_use]
+    pub fn cart(&self) -> Option<&CartMeta> {
+        match &self.variant {
+            Variant::Vehicle { cart, .. } => Some(cart),
+            _ => None,
+        }
     }
 
     /// Merges the entries of `metadata` into this state; `kind` selects which
@@ -162,7 +192,11 @@ impl EntityMeta {
             EntityKind::Guardian => monsters::apply_guardian(&mut variant, metadata),
             EntityKind::WitherSkull => monsters::apply_wither_skull(&mut variant, metadata),
             EntityKind::Boat | EntityKind::Minecart => {
-                monsters::apply_vehicle(&mut variant, metadata)
+                monsters::apply_vehicle(&mut variant, metadata);
+                if let (EntityKind::Minecart, Variant::Vehicle { cart, .. }) = (kind, &mut variant)
+                {
+                    cart.apply(metadata);
+                }
             }
             EntityKind::Villager => monsters::apply_villager(&mut variant, metadata),
             EntityKind::ArmorStand => armor_stand::apply(&mut variant, metadata),

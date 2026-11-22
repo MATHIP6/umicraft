@@ -20,7 +20,8 @@ use umicraft_model::entity::{ChestModel, ModelBox, ModelPart, ModelVertex, Textu
 use umicraft_render::EntityVertex;
 
 use super::transform::x_mirror;
-use crate::scene::item_world::objects::{cart_block, Pose, CHEST};
+use crate::scene::block_entity::{mob_pose, spin_degrees};
+use crate::scene::item_world::objects::{cart_block, cart_jitter, cart_spawner_frame, Pose, CHEST};
 
 /// How high above the position of the entity the model is drawn.
 const BOAT_LIFT: f32 = 0.25;
@@ -106,6 +107,7 @@ pub(crate) fn wobble(ent: &EntityRenderSnapshot) -> f32 {
         amplitude,
         direction,
         damage,
+        ..
     } = ent.meta.variant
     else {
         return 0.0;
@@ -139,7 +141,12 @@ pub(super) fn add_vehicle(
         EntityKind::EnderCrystal => return add_crystal(batches, ent, light),
         _ => return,
     };
-    let placed = Mat4::from_translation(ent.position + Vec3::new(0.0, lift, 0.0))
+    let jitter = if ent.kind == EntityKind::Minecart {
+        cart_jitter(ent.id.0)
+    } else {
+        Vec3::ZERO
+    };
+    let placed = Mat4::from_translation(ent.position + jitter + Vec3::new(0.0, lift, 0.0))
         * Mat4::from_rotation_y((180.0 - ent.yaw).to_radians())
         * Mat4::from_rotation_z(tilt)
         * Mat4::from_rotation_x(wobble(ent).to_radians())
@@ -161,6 +168,42 @@ pub(super) fn add_vehicle(
                 light,
             );
         }
+    }
+    if let Some(frame) = cart_spawner_frame(ent) {
+        add_spawner_pig(batches, ent, frame, light);
+    }
+}
+
+/// The mob that spins in a spawner cart (`RenderMinecartMobSpawner`): always
+/// a pig, since the client's spawner logic never learns the cart's mob and
+/// keeps its default `Pig`. It spins at the corner of the block frame, with
+/// no centring, as the reference draws it.
+fn add_spawner_pig(
+    batches: &mut HashMap<TextureSlot, Vec<EntityVertex>>,
+    ent: &EntityRenderSnapshot,
+    frame: Mat4,
+    light: u32,
+) {
+    let mut pig = EntityRenderSnapshot::new(ent.id, EntityKind::Pig, Vec3::ZERO);
+    pig.age = ent.age;
+    let matrix = frame * mob_pose(spin_degrees(f64::from(ent.age)));
+    for (slot, vertices) in super::mesh_entities(&[pig]) {
+        batches
+            .entry(slot)
+            .or_default()
+            .extend(vertices.into_iter().map(|vertex| {
+                EntityVertex {
+                    position: matrix
+                        .transform_point3(Vec3::from(vertex.position))
+                        .to_array(),
+                    normal: matrix
+                        .transform_vector3(Vec3::from(vertex.normal))
+                        .normalize_or_zero()
+                        .to_array(),
+                    light,
+                    ..vertex
+                }
+            }));
     }
 }
 
@@ -231,6 +274,7 @@ fn add_crystal(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use umicraft_game::entity::meta::CartMeta;
     use umicraft_game::entity::EntityId;
 
     fn at(kind: EntityKind, yaw: f32, pitch: f32) -> EntityRenderSnapshot {
@@ -318,6 +362,7 @@ mod tests {
                 amplitude,
                 direction: 1,
                 damage,
+                cart: CartMeta::default(),
             };
             ent
         };
@@ -333,6 +378,7 @@ mod tests {
             amplitude: 10,
             direction: -1,
             damage: 20.0,
+            cart: CartMeta::default(),
         };
         assert!((wobble(&other) + rolled).abs() < 1e-4);
         // The boat is turned by it.

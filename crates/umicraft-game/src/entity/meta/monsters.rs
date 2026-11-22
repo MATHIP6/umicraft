@@ -4,7 +4,7 @@
 
 use umicraft_protocol::packets::play::Metadata;
 
-use super::Variant;
+use super::{CartMeta, Variant};
 
 /// Slime entry: size (MCP `EntitySlime.entityInit`).
 const SLIME_SIZE: u8 = 16;
@@ -102,13 +102,14 @@ const VEHICLE_DIRECTION: u8 = 18;
 const VEHICLE_DAMAGE: u8 = 19;
 
 pub(super) fn apply_vehicle(variant: &mut Variant, metadata: &Metadata) {
-    let (mut amplitude, mut direction, mut damage) = match *variant {
+    let (mut amplitude, mut direction, mut damage, cart) = match *variant {
         Variant::Vehicle {
             amplitude,
             direction,
             damage,
-        } => (amplitude, direction, damage),
-        _ => (0, 1, 0.0),
+            cart,
+        } => (amplitude, direction, damage, cart),
+        _ => (0, 1, 0.0, CartMeta::default()),
     };
     if let Some(value) = metadata.get_int(VEHICLE_AMPLITUDE) {
         amplitude = value;
@@ -123,6 +124,7 @@ pub(super) fn apply_vehicle(variant: &mut Variant, metadata: &Metadata) {
         amplitude,
         direction,
         damage,
+        cart,
     };
 }
 
@@ -130,9 +132,13 @@ pub(super) fn apply_vehicle(variant: &mut Variant, metadata: &Metadata) {
 /// `EntityBoat.onUpdate`).
 pub(super) fn tick_vehicle(variant: &mut Variant) {
     if let Variant::Vehicle {
-        amplitude, damage, ..
+        amplitude,
+        damage,
+        cart,
+        ..
     } = variant
     {
+        cart.tick();
         if *amplitude > 0 {
             *amplitude -= 1;
         }

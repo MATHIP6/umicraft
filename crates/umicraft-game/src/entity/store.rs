@@ -28,6 +28,8 @@ use super::{
 pub const LIGHTNING_FLASH_TICKS: u32 = 3;
 
 const ENTITY_FLAGS: u8 = 0;
+/// The `data` of the spawn packet of a TNT minecart (`EntityMinecart.EnumMinecartType`).
+const TNT_CART: i32 = 3;
 /// Data watcher entry of the player skin parts (MCP `EntityPlayer.entityInit`).
 const PLAYER_SKIN_PARTS: u8 = 10;
 /// Data watcher entry of the health (MCP `EntityLivingBase.entityInit`).
@@ -621,6 +623,10 @@ impl EntityStore {
             19 if entity.kind == EntityKind::Squid => entity.animation.restart_squid_cycle(),
             // MCP `EntityPlayer.handleStatusUpdate`: the item use finished.
             9 => entity.use_ticks = 0,
+            // MCP `EntityMinecartTNT.handleStatusUpdate`: the cart is lit.
+            10 if entity.kind == EntityKind::Minecart && entity.object_data == TNT_CART => {
+                entity.meta.ignite_cart();
+            }
             _ => {}
         }
     }
@@ -1078,6 +1084,31 @@ mod tests {
         // An unknown vehicle is `mountEntity(null)`: the item steps off.
         store.attach(EntityId(2), Some(EntityId(98)));
         assert_eq!(store.entities[&EntityId(2)].vehicle, None);
+    }
+
+    #[test]
+    fn status_ten_lights_a_tnt_cart_only() {
+        let mut store = EntityStore::new();
+        for (id, data) in [(1, 3), (2, 1)] {
+            store.spawn_object(EntityId(id), 10, DVec3::ZERO, 0.0, 0.0, Vec3::ZERO, data);
+            store.status(EntityId(id), 10);
+        }
+        let fuse = |id| {
+            store.entities[&EntityId(id)]
+                .meta
+                .cart()
+                .map(|cart| cart.fuse)
+        };
+        assert_eq!(fuse(1), Some(80));
+        assert_eq!(fuse(2), None);
+        store.tick();
+        assert_eq!(
+            store.entities[&EntityId(1)]
+                .meta
+                .cart()
+                .map(|cart| cart.fuse),
+            Some(79)
+        );
     }
 
     #[test]
