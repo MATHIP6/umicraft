@@ -771,19 +771,23 @@ const DEFAULT_PACK_PATH: &str = "pack.png";
 /// The sign texture, which the sign editor draws flat in the GUI
 /// (`GuiEditSign` renders the sign model facing the screen).
 const SIGN_PATH: &str = "assets/minecraft/textures/entity/sign.png";
+/// The standard galactic alphabet, which the enchanting table writes its row
+/// names in (`Minecraft.standardGalacticFontRenderer`).
+const GALACTIC_FONT_PATH: &str = "assets/minecraft/textures/font/ascii_sga.png";
 
 /// The textures outside `textures/gui/` that the GUI atlas holds anyway, with
 /// their region names.
-const EXTRA_GUI_TEXTURES: [(&str, &str); 4] = [
+const EXTRA_GUI_TEXTURES: [(&str, &str); 5] = [
     (UNKNOWN_SERVER_PATH, "misc/unknown_server"),
     (UNKNOWN_PACK_PATH, "misc/unknown_pack"),
     (DEFAULT_PACK_PATH, "misc/default_pack"),
     (SIGN_PATH, "entity/sign"),
+    (GALACTIC_FONT_PATH, "font/ascii_sga"),
 ];
 
 /// True for a GUI texture PNG (container backgrounds, widgets, icons) or one
 /// of the [`EXTRA_GUI_TEXTURES`] (the default server and pack icons, the
-/// sign).
+/// sign, the galactic font).
 fn is_gui_texture(path: &str) -> bool {
     (path.starts_with(GUI_TEXTURES_PREFIX) && path.ends_with(".png"))
         || EXTRA_GUI_TEXTURES.iter().any(|(extra, _)| *extra == path)

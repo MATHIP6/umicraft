@@ -30,6 +30,7 @@ use umicraft_ui::{draw_item, FontAtlas, Rect, TextStyle, Ui};
 use crate::resources::item_icons::{slot_item, ItemView};
 use crate::screens::anvil_field::FieldView;
 use crate::screens::effect_list::draw_effect_list;
+use crate::screens::inventory::galactic::draw_enchant_names;
 use crate::screens::inventory::input::Context;
 use crate::screens::portrait::{self, Spot, Subject};
 use crate::screens::tooltip::draw_tooltip;
@@ -479,6 +480,9 @@ pub(crate) fn draw_inventory_overlay(
             }
         }
         None => ui.draw().rect(layout.background, FALLBACK_BACKGROUND),
+    }
+    if kind == ScreenKind::EnchantingTable {
+        draw_enchant_names(ui, &layout, gui_atlas, &state);
     }
     draw_labels(ui, atlas, &layout, &dynamic.labels);
     draw_captions(ui, atlas, &layout, (kind, view.container.as_ref()));

@@ -2,9 +2,10 @@
 
 //! The enchanting table, after `ContainerEnchantment` / `GuiEnchantment`.
 //!
-//! The three option rows are drawn with their level cost; the text in the
-//! standard galactic alphabet and the animated book are not (see
-//! `docs/parity.md`).
+//! The three option rows are drawn with their level cost. The client writes
+//! the row names in the standard galactic alphabet over them
+//! (`umicraft_client::screens::inventory::galactic`); the animated book is not
+//! drawn (see `docs/parity.md`).
 
 use super::decoration::Decoration;
 use super::interaction::{Dynamic, Hotspot, HotspotSpec, Label, ScreenState};
