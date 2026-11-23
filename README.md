@@ -11,7 +11,8 @@ An independent Rust client for Minecraft: Java Edition 1.8.x servers
 [![Discord](https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/7EwBaNDag2)
 
 [Status](#status) · [Workspace](#workspace) · [Getting started](#getting-started) ·
-[Development](#development) · [Documentation](#documentation)
+[Development](#development) · [Contributing](#contributing) ·
+[Documentation](#documentation)
 
 </div>
 
@@ -150,6 +151,35 @@ cargo test --workspace
 
 GPU smoke tests are opt-in because they need a working adapter:
 `cargo test -p umicraft-client -- --ignored`.
+
+## Contributing
+
+Contributions are welcome: bug reports, feature ideas and pull requests. You can
+also ask questions or talk about an idea on
+[Discord](https://discord.gg/7EwBaNDag2).
+
+### Finding something to work on
+
+Look at the [open issues](https://github.com/MATHIP6/umicraft/issues): features
+and fixes waiting for someone are written there, with their behaviour, design
+notes and acceptance criteria. Comment on the issue you want to take, so two people
+do not work on the same task, and ask there if anything is unclear.
+
+### Clean-room rules
+
+- **No Mojang assets** (textures, sounds, fonts, language files, models,
+  logos) in the repository or in a pull request. The user downloads them.
+- **No Mojang code** copied verbatim, and no decompiled sources or mappings
+  committed.
+- **No code or assets from other mods.** An existing mod may inspire a feature,
+  but the implementation must be original and compatible with the project
+  license.
+
+### License of contributions
+
+Unless you state otherwise, any contribution you submit for inclusion in
+Umicraft is dual-licensed under MIT or Apache-2.0, as the rest of the project,
+with no additional terms or conditions.
 
 ## Documentation
 
