@@ -184,6 +184,9 @@ pub(super) struct Game {
     /// The game mode the physics layers read and may change; the game stores
     /// its own before every physics run and applies a change after it.
     pub(super) physics_mode: SharedGameMode,
+    /// Whether the frames carry the entity facts the mods' render-thread
+    /// snapshot reads; set when external mods are loaded.
+    pub(super) entity_facts: bool,
 }
 
 impl Game {
@@ -244,6 +247,7 @@ impl Game {
             commands: None,
             physics: None,
             physics_mode: SharedGameMode::default(),
+            entity_facts: false,
         }
     }
 

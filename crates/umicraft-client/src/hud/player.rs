@@ -151,6 +151,11 @@ impl Default for HudTracker {
 }
 
 impl HudTracker {
+    /// The `generic.maxHealth` the server described for an entity, if it did.
+    pub(crate) fn max_health_of(&self, id: i32) -> Option<f32> {
+        self.max_health.get(&id).copied()
+    }
+
     /// The views of the last tick.
     pub(crate) fn views(&self) -> &HudViews {
         &self.views

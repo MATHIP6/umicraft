@@ -49,6 +49,9 @@ pub struct GameMods {
     pub commands: Option<CommandTable>,
     /// The mods' `player_physics` layers; `None` when no mod registered one.
     pub physics: Option<PhysicsChain>,
+    /// Whether external mods are loaded, so every published frame carries the
+    /// entity facts of the render-thread snapshot (ADR-0094).
+    pub entity_facts: bool,
 }
 
 /// Runs one game tick between its [`PreTick`] and [`PostTick`] events.
@@ -64,15 +67,23 @@ pub(super) fn run_tick(
 ) {
     let number = game.status_data.ticks;
     if game.bus.has_subscribers::<PreTick>() {
-        lend(game.world.as_ref(), &game.entities, || {
-            game.bus.dispatch(&mut PreTick::new(number))
-        });
+        lend(
+            game.world.as_ref(),
+            &game.entities,
+            &game.social.scoreboard,
+            &game.hud_view,
+            || game.bus.dispatch(&mut PreTick::new(number)),
+        );
     }
     tick(game, queue, frames, chunks, tick_time);
     if game.bus.has_subscribers::<PostTick>() {
-        lend(game.world.as_ref(), &game.entities, || {
-            game.bus.dispatch(&mut PostTick::new(number))
-        });
+        lend(
+            game.world.as_ref(),
+            &game.entities,
+            &game.social.scoreboard,
+            &game.hud_view,
+            || game.bus.dispatch(&mut PostTick::new(number)),
+        );
     }
 }
 
@@ -149,12 +160,22 @@ pub(super) fn typed_chat(game: &mut Game, message: String) -> Option<String> {
         .commands
         .as_ref()
         .map_or(CommandOutcome::NotACommand, |table| {
-            lend(game.world.as_ref(), &game.entities, || table.run(&message))
+            lend(
+                game.world.as_ref(),
+                &game.entities,
+                &game.social.scoreboard,
+                &game.hud_view,
+                || table.run(&message),
+            )
         });
     match line_action(outcome) {
-        LineAction::Send => lend(game.world.as_ref(), &game.entities, || {
-            outgoing_chat(&mut game.bus, message)
-        }),
+        LineAction::Send => lend(
+            game.world.as_ref(),
+            &game.entities,
+            &game.social.scoreboard,
+            &game.hud_view,
+            || outgoing_chat(&mut game.bus, message),
+        ),
         LineAction::Swallow => None,
     }
 }

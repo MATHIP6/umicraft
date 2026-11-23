@@ -14,7 +14,7 @@ use winit::keyboard::KeyCode;
 
 use umicraft_builtin_mods::{CombatInfo, KeyState, MAX_EFFECTS};
 use umicraft_core::lang::Lang;
-use umicraft_modhost::ModHost;
+use umicraft_modhost::{with_entity_snapshot, ModHost};
 use umicraft_render::ModWidgetView;
 use umicraft_ui::menus::{ModsOutcome, ModsView};
 use umicraft_ui::FontAtlas;
@@ -181,13 +181,41 @@ impl App {
     /// HUD or the HUD editor shows them). Called once the camera is final, so a
     /// widget placing an annotation with the projection of `Frame` draws it where
     /// the world shows the point (API 1.1, ADR-0094).
-    pub(super) fn publish_frame(&mut self, (width, height): (u32, u32)) {
+    ///
+    /// Both run inside the entity-snapshot scope, so the `Frame` intercepts and the
+    /// widget draws read the entities the frame draws (ADR-0094).
+    pub(super) fn publish_frame(&mut self, (width, height): (u32, u32), now: Instant) {
         let camera = frame_camera(&self.camera, (width, height));
-        self.mods.dispatch_frame(camera, &mut self.render_bus);
-        if self.session.is_some() {
-            if let Some(host) = self.external_mods.as_ref().and_then(ExternalMods::host) {
-                host.draw_widgets();
+        self.refresh_entity_snapshot(now);
+        let Self {
+            mods,
+            render_bus,
+            external_mods,
+            session,
+            entity_snapshot,
+            ..
+        } = self;
+        with_entity_snapshot(entity_snapshot.snapshot(), || {
+            mods.dispatch_frame(camera, render_bus);
+            if session.is_some() {
+                if let Some(host) = external_mods.as_ref().and_then(ExternalMods::host) {
+                    host.draw_widgets();
+                }
             }
+        });
+    }
+
+    /// Rebuilds the snapshot the external mods read this frame: the entities nearest
+    /// to the camera in a session, none outside one. Skipped without external mods.
+    fn refresh_entity_snapshot(&mut self, now: Instant) {
+        if self.external_mods.is_none() {
+            return;
+        }
+        match (&self.session, &self.world) {
+            (Some(_), Some(world)) => {
+                world.refresh_entity_snapshot(now, self.camera.eye(), &mut self.entity_snapshot);
+            }
+            _ => self.entity_snapshot.clear(),
         }
     }
 

@@ -17,6 +17,7 @@ use umicraft_render::{BorderView, FogMedium, OutlineBox, PrecipitationField, Scr
 use umicraft_world::LightLevel;
 
 use super::WorldView;
+use crate::mods::entity_facts::SnapshotBuilder;
 use crate::scene::overlay::{compose, SpriteLayers, ViewFacts};
 
 impl WorldView {
@@ -190,6 +191,19 @@ impl WorldView {
             }
             snapshot
         }));
+    }
+
+    /// Rebuilds the entity snapshot of the mods for the frame drawn at `now`: the
+    /// entities of the newest tick nearest to `eye`, each at the position this frame
+    /// draws it (the same interpolation as [`entities_into`](Self::entities_into)).
+    pub(crate) fn refresh_entity_snapshot(
+        &self,
+        now: Instant,
+        eye: glam::DVec3,
+        builder: &mut SnapshotBuilder,
+    ) {
+        let alpha = f64::from(self.view.partial_tick(now));
+        builder.refresh(&self.mod_entities, eye, alpha);
     }
 
     /// The body of the local player at the newest tick, once a frame arrived.

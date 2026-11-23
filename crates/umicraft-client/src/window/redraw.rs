@@ -204,7 +204,7 @@ impl App {
             .map_or((self.args.width, self.args.height), Renderer::size);
         // The camera is final: the external mods see it in `Frame` and draw
         // their widgets with it, before the HUD is built.
-        self.publish_frame((width, height));
+        self.publish_frame((width, height), now);
         // The dials first, so the icon keys of this frame name the frames the
         // block array shows.
         self.advance_dials(Duration::from_secs_f32(elapsed), environment);

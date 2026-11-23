@@ -23,7 +23,8 @@
 //!
 //! F3.6 adds the `player_physics` service ([`PhysicsChain`], built by
 //! [`ModHost::physics`]) and read-only world queries ([`WorldQuery`], lent to the game
-//! thread with [`with_world`]).
+//! thread with [`with_world`]), plus the render-thread entity snapshot
+//! ([`EntitySnapshot`], lent with [`with_entity_snapshot`]).
 //!
 //! F3.8 adds what the client needs to show mods honestly: [`ModHost::profile`]
 //! (counters and [`ModState`], with the first failure's reason), the manager data of
@@ -48,6 +49,7 @@ mod post_pass;
 mod profile;
 pub mod resolve;
 mod sentinel;
+mod snapshot;
 mod trust;
 pub mod ui;
 mod worker;
@@ -79,6 +81,7 @@ pub use post_pass::{PostPassView, MAX_POST_PASSES};
 pub use profile::{ModProfile, ModState};
 pub use resolve::{resolve, Candidate, RejectReason, Rejection, Resolution};
 pub use sentinel::{Arming, CrashSentinel, SentinelGuard};
+pub use snapshot::{with_entity_snapshot, EntitySnapshot, MAX_SNAPSHOT_ENTITIES};
 pub use trust::{sha256_file, TrustList};
 pub use ui::commands::{CommandOutcome, CommandTable};
 pub use ui::config::ExternalModConfig;

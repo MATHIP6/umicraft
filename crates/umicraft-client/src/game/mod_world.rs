@@ -25,6 +25,7 @@ use umicraft_game::entity::EntityStore;
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::input::InputIntent;
 use umicraft_game::physics::{PhysicsOverride, Player};
+use umicraft_game::scoreboard::Scoreboard;
 use umicraft_modapi_sys::{
     UmiPhysicsInput, UmiPlayerPhysics, UMI_INPUT_JUMP, UMI_INPUT_SNEAK, UMI_INPUT_SPRINT,
     UMI_PHYSICS_ALLOW_FLYING, UMI_PHYSICS_FLYING, UMI_PHYSICS_IN_WATER, UMI_PHYSICS_ON_GROUND,
@@ -33,12 +34,29 @@ use umicraft_modapi_sys::{
 use umicraft_modhost::{EntityView, PhysicsChain, WorldQuery};
 use umicraft_world::{BlockPos, World};
 
+use crate::hud::player::HudTracker;
+use crate::mods::entity_facts::{entity_view, FactSources};
+
 /// The world and the entities as the mods' queries see them.
 pub(super) struct GameWorld<'a> {
     /// The world of the session; `None` before `Join Game`.
     pub(super) world: Option<&'a World>,
     /// The entities of the world (the local player is not among them).
     pub(super) entities: &'a EntityStore,
+    /// The teams, which the entities' team names come from.
+    pub(super) scoreboard: &'a Scoreboard,
+    /// The HUD state, which remembers the maximum health the server described.
+    pub(super) hud: &'a HudTracker,
+}
+
+impl<'a> GameWorld<'a> {
+    /// What the facts of an entity need besides its record.
+    pub(super) fn sources(&self) -> FactSources<'a> {
+        FactSources {
+            scoreboard: self.scoreboard,
+            hud: self.hud,
+        }
+    }
 }
 
 impl WorldQuery for GameWorld<'_> {
@@ -50,22 +68,9 @@ impl WorldQuery for GameWorld<'_> {
     }
 
     fn visit_entities(&self, visit: &mut dyn FnMut(&EntityView<'_>) -> bool) {
+        let sources = self.sources();
         for record in self.entities.entities().values() {
-            let name = record
-                .profile
-                .as_ref()
-                .map(|profile| &*profile.name)
-                .or(record.name_tag.as_deref())
-                .unwrap_or_default();
-            let view = EntityView {
-                id: record.id.0,
-                kind: record.kind.name(),
-                position: record.position.to_array(),
-                yaw: record.yaw,
-                pitch: record.pitch,
-                name,
-            };
-            if !visit(&view) {
+            if !visit(&entity_view(record, &sources)) {
                 return;
             }
         }
@@ -73,8 +78,20 @@ impl WorldQuery for GameWorld<'_> {
 }
 
 /// Runs `f` with the world lent to the mods' queries (`with_world`).
-pub(super) fn lend<R>(world: Option<&World>, entities: &EntityStore, f: impl FnOnce() -> R) -> R {
-    umicraft_modhost::with_world(&GameWorld { world, entities }, f)
+pub(super) fn lend<R>(
+    world: Option<&World>,
+    entities: &EntityStore,
+    scoreboard: &Scoreboard,
+    hud: &HudTracker,
+    f: impl FnOnce() -> R,
+) -> R {
+    let game_world = GameWorld {
+        world,
+        entities,
+        scoreboard,
+        hud,
+    };
+    umicraft_modhost::with_world(&game_world, f)
 }
 
 /// The game mode the physics layers read and may change.
@@ -240,7 +257,11 @@ mod tests {
         UMI_GAME_MODE_SURVIVAL,
     };
 
+    use umicraft_game::entity::EntityId;
+    use umicraft_modhost::EntitySnapshot;
+
     use super::*;
+    use crate::mods::entity_facts::{ModEntity, SnapshotBuilder};
 
     fn player() -> Player {
         Player::new(DVec3::new(0.5, 64.0, 0.5))
@@ -401,5 +422,157 @@ mod tests {
         let input = input_of(&intent);
         assert_eq!(input.flags, UMI_INPUT_JUMP | UMI_INPUT_SPRINT);
         assert_eq!((input.forward, input.yaw), (intent.forward, 90.0));
+    }
+
+    /// A store with a zombie, a pig, a dropped item and a named player on a team.
+    fn crowd() -> (EntityStore, Scoreboard) {
+        use umicraft_game::entity::{EntityFlags, PlayerProfile};
+        use umicraft_protocol::packets::play::clientbound::{TeamInfo, Teams};
+
+        let mut store = EntityStore::new();
+        let at = |x: f64| DVec3::new(x, 64.0, 0.0);
+        store.spawn_mob(
+            EntityId(1),
+            54,
+            at(3.0),
+            0.0,
+            0.0,
+            0.0,
+            glam::Vec3::ZERO,
+            EntityFlags::new(0x01, 0),
+        );
+        store.spawn_mob(
+            EntityId(2),
+            90,
+            at(1.0),
+            0.0,
+            0.0,
+            0.0,
+            glam::Vec3::ZERO,
+            EntityFlags::default(),
+        );
+        store.spawn_player(
+            EntityId(4),
+            [4; 16],
+            at(2.0),
+            0.0,
+            0.0,
+            None,
+            EntityFlags::new(0x0A, 0),
+        );
+        store.set_profile(
+            [4; 16],
+            PlayerProfile {
+                name: "Ann".into(),
+                skin_url: None,
+                cape_url: None,
+                slim: None,
+            },
+        );
+        store.set_armor(EntityId(4), 4, Some(armor_piece(310)));
+        let mut board = Scoreboard::new();
+        board.apply_teams(&Teams::Create {
+            name: "red".to_owned(),
+            info: TeamInfo {
+                display_name: "Red".to_owned(),
+                prefix: String::new(),
+                suffix: String::new(),
+                friendly_flags: 0,
+                name_tag_visibility: "always".to_owned(),
+                color: -1,
+            },
+            players: vec!["Ann".to_owned()],
+        });
+        (store, board)
+    }
+
+    fn armor_piece(item_id: i16) -> umicraft_game::entity::EntityItem {
+        umicraft_game::entity::EntityItem {
+            item_id,
+            damage: 0,
+            count: 1,
+            nbt: None,
+        }
+    }
+
+    /// Rows of a snapshot sorted by id, as plain tuples of every fact.
+    fn by_id(snapshot: &EntitySnapshot) -> Vec<EntityView<'_>> {
+        let mut rows: Vec<_> = snapshot.iter().collect();
+        rows.sort_by_key(|row| row.id);
+        rows
+    }
+
+    #[test]
+    fn the_snapshot_equals_the_game_thread_query_of_the_same_tick() {
+        let (store, board) = crowd();
+        let hud = HudTracker::default();
+        let world = GameWorld {
+            world: None,
+            entities: &store,
+            scoreboard: &board,
+            hud: &hud,
+        };
+        let mut query = EntitySnapshot::new();
+        query.begin();
+        world.visit_entities(&mut |view| query.push(view));
+
+        let sources = world.sources();
+        let facts: Vec<ModEntity> = store
+            .entities()
+            .values()
+            .map(|record| ModEntity::of(record, &sources))
+            .collect();
+        let mut builder = SnapshotBuilder::default();
+        builder.refresh(&facts, DVec3::new(0.0, 64.0, 0.0), 1.0);
+
+        // Drawn at the end of the tick, an entity is where the query puts it.
+        assert_eq!(by_id(builder.snapshot()), by_id(&query));
+        let ann = by_id(&query)[2];
+        assert_eq!((ann.id, ann.name, ann.team), (4, "Ann", "red"));
+        assert_eq!(ann.armor, 3.0, "a diamond helmet");
+        // Nearest first: the pig, the player, the zombie.
+        let order: Vec<i32> = builder.snapshot().iter().map(|row| row.id).collect();
+        assert_eq!(order, [2, 4, 1]);
+    }
+
+    #[test]
+    fn mid_tick_only_the_render_position_differs_from_the_query() {
+        let (mut store, board) = crowd();
+        let hud = HudTracker::default();
+        store.move_relative(EntityId(1), DVec3::new(3.0, 0.0, 0.0), true);
+        store.tick();
+        let sources = FactSources {
+            scoreboard: &board,
+            hud: &hud,
+        };
+        let facts: Vec<ModEntity> = store
+            .entities()
+            .values()
+            .map(|record| ModEntity::of(record, &sources))
+            .collect();
+        let mut builder = SnapshotBuilder::default();
+        builder.refresh(&facts, DVec3::ZERO, 0.5);
+        let mut query = EntitySnapshot::new();
+        query.begin();
+        GameWorld {
+            world: None,
+            entities: &store,
+            scoreboard: &board,
+            hud: &hud,
+        }
+        .visit_entities(&mut |view| query.push(view));
+        let (drawn, asked) = (by_id(builder.snapshot()), by_id(&query));
+        let zombie = asked.iter().find(|row| row.id == 1).unwrap();
+        assert!(zombie.velocity[0] > 0.0, "the zombie moved this tick");
+        let zombie_drawn = drawn.iter().find(|row| row.id == 1).unwrap();
+        assert_ne!(zombie_drawn.render_position, zombie.position);
+        for (drawn, asked) in drawn.iter().zip(&asked) {
+            let same_but_drawn = drawn.with_text(drawn.kind, drawn.name, drawn.team);
+            let moved = EntityView {
+                render_position: asked.render_position,
+                ..same_but_drawn
+            };
+            assert_eq!(&moved, asked, "entity {}", asked.id);
+        }
     }
 }

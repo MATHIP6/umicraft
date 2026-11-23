@@ -33,9 +33,13 @@ pub(super) fn local_chat_line(text: &str) -> ChatLineView {
 /// The mods see the line first and may hide or rewrite it (`ChatReceived`); a
 /// hidden line is not counted, as if the server never sent it.
 pub(super) fn show_chat(game: &mut Game, json: &str, position: Position) {
-    let Some(json) = lend(game.world.as_ref(), &game.entities, || {
-        incoming_chat(&mut game.bus, json, position)
-    }) else {
+    let Some(json) = lend(
+        game.world.as_ref(),
+        &game.entities,
+        &game.social.scoreboard,
+        &game.hud_view,
+        || incoming_chat(&mut game.bus, json, position),
+    ) else {
         return;
     };
     game.status_data.chat_messages += 1;
@@ -47,9 +51,13 @@ pub(super) fn show_chat(game: &mut Game, json: &str, position: Position) {
 
 /// Shows an action-bar packet above the hotbar, after the mods had their say.
 pub(super) fn show_action_bar(game: &mut Game, json: &str) {
-    if let Some(json) = lend(game.world.as_ref(), &game.entities, || {
-        incoming_chat(&mut game.bus, json, Position::ActionBar)
-    }) {
+    if let Some(json) = lend(
+        game.world.as_ref(),
+        &game.entities,
+        &game.social.scoreboard,
+        &game.hud_view,
+        || incoming_chat(&mut game.bus, json, Position::ActionBar),
+    ) {
         game.social.action_bar.show(&json);
         game.hud_dirty = true;
     }

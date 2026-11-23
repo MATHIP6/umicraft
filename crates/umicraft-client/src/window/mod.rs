@@ -32,6 +32,7 @@ use crate::hud::cache::HudCache;
 use crate::hud::dials::DialAnimator;
 use crate::input::ui::UiInputTranslator;
 use crate::language;
+use crate::mods::entity_facts::SnapshotBuilder;
 use crate::mods::external::ExternalMods;
 use crate::mods::runtime::ModsRuntime;
 use crate::mods::zoom::Zoom;
@@ -224,6 +225,9 @@ struct App {
     mods: ModsRuntime,
     /// The external native mods and the crash sentinel; shut down on a clean exit.
     external_mods: Option<ExternalMods>,
+    /// The entity snapshot the external mods read in the callbacks of this frame,
+    /// rebuilt once per frame (ADR-0094).
+    entity_snapshot: SnapshotBuilder,
     /// The per-mod lines of the F3 screen, recomputed once a second.
     mod_profiler: ModProfiler,
     /// The mod events of the render thread (connection and screens). Dropped

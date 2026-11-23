@@ -23,7 +23,7 @@ pub(crate) use hud::with_hud_cx;
 #[cfg(test)]
 pub(crate) use physics::testing as physics_testing;
 pub(crate) use physics::{with_physics_cx, StatePtr};
-pub(crate) use world::lend_world;
+pub(crate) use world::{lend_snapshot, lend_world};
 
 use core::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -170,7 +170,7 @@ pub fn host_table() -> UmiHost {
         post_set_param: post::host_post_set_param,
         register_camera: pending::host_register_camera,
         camera_next: pending::host_camera_next,
-        world_entities_snapshot: pending::host_world_entities_snapshot,
+        world_entities_snapshot: world::host_world_entities_snapshot,
         hud_outline: hud::host_hud_outline,
         hud_segment: hud::host_hud_segment,
     }

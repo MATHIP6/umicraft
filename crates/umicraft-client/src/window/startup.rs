@@ -29,6 +29,7 @@ use crate::hud::dials::DialAnimator;
 use crate::input::ui::UiInputTranslator;
 use crate::input::InputState;
 use crate::meshing::pool::worker_count;
+use crate::mods::entity_facts::SnapshotBuilder;
 use crate::mods::external::ExternalMods;
 use crate::mods::runtime::ModsRuntime;
 use crate::mods::zoom::Zoom;
@@ -216,6 +217,7 @@ impl App {
             lang,
             mods: ModsRuntime::new(&options.mods),
             external_mods,
+            entity_snapshot: SnapshotBuilder::default(),
             mod_profiler: ModProfiler::default(),
             render_bus,
             releasing: Vec::new(),

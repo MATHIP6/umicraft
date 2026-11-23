@@ -1,0 +1,9 @@
+[mod]
+id = "entity_list"
+name = "Entity list"
+version = "0.1.0"
+authors = ["Umicraft contributors"]
+api_version = "1.1"
+license = "MIT"
+description = "Teaching example and debugging view: lists the ten nearest entities with their name or kind, distance and a health bar, read from the render-thread entity snapshot."
+library = "entity_list"

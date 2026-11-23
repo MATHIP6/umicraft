@@ -21,11 +21,14 @@ use std::time::Duration;
 
 use umicraft_builtin_mods::SettingValue;
 use umicraft_core::EventBus;
-use umicraft_modapi_sys::{UmiEventId, UmiMode, UmiPhysicsInput, UmiPlayerPhysics, UmiStatus};
+use umicraft_modapi_sys::{
+    UmiEventId, UmiMode, UmiPhysicsInput, UmiPlayerPhysics, UmiStatus, UMI_ENTITY_LIVING,
+};
 use umicraft_modhost::{
-    discover, library_file_name, platform_dir, resolve, with_world, ApiVersion, Arch, Candidate,
-    ChatSend, CommandOutcome, EntityView, EventThread, KeyPressed, LoadError, ModHost, ModId, Os,
-    PacketReceived, PostTick, PreTick, TrustList, WorldQuery,
+    discover, library_file_name, platform_dir, resolve, with_entity_snapshot, with_world,
+    ApiVersion, Arch, Candidate, ChatSend, CommandOutcome, EntitySnapshot, EntityView, EventThread,
+    Frame, FrameCamera, FrameFacts, KeyPressed, LoadError, ModHost, ModId, Os, PacketReceived,
+    PostTick, PreTick, TrustList, WorldQuery,
 };
 
 /// The directory holding the built example libraries (`<target>/<profile>`).
@@ -47,6 +50,8 @@ fn built_libraries() -> &'static Path {
                 "umicraft-example-shader-pass",
                 "-p",
                 "umicraft-example-depth-fog",
+                "-p",
+                "umicraft-example-entity-list",
                 "--offline",
             ])
             .status()
@@ -320,6 +325,16 @@ impl WorldQuery for FlatWorld {
             yaw: 0.0,
             pitch: 0.0,
             name: "Steve",
+            health: 20.0,
+            max_health: 20.0,
+            armor: 0.0,
+            team: "",
+            width: 0.6,
+            height: 1.8,
+            velocity: [0.0; 3],
+            flags: UMI_ENTITY_LIVING,
+            is_player: true,
+            render_position: [3.0, 64.0, 4.0],
         });
     }
 }
@@ -479,6 +494,93 @@ fn depth_fog_registers_a_pass_that_reads_the_scene_depth() {
         assert!(std::time::Instant::now() < deadline, "params never set");
         std::thread::yield_now();
     }
+    host.shutdown_all();
+}
+
+/// An entity of the snapshot of the `entity_list` test, `x` blocks east of the origin.
+fn listed(id: i32, kind: &'static str, name: &'static str, health: f32) -> EntityView<'static> {
+    let living = kind != "item";
+    EntityView {
+        id,
+        kind,
+        position: [f64::from(id), 64.0, 0.0],
+        yaw: 0.0,
+        pitch: 0.0,
+        name,
+        health: if living { health } else { 0.0 },
+        max_health: if living { 20.0 } else { 0.0 },
+        armor: 0.0,
+        team: "",
+        width: 0.6,
+        height: 1.8,
+        velocity: [0.0; 3],
+        flags: if living { UMI_ENTITY_LIVING } else { 0 },
+        is_player: kind == "player",
+        render_position: [f64::from(id), 64.0, 0.0],
+    }
+}
+
+/// The real `entity_list` (API 1.1): its widget reads the render-thread snapshot
+/// inside the scope the client opens around the `Frame` event and the widget draws.
+#[test]
+fn entity_list_draws_the_snapshot_inside_the_scope() {
+    let tmp = TempDir::new();
+    install(&tmp.0, "entity_list");
+    let candidates = discover(&tmp.0).into_iter().map(|d| Candidate {
+        manifest: d.manifest.unwrap(),
+        enabled: true,
+    });
+    let resolution = resolve(candidates, host_version());
+    let (mut host, failures) =
+        ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
+    assert!(failures.is_empty(), "{failures:?}");
+    let mut render = EventBus::default();
+    host.install(&mut render, EventThread::Render);
+
+    // Twelve entities, nearest first; only ten are listed.
+    let mut snapshot = EntitySnapshot::new();
+    snapshot.begin();
+    snapshot.push(&listed(1, "player", "Ann", 10.0));
+    snapshot.push(&listed(2, "item", "", 0.0));
+    for id in 3..=12 {
+        snapshot.push(&listed(id, "zombie", "", 20.0));
+    }
+    let facts = FrameFacts {
+        now_ms: 0,
+        position: [0.0, 64.0, 0.0],
+        fps: 60,
+        frame_ms: 16.0,
+        yaw: 0.0,
+        pitch: 0.0,
+        left_clicks: 0,
+        right_clicks: 0,
+        ping_ms: None,
+        sprinting: false,
+        camera: FrameCamera {
+            eye: [0.0, 64.0, 0.0],
+            ..FrameCamera::default()
+        },
+    };
+    with_entity_snapshot(&snapshot, || {
+        render.dispatch(&mut Frame::new(facts));
+        host.draw_widgets();
+    });
+    let mut labels = Vec::new();
+    let mut bars = 0;
+    host.visit_widgets(|w| {
+        labels.extend(w.content.labels().iter().map(|l| l.text.clone()));
+        bars = w.content.ticks().len();
+    });
+    assert_eq!(labels.len(), 10);
+    assert_eq!(labels[0], "Ann 1.0m");
+    assert_eq!(labels[1], "item 2.0m");
+    assert_eq!(labels[9], "zombie 10.0m");
+    // A background and a fill for the nine living ones, none for the item.
+    assert_eq!(bars, 9 * 2);
+
+    // Outside the scope the snapshot is unsupported: the widget shows nothing.
+    host.draw_widgets();
+    host.visit_widgets(|w| assert!(w.content.labels().is_empty()));
     host.shutdown_all();
 }
 

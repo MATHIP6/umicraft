@@ -21,6 +21,7 @@ members = [
     "crates/umicraft-modapi",
     "crates/umicraft-modhost",
     "mods/examples/depth_fog",
+    "mods/examples/entity_list",
     "mods/examples/hello",
     "mods/examples/packet_logger",
     "mods/examples/panicking",

@@ -25,6 +25,7 @@ use super::look::Look;
 use super::messages::{ChunkEvent, Frame, RenderEvent, TextScreenRequest};
 use super::state::Game;
 use super::view::{debug_world, player_view, sky_temperature};
+use crate::mods::entity_facts::{FactSources, ModEntity};
 use crate::pack_offer::ServerPackRequest;
 use crate::scene::fog::fog_context;
 
@@ -58,6 +59,24 @@ pub(super) fn publish_sounds(game: &mut Game, frames: &SyncSender<RenderEvent>) 
     if !cues.is_empty() {
         let _ = frames.try_send(RenderEvent::Sounds(cues));
     }
+}
+
+/// The facts about every entity the external mods may read, taken at this tick;
+/// empty when no external mod is loaded. The render thread keeps the nearest 256
+/// from them (`SnapshotBuilder`).
+fn mod_entities(game: &Game) -> Arc<[ModEntity]> {
+    if !game.entity_facts {
+        return Arc::default();
+    }
+    let sources = FactSources {
+        scoreboard: &game.social.scoreboard,
+        hud: &game.hud_view,
+    };
+    game.entities
+        .entities()
+        .values()
+        .map(|record| ModEntity::of(record, &sources))
+        .collect()
 }
 
 /// Publishes the current player state as a frame.
@@ -163,6 +182,7 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
             .overlays
             .inputs(game.perspective == Perspective::FirstPerson),
         debug: Arc::new(debug_world(game)),
+        mod_entities: mod_entities(game),
     })));
 }
 

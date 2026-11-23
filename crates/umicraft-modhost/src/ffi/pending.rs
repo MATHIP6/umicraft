@@ -6,9 +6,7 @@
 
 use core::ffi::c_void;
 
-use umicraft_modapi_sys::{
-    UmiCameraCx, UmiCameraFn, UmiEntity, UmiModHandle, UmiServiceMode, UmiStatus,
-};
+use umicraft_modapi_sys::{UmiCameraCx, UmiCameraFn, UmiModHandle, UmiServiceMode, UmiStatus};
 
 pub(super) extern "C" fn host_register_camera(
     _me: UmiModHandle,
@@ -20,14 +18,5 @@ pub(super) extern "C" fn host_register_camera(
 }
 
 pub(super) extern "C" fn host_camera_next(_cx: *mut UmiCameraCx) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
-}
-
-pub(super) extern "C" fn host_world_entities_snapshot(
-    _me: UmiModHandle,
-    _out: *mut UmiEntity,
-    _capacity: usize,
-    _count: *mut usize,
-) -> UmiStatus {
     UmiStatus::UNSUPPORTED
 }

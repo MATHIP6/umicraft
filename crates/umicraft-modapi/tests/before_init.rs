@@ -26,3 +26,14 @@ fn world_reports_unsupported_without_a_host() {
     assert_eq!(World.block(0, 0, 0), Err(unsupported.clone()));
     assert_eq!(World.entities(|_| true), Err(unsupported));
 }
+
+#[test]
+fn the_snapshot_reports_unsupported_without_a_host() {
+    let mut visited = false;
+    let result = World.snapshot(|_| {
+        visited = true;
+        true
+    });
+    assert_eq!(result, Err(ModError::HostRefused(UmiStatus::UNSUPPORTED)));
+    assert!(!visited);
+}
