@@ -87,3 +87,9 @@ crates may use `unsafe`.
   of `umicraft-modapi-sys/tests/abi.rs` pin every offset of 1.0 and must not be edited
   except to add assertions. A break needs major 2 (and a new ADR). The generated
   header `include/umicraft.h` is the C view of the same contract.
+- **2026-11-23 — 1.1 (ADR-0094).** First minor of major 1, made only by appending: new
+  fields after the last 1.0 field of `UmiFrame`, `UmiEntity` and `UmiPlayerPhysics`
+  (their `size` grew, every 1.0 offset is unchanged), five host functions after
+  `post_set_param`, event 13 (`PRE_RENDER`), anchor value 9 (`UMI_HUD_ANCHOR_SCREEN`,
+  refused by 1.0) and the `render_camera` service. Only the size assertions of the
+  1.0 layout tests changed; every offset assertion stands.

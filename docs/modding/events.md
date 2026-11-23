@@ -1,6 +1,6 @@
 # Mod events
 
-Events a native mod can subscribe to (API 1.0, ADR-0086). Handlers run on the thread
+Events a native mod can subscribe to (API 1.1, ADR-0086, ADR-0094). Handlers run on the thread
 shown below; an event nobody subscribes to costs nothing.
 
 | Event | Id | Thread | Payload | Cancellable | Mutable | Fires |

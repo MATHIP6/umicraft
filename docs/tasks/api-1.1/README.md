@@ -1,6 +1,6 @@
 # API 1.1 — camera, projection, entity snapshot, depth, flight
 
-Status: **in progress** (started 2026-11-23). Design: ADR-0094. Base: API 1.0
+Status: **done** (2026-11-23), except the generated C header. Design: ADR-0094. Base: API 1.0
 (`docs/tasks/f3/README.md`, ADR-0086, ADR-0087).
 
 | # | Phase | Acceptance | State |
@@ -12,7 +12,7 @@ Status: **in progress** (started 2026-11-23). Design: ADR-0094. Base: API 1.0
 | 1.1.4 | Entity metadata and the render-thread snapshot | snapshot equals the game-thread query of the same tick; example lists names and health | done |
 | 1.1.5 | Camera facts in `FRAME`, `world_to_screen`, `Anchor::Screen`, `hud_outline`, `hud_segment`; `FRAME` and external widgets after the final camera | axis projection test; example box follows a world point | done |
 | 1.1.6 | `render_camera` service, `PRE_RENDER`, generic service chain | orbit example; player state bit-identical with a camera layer | done |
-| 1.1.7 | Docs, template and examples on `api_version = "1.1"`, header | fmt, clippy `-D warnings`, workspace tests | |
+| 1.1.7 | Docs, template and examples on `api_version = "1.1"`, header | fmt, clippy `-D warnings`, workspace tests | done (header pending: cbindgen not installed) |
 
 ## Frozen interface (spec §14 rule 11)
 

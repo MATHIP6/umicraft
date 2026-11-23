@@ -1,8 +1,12 @@
 # Writing mods for Umicraft
 
 Guide and index of the modding API (ADR-0086, ADR-0087, spec §8). The API is
-version **1.0**, frozen: a mod built for 1.y loads on every client offering 1.x
-with x ≥ y, and nothing a 1.0 mod uses is ever removed or moved within major 1.
+version **1.1** (1.0 frozen in F3.9, 1.1 appended in ADR-0094): a mod built for 1.y
+loads on every client offering 1.x with x ≥ y, and nothing a 1.0 mod uses is ever
+removed or moved within major 1. API 1.1 added the camera of `FRAME` and
+`world_to_screen`, screen widgets with outlines and segments, entity facts and the
+render-thread snapshot, scene depth in post passes, flight and game mode from a
+physics layer, and the `render_camera` service with `PRE_RENDER`.
 
 ## What a mod is
 
@@ -42,7 +46,7 @@ Unknown keys are errors, so a typo is reported instead of ignored.
 | `name` | string | required | Display name, not empty. |
 | `version` | string | required | The mod's own semantic version. |
 | `authors` | array of strings | required | Author names (may be empty). |
-| `api_version` | string | required | `major.minor`, e.g. `"1.0"`: the same major as the client and a minor no higher than the client's. (Before 1.0 the minor had to match exactly.) |
+| `api_version` | string | required | `major.minor`, e.g. `"1.1"`: the same major as the client and a minor no higher than the client's. (Before 1.0 the minor had to match exactly.) |
 | `license` | string | none | SPDX expression. |
 | `description` | string | none | One line for the mods menu. |
 | `library` | string | the id | Library file stem under `bin/<os>-<arch>/`; letters, digits, `_`, `-`. |

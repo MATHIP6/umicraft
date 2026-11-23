@@ -660,8 +660,8 @@ fn camera_orbit_wraps_the_render_camera_without_the_compat_mode_holding_it() {
     host.shutdown_all();
 }
 
-/// The API this client implements: the examples still declare 1.0, so every test
-/// here also proves that 1.0 mods load on a 1.1 host (ADR-0094).
+/// The API this client implements. That a 1.0 manifest still resolves on a 1.1
+/// host is pinned by `api_version_acceptance_table` (tests/manifest.rs).
 fn host_version() -> ApiVersion {
     ApiVersion {
         major: umicraft_modapi_sys::UMI_API_VERSION.major,
