@@ -14,6 +14,7 @@ use std::time::Instant;
 
 use umicraft_core::events::EventBus;
 use umicraft_core::lang::Lang;
+use umicraft_modhost::CameraChain;
 use umicraft_render::{Camera, Overlay, Renderer};
 use umicraft_ui::game_menu::{GameMenu, GameMenuAction};
 use umicraft_ui::menus::PanoramaTextures;
@@ -229,6 +230,12 @@ struct App {
     /// The mod events of the render thread (connection and screens). Dropped
     /// before `external_mods` shuts down: its handlers call into the mods.
     render_bus: EventBus,
+    /// The mods' `render_camera` layers, built once at start; `None` when no mod
+    /// registered one (API 1.1).
+    camera_layers: Option<CameraChain>,
+    /// How far the mouse turned the view this frame, in Minecraft degrees (yaw,
+    /// pitch), for the camera layers.
+    frame_look: (f32, f32),
     /// The threads still dropping stopped sessions; joined at exit before the
     /// mods shut down, because their game threads may still dispatch.
     releasing: Vec<std::thread::JoinHandle<()>>,

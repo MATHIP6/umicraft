@@ -4,7 +4,7 @@
 
 use umicraft_modapi_sys::{
     UmiChatReceived, UmiChatSend, UmiConnected, UmiDisconnected, UmiEventHeader, UmiEventId,
-    UmiFrame, UmiKeyPressed, UmiPacket, UmiPostTick, UmiPreTick, UmiScreen,
+    UmiFrame, UmiKeyPressed, UmiPacket, UmiPostTick, UmiPreRender, UmiPreTick, UmiScreen,
     UMI_CHAT_POSITION_ACTION_BAR, UMI_CHAT_POSITION_CHAT, UMI_CHAT_POSITION_SYSTEM,
 };
 
@@ -152,6 +152,15 @@ view!(
     Frame,
     UmiFrame,
     UmiEventId::FRAME
+);
+
+view!(
+    /// The frame is about to be drawn, with the final camera (after every
+    /// `render_camera` layer). Render thread; read-only and not cancellable.
+    /// Added in API 1.1.
+    PreRender,
+    UmiPreRender,
+    UmiEventId::PRE_RENDER
 );
 
 /// Where a received chat line shows (the protocol's position byte).
@@ -302,6 +311,38 @@ impl Frame {
     /// effective field of view and the view bobbing.
     pub fn world_to_screen(&self, point: [f64; 3]) -> Option<[f32; 2]> {
         crate::projection::world_to_screen(&self.0, point)
+    }
+}
+
+impl PreRender {
+    /// The camera eye, in blocks.
+    pub fn eye(&self) -> [f64; 3] {
+        self.0.camera.eye
+    }
+
+    /// The view yaw in degrees (Minecraft yaw).
+    pub fn yaw(&self) -> f32 {
+        self.0.camera.yaw
+    }
+
+    /// The view pitch in degrees, positive looks down.
+    pub fn pitch(&self) -> f32 {
+        self.0.camera.pitch
+    }
+
+    /// The effective vertical field of view, in degrees.
+    pub fn fov_y(&self) -> f32 {
+        self.0.camera.fov_y
+    }
+
+    /// The viewport width over its height.
+    pub fn aspect(&self) -> f32 {
+        self.0.camera.aspect
+    }
+
+    /// The column-major camera-space view bobbing.
+    pub fn view_bob(&self) -> [[f32; 4]; 4] {
+        self.0.camera.view_bob
     }
 }
 

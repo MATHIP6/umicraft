@@ -55,6 +55,17 @@ impl WorldView {
         self.view.apply_look_delta(yaw_delta, pitch_delta);
     }
 
+    /// The player's own view for `now`, whatever the render camera does: the eye
+    /// and the angles in the renderer's convention (radians, see
+    /// [`camera_angles`]). The third person and the mods' camera layers move the
+    /// camera, never this; `None` with no frame yet.
+    #[must_use]
+    pub fn player_view(&self, now: Instant) -> Option<(glam::DVec3, f32, f32)> {
+        let state = self.view.sample(now)?;
+        let (yaw, pitch) = camera_angles(&state);
+        Some((state.eye, yaw, pitch))
+    }
+
     /// The eye of the local player while the camera shows the player from
     /// outside (the third person), `None` in the first person and with no frame.
     /// The camera is the orbit, so it differs from the eye by the orbit distance.

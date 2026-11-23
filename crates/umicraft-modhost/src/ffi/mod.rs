@@ -8,21 +8,27 @@
 //! [`crate::context`]; this module only converts raw arguments into safe ones.
 #![allow(unsafe_code)]
 
+mod camera;
 mod event;
 mod hud;
 mod packet;
 mod pending;
 mod physics;
 mod post;
+mod service;
 mod ui;
 mod world;
 
+#[cfg(test)]
+pub(crate) use camera::testing as camera_testing;
+pub(crate) use camera::CAMERA_ACTIVE;
 #[cfg(test)]
 pub(crate) use event::testing;
 pub(crate) use hud::with_hud_cx;
 #[cfg(test)]
 pub(crate) use physics::testing as physics_testing;
-pub(crate) use physics::{with_physics_cx, StatePtr};
+pub(crate) use physics::PHYSICS_ACTIVE;
+pub(crate) use service::{with_service_cx, StatePtr};
 pub(crate) use world::lend_world;
 
 use core::ffi::c_void;
@@ -168,8 +174,8 @@ pub fn host_table() -> UmiHost {
         world_entities: world::host_world_entities,
         register_post_pass: post::host_register_post_pass,
         post_set_param: post::host_post_set_param,
-        register_camera: pending::host_register_camera,
-        camera_next: pending::host_camera_next,
+        register_camera: camera::host_register_camera,
+        camera_next: camera::host_camera_next,
         world_entities_snapshot: pending::host_world_entities_snapshot,
         hud_outline: hud::host_hud_outline,
         hud_segment: hud::host_hud_segment,

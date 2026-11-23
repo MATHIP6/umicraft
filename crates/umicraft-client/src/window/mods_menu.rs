@@ -14,13 +14,14 @@ use winit::keyboard::KeyCode;
 
 use umicraft_builtin_mods::{CombatInfo, KeyState, MAX_EFFECTS};
 use umicraft_core::lang::Lang;
-use umicraft_modhost::ModHost;
+use umicraft_modhost::{ModHost, PreRender};
 use umicraft_render::ModWidgetView;
 use umicraft_ui::menus::{ModsOutcome, ModsView};
 use umicraft_ui::FontAtlas;
 
 use super::App;
 use crate::game::GameEvent;
+use crate::mods::camera::{camera_input, camera_of, place_camera};
 use crate::mods::external::ExternalMods;
 use crate::mods::external_menu;
 use crate::mods::hud::{item_of, mod_widget_view, mod_widget_views, screen_widget_view};
@@ -136,7 +137,13 @@ impl App {
     /// mods get their `Frame` later, from [`publish_frame`](Self::publish_frame).
     pub(super) fn update_mods(&mut self, now: Instant) {
         self.forward_mod_chat();
-        let eye = self.camera.eye();
+        // The player's view, not the camera's: a third-person orbit or a mod's
+        // camera layer must not move what the mods are told of the player.
+        let (eye, yaw, pitch) = self
+            .world
+            .as_ref()
+            .and_then(|world| world.player_view(now))
+            .unwrap_or((self.camera.eye(), self.camera.yaw, self.camera.pitch));
         let (hud, slots) = match self.world.as_ref() {
             Some(world) => (Some(world.hud()), Some(&world.window_view().player_slots)),
             None => (None, None),
@@ -151,8 +158,8 @@ impl App {
             fps: self.clock.fps.round() as u32,
             frame_ms: self.clock.frame_ms,
             eye: [eye.x, eye.y, eye.z],
-            yaw_radians: self.camera.yaw,
-            pitch_radians: self.camera.pitch,
+            yaw_radians: yaw,
+            pitch_radians: pitch,
             sprinting: self.held(Action::Sprint),
             ping_ms: hud.and_then(|hud| hud.ping_ms),
             keys: KeyState {
@@ -174,6 +181,23 @@ impl App {
                 crate::mods::facts::effects(&hud.active_effects)
             }),
         });
+    }
+
+    /// Runs the mods' `render_camera` layers on the camera of this frame, then sends
+    /// `PreRender` with the result (API 1.1). Only in a world: the menus have no
+    /// camera of their own to move.
+    pub(super) fn place_mod_camera(&mut self, elapsed: f32) {
+        if self.world.is_none() {
+            return;
+        }
+        if let Some(chain) = &self.camera_layers {
+            let input = camera_input(&self.key_state(), self.frame_look, elapsed);
+            place_camera(chain, &mut self.camera, &input);
+        }
+        if self.render_bus.has_subscribers::<PreRender>() {
+            self.render_bus
+                .dispatch(&mut PreRender::new(camera_of(&self.camera)));
+        }
     }
 
     /// Sends this frame's `Frame` event, with the camera the frame is drawn with,

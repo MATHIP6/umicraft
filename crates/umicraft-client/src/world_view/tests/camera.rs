@@ -881,3 +881,53 @@ fn full_360_degree_mouse_look_rotation_in_both_f5_modes() {
         }
     }
 }
+
+/// API 1.1 acceptance (ADR-0094): a `render_camera` layer orbiting the camera
+/// leaves the player's view, which the mods and the game read, bit for bit as it
+/// was, frame after frame; and the next frame starts again from the player.
+#[test]
+fn a_camera_layer_moves_the_camera_and_never_the_player() {
+    let mut harness = Harness::new();
+    let tick = Instant::now();
+    harness
+        .frames
+        .0
+        .send(RenderEvent::Frame(frame(
+            glam::Vec3::new(3.0, 0.0, -2.0),
+            tick,
+            0,
+        )))
+        .expect("frame queue");
+    harness.sync();
+    let bits = |(eye, yaw, pitch): (glam::DVec3, f32, f32)| {
+        (
+            eye.to_array().map(f64::to_bits),
+            yaw.to_bits(),
+            pitch.to_bits(),
+        )
+    };
+    let player = harness.world_view.player_view(tick).expect("a frame");
+
+    for step in 0..8 {
+        let now = tick + Duration::from_millis(16 * step);
+        let mut camera = Camera::default();
+        harness
+            .world_view
+            .update_camera(&mut camera, now, (true, true, true));
+        let built_in = camera.eye();
+        // What an orbit layer does to the render camera.
+        let angle = step as f64 * 0.5;
+        let orbit = built_in + glam::DVec3::new(4.0 * angle.cos(), 2.0, 4.0 * angle.sin());
+        let place = crate::mods::camera::camera_of(&camera);
+        camera.set_eye(orbit);
+        camera.yaw += 1.0;
+        assert_ne!(crate::mods::camera::camera_of(&camera), place);
+
+        let seen = harness.world_view.player_view(now).expect("a frame");
+        assert_eq!(bits(seen), bits(player), "frame {step}");
+        assert_eq!(
+            seen.0, built_in,
+            "the player's eye is the built-in camera's"
+        );
+    }
+}

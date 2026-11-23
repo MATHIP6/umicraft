@@ -27,7 +27,7 @@ use crate::budget::BUDGET;
 use crate::context::{ModContext, Subscription};
 use crate::events::{
     ChatReceived, ChatSend, Connected, Disconnected, EventThread, Frame, HostEvent, KeyPressed,
-    PacketReceived, PacketSend, PostTick, PreTick, ScreenClosed, ScreenOpened,
+    PacketReceived, PacketSend, PostTick, PreRender, PreTick, ScreenClosed, ScreenOpened,
 };
 use crate::ffi::UserPtr;
 use crate::hook::{check_status, run_hook, warn_sparse};
@@ -69,6 +69,7 @@ fn register(
         UmiEventId::PACKET_RECEIVED => adapt::<PacketReceived>(bus, thread, context, subscription),
         UmiEventId::PACKET_SEND => adapt::<PacketSend>(bus, thread, context, subscription),
         UmiEventId::FRAME => adapt::<Frame>(bus, thread, context, subscription),
+        UmiEventId::PRE_RENDER => adapt::<PreRender>(bus, thread, context, subscription),
         // `subscribe` refuses unknown ids, so nothing else can be recorded.
         _ => {}
     }

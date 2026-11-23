@@ -41,6 +41,8 @@ pub struct ModProfile {
     pub commands: ModStats,
     /// The `player_physics` layer.
     pub physics: ModStats,
+    /// The `render_camera` layer (API 1.1).
+    pub camera: ModStats,
 }
 
 impl ModProfile {
@@ -54,21 +56,28 @@ impl ModProfile {
             widgets: context.hud_stats(),
             commands: context.command_counters().snapshot(),
             physics: context.physics_stats(),
+            camera: context.camera_stats(),
         }
     }
 
-    /// All four categories added up: counters summed, `max_ns` the largest.
+    /// All five categories added up: counters summed, `max_ns` the largest.
     pub fn total(&self) -> ModStats {
-        [self.events, self.widgets, self.commands, self.physics]
-            .into_iter()
-            .fold(ModStats::default(), |sum, part| ModStats {
-                calls: sum.calls.saturating_add(part.calls),
-                total_ns: sum.total_ns.saturating_add(part.total_ns),
-                max_ns: sum.max_ns.max(part.max_ns),
-                overruns: sum.overruns.saturating_add(part.overruns),
-                dropped: sum.dropped.saturating_add(part.dropped),
-                injected: sum.injected.saturating_add(part.injected),
-            })
+        [
+            self.events,
+            self.widgets,
+            self.commands,
+            self.physics,
+            self.camera,
+        ]
+        .into_iter()
+        .fold(ModStats::default(), |sum, part| ModStats {
+            calls: sum.calls.saturating_add(part.calls),
+            total_ns: sum.total_ns.saturating_add(part.total_ns),
+            max_ns: sum.max_ns.max(part.max_ns),
+            overruns: sum.overruns.saturating_add(part.overruns),
+            dropped: sum.dropped.saturating_add(part.dropped),
+            injected: sum.injected.saturating_add(part.injected),
+        })
     }
 }
 
@@ -99,6 +108,7 @@ mod tests {
             widgets,
             commands: ModStats::default(),
             physics: ModStats::default(),
+            camera: ModStats::default(),
         }
     }
 

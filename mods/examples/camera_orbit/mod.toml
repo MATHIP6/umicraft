@@ -1,0 +1,15 @@
+[mod]
+id = "camera_orbit"
+name = "Camera orbit"
+version = "0.1.0"
+authors = ["Umicraft contributors"]
+api_version = "1.1"
+license = "MIT"
+description = "Teaching example: press the bound key and the camera circles around you, looking at you, while you stay where you are."
+library = "camera_orbit"
+
+[permissions]
+camera = true
+
+[load]
+wraps = ["render_camera"]

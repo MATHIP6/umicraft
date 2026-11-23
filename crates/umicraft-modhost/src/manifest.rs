@@ -22,13 +22,16 @@ pub use platform::{library_file_name, platform_dir, Arch, Os};
 
 use crate::error::ManifestError;
 
-/// The one service v1 lets a mod wrap or replace: the step that moves the local player.
+/// The service that moves the local player once per tick (F3.6).
 pub const PLAYER_PHYSICS: &str = "player_physics";
+
+/// The service that places the camera of each frame (API 1.1, ADR-0094).
+pub const RENDER_CAMERA: &str = "render_camera";
 
 /// Every service a manifest may name in `wraps` or `replaces`; the loader refuses
 /// anything else ([`LoadError::UnknownService`](crate::LoadError::UnknownService)) so a
 /// typo is reported instead of silently doing nothing.
-pub const KNOWN_SERVICES: &[&str] = &[PLAYER_PHYSICS];
+pub const KNOWN_SERVICES: &[&str] = &[PLAYER_PHYSICS, RENDER_CAMERA];
 
 /// The `[load]` table: ordering hints and service hooks.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -70,6 +73,9 @@ pub struct Permissions {
     pub network_packets: bool,
     /// May alter player movement.
     pub movement: bool,
+    /// May move the render camera (`render_camera`, API 1.1). Shown to the player
+    /// only: it changes what is drawn, not what the server sees (ADR-0094).
+    pub camera: bool,
     /// May access the filesystem beyond its own directory.
     pub filesystem: bool,
     /// May make HTTP requests.

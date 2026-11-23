@@ -100,6 +100,7 @@ mod tests {
             widgets: ModStats::default(),
             commands: ModStats::default(),
             physics: ModStats::default(),
+            camera: ModStats::default(),
         }
     }
 

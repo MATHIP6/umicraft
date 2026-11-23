@@ -55,7 +55,7 @@ impl App {
     }
 
     /// The key state of the window.
-    fn key_state(&self) -> InputState {
+    pub(super) fn key_state(&self) -> InputState {
         if self.screen().blocks_game_input() || self.death_screen_visible() {
             // While a screen is open the movement keys do not steer the player.
             return InputState::default();
@@ -86,6 +86,7 @@ impl App {
     /// The send never blocks: when the inbox is full the input is repeated
     /// on the next frame.
     pub(super) fn publish_input(&mut self) {
+        self.frame_look = (0.0, 0.0);
         if self.session.is_none() {
             return;
         }
@@ -137,6 +138,7 @@ impl App {
                     // turns the authoritative look with `set_angles`.
                     let (yaw, pitch) = set_angles(0.0, 0.0, turn);
                     world.apply_look_delta(yaw.to_radians(), pitch.to_radians());
+                    self.frame_look = (yaw, pitch);
                 }
             }
             self.input.last = state;

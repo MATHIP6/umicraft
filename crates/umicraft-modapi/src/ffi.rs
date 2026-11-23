@@ -9,14 +9,15 @@ use std::mem::size_of;
 
 use core::ptr::NonNull;
 use umicraft_modapi_sys::{
-    UmiBytes, UmiEntity, UmiEventHeader, UmiHost, UmiHudCx, UmiModHandle, UmiPhysicsCx,
-    UmiPhysicsInput, UmiPlayerPhysics, UmiStatus, UmiStr, UMI_EVENT_CANCELLABLE,
-    UMI_EVENT_CANCELLED,
+    UmiBytes, UmiCameraCx, UmiCameraInput, UmiEntity, UmiEventHeader, UmiHost, UmiHudCx,
+    UmiModHandle, UmiPhysicsCx, UmiPhysicsInput, UmiPlayerPhysics, UmiRenderCamera, UmiStatus,
+    UmiStr, UMI_EVENT_CANCELLABLE, UMI_EVENT_CANCELLED,
 };
 
+use crate::camera::CameraHandler;
 use crate::event::{Control, Event};
 use crate::private::guarded;
-use crate::{host, Entity, Hud, Input, ModError, Physics, PlayerState};
+use crate::{host, Camera, CameraInput, Entity, Hud, Input, ModError, Physics};
 
 /// A mod handle that can be shared across threads.
 #[derive(Debug, Clone, Copy)]
@@ -214,32 +215,33 @@ pub(crate) extern "C" fn command_trampoline(args: UmiStr, user: *mut c_void) -> 
 /// The boxed closure type behind a physics layer's `user` pointer.
 pub(crate) type PhysicsHandler = Box<dyn FnMut(&mut Physics<'_>) -> Result<(), ModError> + Send>;
 
-/// The player state the host lent for one physics call.
+/// The state the host lent for one service call (the player state of a physics
+/// layer, the camera of a camera layer), seen as the safe view `T`.
 ///
 /// Holds a raw pointer, not a reference, because the host writes through the
-/// same memory during `physics_next`: a reference kept across that call would
-/// alias. Every access re-borrows through `&self`/`&mut self`, so the borrow
-/// checker keeps `next` and the state accessors apart.
+/// same memory during `*_next`: a reference kept across that call would alias.
+/// Every access re-borrows through `&self`/`&mut self`, so the borrow checker
+/// keeps `next` and the state accessors apart.
 #[derive(Debug)]
-pub(crate) struct StatePtr(NonNull<PlayerState>);
+pub(crate) struct StatePtr<T>(NonNull<T>);
 
-impl StatePtr {
+impl<T> StatePtr<T> {
     /// # Safety
-    /// `ptr` must point to a valid, host-owned player state that stays valid
-    /// and is not accessed by anything else, except the host during
-    /// `physics_next`, while the returned value (or any copy of the borrow it
-    /// hands out) lives.
-    pub(crate) unsafe fn new(ptr: NonNull<UmiPlayerPhysics>) -> Self {
+    /// `ptr` must point to a valid, host-owned state that stays valid and is not
+    /// accessed by anything else, except the host during `*_next`, while the
+    /// returned value (or any copy of the borrow it hands out) lives; `T` must be
+    /// `#[repr(transparent)]` over `R`.
+    pub(crate) unsafe fn new<R>(ptr: NonNull<R>) -> Self {
         Self(ptr.cast())
     }
 
-    pub(crate) fn get(&self) -> &PlayerState {
+    pub(crate) fn get(&self) -> &T {
         // SAFETY: `new` guarantees validity; the `&self` borrow bounds the
         // reference and excludes `get_mut` meanwhile.
         unsafe { self.0.as_ref() }
     }
 
-    pub(crate) fn get_mut(&mut self) -> &mut PlayerState {
+    pub(crate) fn get_mut(&mut self) -> &mut T {
         // SAFETY: as in `get`; `&mut self` makes the borrow unique.
         unsafe { self.0.as_mut() }
     }
@@ -274,6 +276,44 @@ pub(crate) extern "C" fn physics_trampoline(
             // only touches it again inside `physics_next`.
             let state = unsafe { StatePtr::new(state) };
             match layer(&mut Physics::new(cx, state, input)) {
+                Ok(()) => UmiStatus::OK,
+                Err(_) => UmiStatus::ERROR,
+            }
+        })
+        .unwrap_or(UmiStatus::INVALID_ARGUMENT)
+    })
+}
+
+/// The camera callback of every layer: validates the lent camera and input, then
+/// runs the closure on a [`Camera`] that lives for this call only.
+pub(crate) extern "C" fn camera_trampoline(
+    cx: *mut UmiCameraCx,
+    camera: *mut UmiRenderCamera,
+    input: *const UmiCameraInput,
+    user: *mut c_void,
+) -> UmiStatus {
+    guarded(|| {
+        let (Some(camera), Some(input)) = (NonNull::new(camera), NonNull::new(input.cast_mut()))
+        else {
+            return UmiStatus::INVALID_ARGUMENT;
+        };
+        // SAFETY: non-null and, per the ABI, valid for reads of its `size`
+        // field's first bytes; `size` is the first field of every version.
+        let sizes = unsafe { (camera.as_ref().size, input.as_ref().size) };
+        if (sizes.0 as usize) < size_of::<UmiRenderCamera>()
+            || (sizes.1 as usize) < size_of::<UmiCameraInput>()
+        {
+            return UmiStatus::INVALID_ARGUMENT;
+        }
+        // SAFETY: the sizes cover the structs; the host keeps the input valid
+        // and unmodified for the call, and `CameraInput` is transparent over it.
+        let input: &CameraInput = unsafe { &*input.as_ptr().cast::<CameraInput>() };
+        with_user(user, |layer: &mut CameraHandler| {
+            // SAFETY: the host lends the camera exclusively for this call and
+            // only touches it again inside `camera_next`; `CameraState` is
+            // transparent over `UmiRenderCamera`.
+            let state = unsafe { StatePtr::new(camera) };
+            match layer(&mut Camera::new(cx, state, input)) {
                 Ok(()) => UmiStatus::OK,
                 Err(_) => UmiStatus::ERROR,
             }

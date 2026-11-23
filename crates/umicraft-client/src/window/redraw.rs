@@ -202,6 +202,8 @@ impl App {
             .renderer
             .as_ref()
             .map_or((self.args.width, self.args.height), Renderer::size);
+        // The mods' camera layers move what is drawn, never the player.
+        self.place_mod_camera(elapsed);
         // The camera is final: the external mods see it in `Frame` and draw
         // their widgets with it, before the HUD is built.
         self.publish_frame((width, height));

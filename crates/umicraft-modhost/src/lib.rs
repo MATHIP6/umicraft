@@ -31,6 +31,7 @@
 //! [`CrashSentinel`] built on a file lock.
 
 mod budget;
+mod camera;
 mod context;
 mod discover;
 mod dispatch;
@@ -48,12 +49,14 @@ mod post_pass;
 mod profile;
 pub mod resolve;
 mod sentinel;
+mod service;
 mod trust;
 pub mod ui;
 mod worker;
 mod world;
 
 pub use budget::{ModStats, BUDGET, HUD_BUDGET, LOG_EVERY, MAX_CONSECUTIVE_OVERRUNS};
+pub use camera::CameraChain;
 pub use context::{ModContext, Subscription};
 pub use discover::{discover, Discovered};
 pub use dispatch::install_mod;
@@ -63,7 +66,7 @@ pub use error::{
 };
 pub use events::{
     ChatReceived, ChatSend, Connected, Disconnected, EventThread, Frame, FrameCamera, FrameFacts,
-    HostEvent, KeyPressed, PacketReceived, PacketSend, PostTick, PreTick, ScreenClosed,
+    HostEvent, KeyPressed, PacketReceived, PacketSend, PostTick, PreRender, PreTick, ScreenClosed,
     ScreenOpened,
 };
 pub use ffi::{host_table, UserPtr};

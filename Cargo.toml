@@ -20,6 +20,7 @@ members = [
     "crates/umicraft-modapi-sys",
     "crates/umicraft-modapi",
     "crates/umicraft-modhost",
+    "mods/examples/camera_orbit",
     "mods/examples/depth_fog",
     "mods/examples/hello",
     "mods/examples/packet_logger",

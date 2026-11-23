@@ -4374,6 +4374,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-example-camera-orbit"
+version = "0.1.0"
+dependencies = [
+ "umicraft-modapi",
+]
+
+[[package]]
 name = "umicraft-example-depth-fog"
 version = "0.1.0"
 dependencies = [

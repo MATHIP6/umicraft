@@ -278,12 +278,16 @@ impl Input {
 #[derive(Debug)]
 pub struct Physics<'a> {
     cx: *mut UmiPhysicsCx,
-    state: StatePtr,
+    state: StatePtr<PlayerState>,
     input: &'a Input,
 }
 
 impl<'a> Physics<'a> {
-    pub(crate) fn new(cx: *mut UmiPhysicsCx, state: StatePtr, input: &'a Input) -> Self {
+    pub(crate) fn new(
+        cx: *mut UmiPhysicsCx,
+        state: StatePtr<PlayerState>,
+        input: &'a Input,
+    ) -> Self {
         Self { cx, state, input }
     }
 

@@ -8,15 +8,18 @@ use umicraft_modapi_sys::{
     UmiHost, UmiModHandle, UmiMode, UmiServiceMode, UmiSettingDef, UmiSettingKind, UmiStatus,
 };
 
+use crate::camera::CameraHandler;
 use crate::event::{Control, Event};
 use crate::ffi::{
-    command_trampoline, draw_trampoline, physics_trampoline, trampoline, CommandHandler,
-    DrawHandler, Handler, OwnedUser, PhysicsHandler,
+    camera_trampoline, command_trampoline, draw_trampoline, physics_trampoline, trampoline,
+    CommandHandler, DrawHandler, Handler, OwnedUser, PhysicsHandler,
 };
 use crate::host::utf8;
 use crate::post::key_too_long;
 use crate::setting::{definition, utf8_all};
-use crate::{Chat, Hud, Logger, ModError, Packets, Physics, Placement, PostPass, Setting, World};
+use crate::{
+    Camera, Chat, Hud, Logger, ModError, Packets, Physics, Placement, PostPass, Setting, World,
+};
 
 /// A mod: built once by the host, told when it is shut down.
 pub trait Mod: Send + Sized + 'static {
@@ -329,6 +332,51 @@ impl<'a> InitCx<'a> {
         let (host, me) = (self.host, self.me);
         self.keep(layer, |user| {
             (host.register_physics)(me, mode, Some(physics_trampoline), user)
+        })
+    }
+
+    /// Wraps the placement of the camera of every frame with `layer` (API 1.1).
+    ///
+    /// Needs `camera = true` and `wraps = ["render_camera"]` in `mod.toml`. The
+    /// layer runs on the render thread once per drawn frame, within a time
+    /// budget, after the client placed its camera; [`Camera::next`] runs the
+    /// layers inside this one. The player does not move: only what is drawn
+    /// does.
+    ///
+    /// # Errors
+    /// [`ModError::HostRefused`]: `DENIED` without the permission or the
+    /// `wraps` entry, `CONFLICT` for a second layer of this mod.
+    pub fn wrap_camera(
+        &mut self,
+        layer: impl FnMut(&mut Camera<'_>) -> Result<(), ModError> + Send + 'static,
+    ) -> Result<(), ModError> {
+        self.register_camera(UmiServiceMode::WRAP, Box::new(layer))
+    }
+
+    /// Replaces the placement of the camera with `layer`; at most one mod may.
+    ///
+    /// Needs `camera = true` and `replaces = ["render_camera"]` in `mod.toml`.
+    /// The camera the layer receives is the client's; [`Camera::next`] is
+    /// refused.
+    ///
+    /// # Errors
+    /// [`ModError::HostRefused`]: `DENIED` without the permission or the
+    /// `replaces` entry, `CONFLICT` for a second layer of this mod.
+    pub fn replace_camera(
+        &mut self,
+        layer: impl FnMut(&mut Camera<'_>) -> Result<(), ModError> + Send + 'static,
+    ) -> Result<(), ModError> {
+        self.register_camera(UmiServiceMode::REPLACE, Box::new(layer))
+    }
+
+    fn register_camera(
+        &mut self,
+        mode: UmiServiceMode,
+        layer: CameraHandler,
+    ) -> Result<(), ModError> {
+        let (host, me) = (self.host, self.me);
+        self.keep(layer, |user| {
+            (host.register_camera)(me, mode, Some(camera_trampoline), user)
         })
     }
 

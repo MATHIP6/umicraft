@@ -16,6 +16,7 @@ mod chat;
 mod frame;
 mod key;
 mod packet;
+mod render;
 mod screen;
 mod session;
 mod tick;
@@ -30,6 +31,7 @@ pub use chat::{ChatReceived, ChatSend};
 pub use frame::{Frame, FrameCamera, FrameFacts};
 pub use key::KeyPressed;
 pub use packet::{PacketReceived, PacketSend};
+pub use render::PreRender;
 pub use screen::{ScreenClosed, ScreenOpened};
 pub use session::{Connected, Disconnected};
 pub use tick::{PostTick, PreTick};
@@ -105,6 +107,7 @@ pub(crate) fn is_known(id: UmiEventId) -> bool {
             | UmiEventId::PACKET_RECEIVED
             | UmiEventId::PACKET_SEND
             | UmiEventId::FRAME
+            | UmiEventId::PRE_RENDER
     )
 }
 

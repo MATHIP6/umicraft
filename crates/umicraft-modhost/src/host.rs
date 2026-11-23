@@ -15,6 +15,7 @@ use crate::budget::ModStats;
 use crate::dispatch::install_mod;
 use crate::events::EventThread;
 
+use crate::camera::CameraChain;
 use crate::context::{ModContext, Subscription};
 use crate::error::{EnableError, LoadError, LoadFailure};
 use crate::ffi::{exports_of, handle_of, host_table, open_library};
@@ -175,6 +176,13 @@ impl ModHost {
     /// switch per step.
     pub fn physics(&self) -> Option<PhysicsChain> {
         PhysicsChain::new(self.mods.iter().map(|m| &m.context))
+    }
+
+    /// The `render_camera` layers of the loaded mods, or `None` when no mod
+    /// registered one (API 1.1). Build it once after loading; the chain consults
+    /// each mod's switch per frame.
+    pub fn camera(&self) -> Option<CameraChain> {
+        CameraChain::new(self.mods.iter().map(|m| &m.context))
     }
 
     /// The counters of every mod, in load order, for the profiler.

@@ -9,9 +9,12 @@ use umicraft_modapi_sys::{UmiHost, UmiPhysicsCx};
 
 use super::*;
 use crate::ffi::physics_testing::{input_yaw, scale_velocity_x, set_velocity_x};
+use crate::ffi::UserPtr;
 use crate::ffi::{handle_of, host_table};
+use crate::manifest::Load;
 use crate::manifest::Permissions;
 use crate::ui::shared::HostShared;
+use umicraft_modapi_sys::UmiServiceMode;
 
 fn state() -> UmiPlayerPhysics {
     UmiPlayerPhysics {

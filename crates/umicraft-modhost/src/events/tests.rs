@@ -120,9 +120,10 @@ fn table_matches_the_documented_threads_and_flags() {
 }
 
 #[test]
-fn known_ids_are_one_to_twelve() {
-    assert!((1..=12).all(|id| is_known(UmiEventId(id))));
-    assert!(!is_known(UmiEventId(0)) && !is_known(UmiEventId(13)));
+fn known_ids_are_one_to_thirteen() {
+    // 13 is `PRE_RENDER`, added in API 1.1.
+    assert!((1..=13).all(|id| is_known(UmiEventId(id))));
+    assert!(!is_known(UmiEventId(0)) && !is_known(UmiEventId(14)));
 }
 
 #[test]

@@ -7,14 +7,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 
 use umicraft_modapi_sys::{
-    UmiEventId, UmiHandlerFn, UmiLevel, UmiMode, UmiPhysicsFn, UmiServiceMode, UmiStatus,
+    UmiCameraFn, UmiEventId, UmiHandlerFn, UmiLevel, UmiMode, UmiPhysicsFn, UmiServiceMode,
+    UmiStatus,
 };
 
 use crate::budget::{ModStats, Stats};
+use crate::camera::RenderCamera;
 use crate::events::is_known;
 use crate::ffi::UserPtr;
 use crate::manifest::{Load, ModId, Permissions};
-use crate::physics::{PhysicsLayer, PhysicsSlot};
+use crate::physics::PlayerPhysics;
+use crate::service::ServiceSlot;
 use crate::ui::shared::HostShared;
 use crate::ui::state::UiState;
 use crate::worker::WorkerSlot;
@@ -61,7 +64,8 @@ pub struct ModContext {
     /// Set once `umi_mod_init` succeeded; cleared by whoever calls `umi_mod_shutdown`.
     shutdown_due: AtomicBool,
     stats: Stats,
-    physics: PhysicsSlot,
+    physics: ServiceSlot<PlayerPhysics>,
+    camera: ServiceSlot<RenderCamera>,
     worker: WorkerSlot,
     pub(crate) ui: UiState,
     pub(crate) shared: Arc<HostShared>,
@@ -117,7 +121,8 @@ impl ModContext {
             failure: OnceLock::new(),
             shutdown_due: AtomicBool::new(false),
             stats: Stats::default(),
-            physics: PhysicsSlot::new(load, permissions.movement),
+            physics: ServiceSlot::new(load, permissions.movement),
+            camera: ServiceSlot::new(load, permissions.camera),
             worker: WorkerSlot::default(),
             ui: UiState::default(),
             shared,
@@ -255,6 +260,7 @@ impl ModContext {
     pub fn finish_init(&self, succeeded: bool) {
         self.init_done.store(true, Ordering::Release);
         self.physics.seal(succeeded);
+        self.camera.seal(succeeded);
         let withdrawn = self.ui.seal(succeeded);
         if succeeded {
             self.shutdown_due.store(true, Ordering::Release);
@@ -309,12 +315,30 @@ impl ModContext {
         self.physics.stats().snapshot()
     }
 
-    pub(crate) fn physics_counters(&self) -> &Stats {
-        self.physics.stats()
+    pub(crate) fn physics_slot(&self) -> &ServiceSlot<PlayerPhysics> {
+        &self.physics
     }
 
-    pub(crate) fn physics_layer(&self) -> Option<PhysicsLayer> {
-        self.physics.layer()
+    /// Registers the mod's `render_camera` layer, with the statuses of
+    /// [`register_physics`](Self::register_physics) and the `camera` permission in
+    /// place of `movement` (API 1.1).
+    pub fn register_camera(
+        &self,
+        mode: UmiServiceMode,
+        step: Option<UmiCameraFn>,
+        user: UserPtr,
+    ) -> UmiStatus {
+        self.camera.register(mode, step, user)
+    }
+
+    /// Counters of the mod's camera layer (budget [`BUDGET`](crate::BUDGET), the time
+    /// inside `camera_next` excluded).
+    pub fn camera_stats(&self) -> ModStats {
+        self.camera.stats().snapshot()
+    }
+
+    pub(crate) fn camera_slot(&self) -> &ServiceSlot<RenderCamera> {
+        &self.camera
     }
 
     pub(crate) fn counters(&self) -> &Stats {

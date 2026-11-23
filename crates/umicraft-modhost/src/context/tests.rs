@@ -132,16 +132,16 @@ fn shutdown_is_owed_once_and_only_after_a_successful_init() {
 }
 
 #[test]
-fn subscribe_accepts_the_ten_open_events_and_refuses_unknown_ids() {
+fn subscribe_accepts_the_eleven_open_events_and_refuses_unknown_ids() {
     let cx = context();
-    for id in (1..=9).chain([12]) {
+    for id in (1..=9).chain([12, 13]) {
         assert_eq!(subscribe(&cx, UmiEventId(id), Some(noop)), UmiStatus::OK);
     }
     assert_eq!(
-        subscribe(&cx, UmiEventId(13), Some(noop)),
+        subscribe(&cx, UmiEventId(14), Some(noop)),
         UmiStatus::INVALID_ARGUMENT
     );
-    assert_eq!(cx.all_subscriptions().len(), 10);
+    assert_eq!(cx.all_subscriptions().len(), 11);
 }
 
 fn with_permissions(id: &str, permissions: Permissions) -> Arc<ModContext> {
@@ -157,12 +157,14 @@ const PACKETS: Permissions = Permissions {
     movement: false,
     filesystem: false,
     network_http: false,
+    camera: false,
 };
 const MOVEMENT: Permissions = Permissions {
     network_packets: false,
     movement: true,
     filesystem: false,
     network_http: false,
+    camera: false,
 };
 
 #[test]
@@ -196,6 +198,12 @@ fn permissions_are_kept_and_alter_game_follows_packets_and_movement() {
         ..Permissions::default()
     };
     assert!(!with_permissions("http", http).alters_game());
+    // The camera changes what is drawn, not what the server sees (ADR-0094).
+    let camera = Permissions {
+        camera: true,
+        ..Permissions::default()
+    };
+    assert!(!with_permissions("cam", camera).alters_game());
 }
 
 #[test]

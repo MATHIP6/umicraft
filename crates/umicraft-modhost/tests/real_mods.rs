@@ -19,9 +19,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 
+use std::mem::size_of;
 use umicraft_builtin_mods::SettingValue;
 use umicraft_core::EventBus;
-use umicraft_modapi_sys::{UmiEventId, UmiMode, UmiPhysicsInput, UmiPlayerPhysics, UmiStatus};
+
+use umicraft_modapi_sys::{
+    UmiCameraInput, UmiEventId, UmiMode, UmiPhysicsInput, UmiPlayerPhysics, UmiRenderCamera,
+    UmiStatus,
+};
 use umicraft_modhost::{
     discover, library_file_name, platform_dir, resolve, with_world, ApiVersion, Arch, Candidate,
     ChatSend, CommandOutcome, EntityView, EventThread, KeyPressed, LoadError, ModHost, ModId, Os,
@@ -47,6 +52,8 @@ fn built_libraries() -> &'static Path {
                 "umicraft-example-shader-pass",
                 "-p",
                 "umicraft-example-depth-fog",
+                "-p",
+                "umicraft-example-camera-orbit",
                 "--offline",
             ])
             .status()
@@ -479,6 +486,78 @@ fn depth_fog_registers_a_pass_that_reads_the_scene_depth() {
         assert!(std::time::Instant::now() < deadline, "params never set");
         std::thread::yield_now();
     }
+    host.shutdown_all();
+}
+
+#[test]
+fn camera_orbit_wraps_the_render_camera_without_the_compat_mode_holding_it() {
+    let tmp = TempDir::new();
+    install(&tmp.0, "camera_orbit");
+    let candidates = discover(&tmp.0).into_iter().map(|d| Candidate {
+        manifest: d.manifest.unwrap(),
+        enabled: true,
+    });
+    let resolution = resolve(candidates, host_version());
+    let (mut host, failures) =
+        ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
+    assert!(failures.is_empty(), "{failures:?}");
+    host.set_server_compat(true);
+    let chain = host.camera().expect("one camera layer");
+    assert!(
+        chain.is_active(),
+        "a camera mod is not held by server-compat"
+    );
+
+    // The orbit is off until its key: the camera stays as the client put it.
+    let built_in = UmiRenderCamera {
+        size: size_of::<UmiRenderCamera>() as u32,
+        flags: 0,
+        eye: [0.5, 65.62, 0.5],
+        yaw: 0.0,
+        pitch: 0.0,
+        fov_y: 70.0,
+        aspect: 16.0 / 9.0,
+        view_bob: [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    };
+    let input = UmiCameraInput {
+        size: size_of::<UmiCameraInput>() as u32,
+        flags: 0,
+        look_dx: 0.0,
+        look_dy: 0.0,
+        forward: 0.0,
+        strafe: 0.0,
+        up: 0.0,
+        frame_seconds: 0.5,
+    };
+    let mut camera = built_in;
+    chain.place(&mut camera, &input);
+    assert_eq!(camera, built_in);
+
+    let mut render = EventBus::default();
+    host.install(&mut render, EventThread::Render);
+    render.dispatch(&mut KeyPressed::new(id("camera_orbit"), "orbit"));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let mut camera = built_in;
+        chain.place(&mut camera, &input);
+        if camera.eye != built_in.eye {
+            let [dx, dz] = [camera.eye[0] - 0.5, camera.eye[2] - 0.5];
+            assert!((dx.hypot(dz) - 5.0).abs() < 1e-9, "on the default circle");
+            assert!(camera.pitch > 0.0, "looking down at the player");
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the key never arrived"
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(host.mods().next().map(|m| m.failed), Some(false));
     host.shutdown_all();
 }
 

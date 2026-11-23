@@ -202,6 +202,7 @@ impl App {
             .as_ref()
             .map(|mods| mods.bus(EventThread::Render))
             .unwrap_or_default();
+        let camera_layers = external_mods.as_ref().and_then(ExternalMods::camera);
         Ok(Self {
             args,
             options_menu: OptionsMenu {
@@ -218,6 +219,8 @@ impl App {
             external_mods,
             mod_profiler: ModProfiler::default(),
             render_bus,
+            camera_layers,
+            frame_look: (0.0, 0.0),
             releasing: Vec::new(),
             post_frames: Vec::new(),
             options,

@@ -64,6 +64,7 @@
 //! umicraft_modapi::umicraft_mod!(Hello);
 //! ```
 
+mod camera;
 mod chat;
 mod error;
 mod event;
@@ -81,11 +82,13 @@ mod projection;
 mod setting;
 mod world;
 
+pub use camera::{Camera, CameraInput, CameraState};
 pub use chat::Chat;
 pub use error::ModError;
 pub use event::{
     ChatPosition, ChatReceived, ChatSend, Connected, Control, Disconnected, Event, Frame,
-    KeyPressed, PacketReceived, PacketSend, PostTick, PreTick, ScreenClosed, ScreenOpened,
+    KeyPressed, PacketReceived, PacketSend, PostTick, PreRender, PreTick, ScreenClosed,
+    ScreenOpened,
 };
 pub use hud::{Anchor, Hud, Placement};
 pub use init::{InitCx, Mod};

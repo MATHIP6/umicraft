@@ -85,6 +85,7 @@ umicraft.mods.external.perm.packets=paquets
 umicraft.mods.external.perm.movement=mouvement
 umicraft.mods.external.perm.files=fichiers
 umicraft.mods.external.perm.http=http
+umicraft.mods.external.perm.camera=caméra
 umicraft.mods.external.untrusted=Non approuvé : #%s. Activez pour approuver ce fichier ; il se charge au prochain démarrage. Hash : %s
 umicraft.mods.external.trusted=Approuvé : #%s. Il se charge au prochain démarrage.
 umicraft.mods.external.compat=Mode compatible serveur

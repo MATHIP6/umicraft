@@ -14,9 +14,9 @@ use crossbeam_channel::Receiver;
 use umicraft_core::events::EventBus;
 use umicraft_modapi_sys::UMI_API_VERSION;
 use umicraft_modhost::{
-    discover, resolve, ApiVersion, Arming, Candidate, CommandTable, CrashSentinel, Discovered,
-    EventThread, LoadError, LoadFailure, ModHost, ModId, PacketOutbox, Permissions, PhysicsChain,
-    SentinelGuard, TrustList,
+    discover, resolve, ApiVersion, Arming, CameraChain, Candidate, CommandTable, CrashSentinel,
+    Discovered, EventThread, LoadError, LoadFailure, ModHost, ModId, PacketOutbox, Permissions,
+    PhysicsChain, SentinelGuard, TrustList,
 };
 
 use super::external_config;
@@ -253,6 +253,12 @@ impl ExternalMods {
     /// `None` in safe mode or when no mod registered one.
     pub(crate) fn physics(&self) -> Option<PhysicsChain> {
         self.host.as_ref().and_then(ModHost::physics)
+    }
+
+    /// The mods' `render_camera` layers for the render thread; `None` in safe mode
+    /// or when no mod registered one (API 1.1).
+    pub(crate) fn camera(&self) -> Option<CameraChain> {
+        self.host.as_ref().and_then(ModHost::camera)
     }
 
     /// Turns the server-compatible mode on or off: while on, the mods that alter
