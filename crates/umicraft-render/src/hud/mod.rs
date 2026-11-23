@@ -41,5 +41,5 @@ pub use state::{
 };
 pub use umicraft_ui::mod_widget::{
     measure as measure_mod_widget, measure_view as measure_mod_widget_view, ModCell, ModIcon,
-    ModLabel, ModLine, ModTick, ModWidgetView, ShadowStyle, WidgetStyle,
+    ModLabel, ModLine, ModSegment, ModTick, ModWidgetView, ShadowStyle, WidgetStyle,
 };

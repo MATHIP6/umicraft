@@ -16,7 +16,7 @@
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use umicraft_builtin_mods::{Anchor, HudContent, HudPlacement};
-use umicraft_modapi_sys::{UmiHudDrawFn, UmiHudPlacement};
+use umicraft_modapi_sys::{UmiHudDrawFn, UmiHudPlacement, UMI_HUD_ANCHOR_SCREEN};
 
 use super::validate::{check_key, check_text};
 use super::MAX_LABEL_BYTES;
@@ -36,18 +36,42 @@ pub struct DrawnWidget<'a> {
     pub key: &'a str,
     /// Label for the HUD editor and the mods menu.
     pub label: &'a str,
-    /// Where the player put it (or its default).
+    /// Where the player put it (or its default). For a widget on the screen, the
+    /// offsets are where its content starts and the scale is 1.
     pub placement: HudPlacement,
+    /// Whether the mod anchored it to the screen itself (`UMI_HUD_ANCHOR_SCREEN`,
+    /// API 1.1): no panel, no padding, not moved nor listed by the HUD editor.
+    pub screen: bool,
     /// What the draw function wrote this frame.
     pub content: &'a HudContent,
 }
 
-/// Converts the ABI placement: a non-finite number or an anchor above 8 is refused,
-/// the scale is clamped by the same rule as the built-in widgets.
-pub(crate) fn placement_of(raw: UmiHudPlacement) -> Result<HudPlacement, DeclareError> {
+/// Where a mod declares its widget: one of the nine anchors, or the screen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum DeclaredPlacement {
+    /// At an anchor; the player may move and scale it.
+    Anchored(HudPlacement),
+    /// Content starting at this GUI pixel of the screen, scale 1, fixed.
+    Screen([f32; 2]),
+}
+
+/// Converts the ABI placement: a non-finite number or an anchor above
+/// `UMI_HUD_ANCHOR_SCREEN` is refused, the scale is clamped by the same rule as the
+/// built-in widgets.
+pub(crate) fn placement_of(raw: UmiHudPlacement) -> Result<DeclaredPlacement, DeclareError> {
+    if raw.anchor == UMI_HUD_ANCHOR_SCREEN {
+        return if raw.offset_x.is_finite() && raw.offset_y.is_finite() {
+            Ok(DeclaredPlacement::Screen([raw.offset_x, raw.offset_y]))
+        } else {
+            Err(DeclareError::Invalid {
+                what: "widget placement",
+                why: "offsets must be finite",
+            })
+        };
+    }
     let anchor = Anchor::from_index(raw.anchor).ok_or(DeclareError::Invalid {
         what: "widget placement",
-        why: "anchor must be 0 to 8",
+        why: "anchor must be 0 to 9",
     })?;
     let finite = [raw.offset_x, raw.offset_y, raw.scale]
         .iter()
@@ -58,13 +82,15 @@ pub(crate) fn placement_of(raw: UmiHudPlacement) -> Result<HudPlacement, Declare
             why: "offsets and scale must be finite",
         });
     }
-    Ok(HudPlacement {
-        anchor,
-        offset_x: raw.offset_x,
-        offset_y: raw.offset_y,
-        scale: raw.scale,
-    }
-    .sanitized())
+    Ok(DeclaredPlacement::Anchored(
+        HudPlacement {
+            anchor,
+            offset_x: raw.offset_x,
+            offset_y: raw.offset_y,
+            scale: raw.scale,
+        }
+        .sanitized(),
+    ))
 }
 
 /// A declared widget: its draw function, its placement and its last content.
@@ -74,6 +100,8 @@ pub(crate) struct WidgetSlot {
     label: String,
     default_placement: HudPlacement,
     placement: Mutex<HudPlacement>,
+    /// Anchored to the screen: the placement never changes.
+    screen: bool,
     draw: UmiHudDrawFn,
     user: UserPtr,
     content: Mutex<HudContent>,
@@ -104,10 +132,30 @@ impl WidgetSlot {
             label: label.to_owned(),
             default_placement: placement,
             placement: Mutex::new(placement),
+            screen: false,
             draw,
             user,
             content: Mutex::new(HudContent::default()),
         })
+    }
+
+    /// Validates and builds a widget anchored to the screen, its content at `at`.
+    pub(crate) fn on_screen(
+        key: &str,
+        label: &str,
+        [x, y]: [f32; 2],
+        draw: Option<UmiHudDrawFn>,
+        user: UserPtr,
+    ) -> Result<Self, DeclareError> {
+        let placement = HudPlacement::at(Anchor::TopLeft, x, y);
+        Ok(Self {
+            screen: true,
+            ..Self::new(key, label, placement, draw, user)?
+        })
+    }
+
+    pub(crate) fn is_on_screen(&self) -> bool {
+        self.screen
     }
 
     pub(crate) fn key(&self) -> &str {
@@ -126,9 +174,12 @@ impl WidgetSlot {
         *lock(&self.placement)
     }
 
-    /// Moves the widget; the placement is sanitised first.
+    /// Moves the widget; the placement is sanitised first. A widget on the screen
+    /// stays where its mod put it, whatever a saved layout says.
     pub(crate) fn set_placement(&self, placement: HudPlacement) {
-        *lock(&self.placement) = placement.sanitized();
+        if !self.screen {
+            *lock(&self.placement) = placement.sanitized();
+        }
     }
 
     /// Clears the content and calls the draw function under [`HUD_BUDGET`]; a failure
@@ -153,6 +204,7 @@ impl WidgetSlot {
             key: &self.key,
             label: &self.label,
             placement: self.placement(),
+            screen: self.screen,
             content: &content,
         });
     }

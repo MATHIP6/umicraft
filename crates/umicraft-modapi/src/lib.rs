@@ -77,6 +77,7 @@ mod physics;
 mod post;
 #[doc(hidden)]
 pub mod private;
+mod projection;
 mod setting;
 mod world;
 

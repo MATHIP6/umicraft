@@ -162,7 +162,9 @@ fn widgets_keys_and_commands_register_and_report_their_errors() {
     };
     assert_eq!(widget(str_of("main"), 4), UmiStatus::OK);
     assert_eq!(widget(str_of("main"), 4), UmiStatus::CONFLICT);
-    assert_eq!(widget(str_of("other"), 9), UmiStatus::INVALID_ARGUMENT);
+    // 9 is the screen anchor since API 1.1; 10 means nothing.
+    assert_eq!(widget(str_of("other"), 10), UmiStatus::INVALID_ARGUMENT);
+    assert_eq!(widget(str_of("marks"), 9), UmiStatus::OK);
 
     let key = |id| (host.register_key)(me, id, str_of("Label"), str_of("KeyG"));
     assert_eq!(key(str_of("toggle")), UmiStatus::OK);

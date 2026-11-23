@@ -23,11 +23,11 @@ use super::App;
 use crate::game::GameEvent;
 use crate::mods::external::ExternalMods;
 use crate::mods::external_menu;
-use crate::mods::hud::{item_of, mod_widget_view, mod_widget_views};
+use crate::mods::hud::{item_of, mod_widget_view, mod_widget_views, screen_widget_view};
 use crate::mods::hud_editor;
 use crate::mods::icons::ModIcons;
 use crate::mods::menu;
-use crate::mods::runtime::{FrameInput, ModsRuntime};
+use crate::mods::runtime::{frame_camera, FrameInput, ModsRuntime};
 use crate::options::{Action, Binding};
 use crate::resources::item_icons::ItemView;
 use crate::screens::menu_flow::MenuFlow;
@@ -60,7 +60,11 @@ pub(super) fn hud_widgets(
     if let Some(host) = external {
         host.visit_widgets(|drawn| {
             let item = (drawn.placement, drawn.content);
-            views.extend(mod_widget_view(item, font, display, icons));
+            views.extend(if drawn.screen {
+                screen_widget_view(item, icons)
+            } else {
+                mod_widget_view(item, font, display, icons)
+            });
         });
     }
     views
@@ -127,17 +131,10 @@ impl App {
         applies
     }
 
-    /// Feeds the mods once per frame with what the window knows: the built-in ones
-    /// get their context and the external ones the `Frame` event made from it, the
-    /// external ones draw their widgets (so they are drawn
-    /// once per frame whether the HUD or the HUD editor shows them), and the chat
-    /// lines the external mods printed go to the game.
+    /// Feeds the built-in mods once per frame with what the window knows, and
+    /// sends the chat lines the external mods printed to the game. The external
+    /// mods get their `Frame` later, from [`publish_frame`](Self::publish_frame).
     pub(super) fn update_mods(&mut self, now: Instant) {
-        if self.session.is_some() {
-            if let Some(host) = self.external_mods.as_ref().and_then(ExternalMods::host) {
-                host.draw_widgets();
-            }
-        }
         self.forward_mod_chat();
         let eye = self.camera.eye();
         let (hud, slots) = match self.world.as_ref() {
@@ -148,38 +145,50 @@ impl App {
             let selected = hud.map_or(0, |hud| hud.selected_slot);
             crate::mods::facts::equipment(slots, selected)
         });
-        self.mods.update(
-            &FrameInput {
-                now_ms: u64::try_from(now.duration_since(self.clock.started).as_millis())
-                    .unwrap_or(u64::MAX),
-                fps: self.clock.fps.round() as u32,
-                frame_ms: self.clock.frame_ms,
-                eye: [eye.x, eye.y, eye.z],
-                yaw_radians: self.camera.yaw,
-                pitch_radians: self.camera.pitch,
-                sprinting: self.held(Action::Sprint),
-                ping_ms: hud.and_then(|hud| hud.ping_ms),
-                keys: KeyState {
-                    forward: self.held(Action::Forward),
-                    left: self.held(Action::Left),
-                    back: self.held(Action::Back),
-                    right: self.held(Action::Right),
-                    jump: self.held(Action::Jump),
-                    attack: self.held(Action::Attack),
-                    use_item: self.held(Action::Use),
-                },
-                combat: hud.map_or(CombatInfo::default(), |hud| CombatInfo {
-                    hits: hud.combat.0,
-                    hurts: hud.combat.1,
-                }),
-                armor,
-                held,
-                effects: hud.map_or([None; MAX_EFFECTS], |hud| {
-                    crate::mods::facts::effects(&hud.active_effects)
-                }),
+        self.mods.update(&FrameInput {
+            now_ms: u64::try_from(now.duration_since(self.clock.started).as_millis())
+                .unwrap_or(u64::MAX),
+            fps: self.clock.fps.round() as u32,
+            frame_ms: self.clock.frame_ms,
+            eye: [eye.x, eye.y, eye.z],
+            yaw_radians: self.camera.yaw,
+            pitch_radians: self.camera.pitch,
+            sprinting: self.held(Action::Sprint),
+            ping_ms: hud.and_then(|hud| hud.ping_ms),
+            keys: KeyState {
+                forward: self.held(Action::Forward),
+                left: self.held(Action::Left),
+                back: self.held(Action::Back),
+                right: self.held(Action::Right),
+                jump: self.held(Action::Jump),
+                attack: self.held(Action::Attack),
+                use_item: self.held(Action::Use),
             },
-            &mut self.render_bus,
-        );
+            combat: hud.map_or(CombatInfo::default(), |hud| CombatInfo {
+                hits: hud.combat.0,
+                hurts: hud.combat.1,
+            }),
+            armor,
+            held,
+            effects: hud.map_or([None; MAX_EFFECTS], |hud| {
+                crate::mods::facts::effects(&hud.active_effects)
+            }),
+        });
+    }
+
+    /// Sends this frame's `Frame` event, with the camera the frame is drawn with,
+    /// then lets the external mods draw their widgets (once per frame, whether the
+    /// HUD or the HUD editor shows them). Called once the camera is final, so a
+    /// widget placing an annotation with the projection of `Frame` draws it where
+    /// the world shows the point (API 1.1, ADR-0094).
+    pub(super) fn publish_frame(&mut self, (width, height): (u32, u32)) {
+        let camera = frame_camera(&self.camera, (width, height));
+        self.mods.dispatch_frame(camera, &mut self.render_bus);
+        if self.session.is_some() {
+            if let Some(host) = self.external_mods.as_ref().and_then(ExternalMods::host) {
+                host.draw_widgets();
+            }
+        }
     }
 
     /// Opens the mods menu over the game, or closes it when it is open.
@@ -298,13 +307,10 @@ mod tests {
         let mut mods = ModsRuntime::new(&crate::options::ModsOptions::default());
         // The mod is on and has run once, so it has a line to draw.
         assert!(mods.registry_mut().set_enabled("fps", true).is_ok());
-        mods.update(
-            &FrameInput {
-                fps: 60,
-                ..FrameInput::default()
-            },
-            &mut umicraft_core::events::EventBus::default(),
-        );
+        mods.update(&FrameInput {
+            fps: 60,
+            ..FrameInput::default()
+        });
         let font = FontAtlas::fallback();
         let on_hud = hud_widgets(
             Screen::None,

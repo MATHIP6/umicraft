@@ -17,8 +17,8 @@ use umicraft_modapi_sys::{
     UmiServiceMode, UmiStatus, UmiStr,
 };
 use umicraft_modhost::{
-    host_table, install_mod, ChatSend, EventThread, Frame, FrameFacts, Load, ModContext,
-    PacketReceived, Permissions, PhysicsChain, PreTick, ServiceId, UserPtr,
+    host_table, install_mod, ChatSend, EventThread, Frame, FrameCamera, FrameFacts, Load,
+    ModContext, PacketReceived, Permissions, PhysicsChain, PreTick, ServiceId, UserPtr,
 };
 
 extern "C" fn noop(_: *mut UmiEventHeader, _: *mut c_void) -> UmiStatus {
@@ -131,6 +131,7 @@ fn dispatch(c: &mut Criterion) {
         right_clicks: 0,
         ping_ms: Some(30),
         sprinting: false,
+        camera: FrameCamera::default(),
     };
     group.bench_function("frame_no_subscriber", |b| {
         b.iter(|| empty.dispatch(black_box(&mut Frame::new(black_box(facts)))));

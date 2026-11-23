@@ -6,8 +6,8 @@
 
 use umicraft_builtin_mods::{HudContent, HudPlacement, HudStyle, HudWidget, Shadow};
 use umicraft_render::{
-    gui_scale, measure_mod_widget_view, ModCell, ModLabel, ModLine, ModTick, ModWidgetView,
-    ShadowStyle, WidgetStyle,
+    gui_scale, measure_mod_widget_view, ModCell, ModLabel, ModLine, ModSegment, ModTick,
+    ModWidgetView, ShadowStyle, WidgetStyle,
 };
 use umicraft_ui::FontAtlas;
 
@@ -56,6 +56,37 @@ pub fn mod_widget_view(
     }
     let scale = gui_scale(display.0, display.1) as f32;
     let screen = (display.0 as f32 / scale, display.1 as f32 / scale);
+    let mut view = content_view(content, icons);
+    // Measured at scale 1: `HudPlacement::rect` applies the widget scale.
+    let rect = placement.rect(measure_mod_widget_view(font, &view), screen);
+    view.mirrored = (rect.x + rect.w / 2.0 > screen.0 / 2.0) != content.invert;
+    view.position = [rect.x, rect.y];
+    view.scale = placement.scale;
+    Some(view)
+}
+
+/// The view of an external widget anchored to the screen (API 1.1): its content
+/// starts at the offsets of `placement`, in GUI pixels, at scale 1, with no panel,
+/// no padding and no mirroring, so a mod's coordinates are screen coordinates.
+/// `None` while it has nothing to draw.
+#[must_use]
+pub fn screen_widget_view(
+    (placement, content): (HudPlacement, &HudContent),
+    icons: &ModIcons<'_>,
+) -> Option<ModWidgetView> {
+    if content.is_empty() {
+        return None;
+    }
+    let mut view = content_view(content, icons);
+    view.style.background = None;
+    view.style.padding = 0.0;
+    view.position = [placement.offset_x, placement.offset_y];
+    view.scale = 1.0;
+    Some(view)
+}
+
+/// The content of a widget as the UI draws it, at the origin and scale 1.
+fn content_view(content: &HudContent, icons: &ModIcons<'_>) -> ModWidgetView {
     let lines: Vec<ModLine> = content
         .lines()
         .iter()
@@ -96,21 +127,27 @@ pub fn mod_widget_view(
             alpha: tick.alpha,
         })
         .collect();
-    let mut view = ModWidgetView {
+    let segments = content
+        .segments()
+        .iter()
+        .map(|segment| ModSegment {
+            from: segment.from,
+            to: segment.to,
+            thickness: segment.thickness,
+            color: segment.color,
+            alpha: segment.alpha,
+        })
+        .collect();
+    ModWidgetView {
         lines,
         cells,
         labels,
         ticks,
+        segments,
         reserve: content.reserve,
         style: widget_style(&content.style),
         ..ModWidgetView::default()
-    };
-    // Measured at scale 1: `HudPlacement::rect` applies the widget scale.
-    let rect = placement.rect(measure_mod_widget_view(font, &view), screen);
-    view.mirrored = (rect.x + rect.w / 2.0 > screen.0 / 2.0) != content.invert;
-    view.position = [rect.x, rect.y];
-    view.scale = placement.scale;
-    Some(view)
+    }
 }
 
 /// The views of `widgets`, given as `(placement, content)`, on a window of
@@ -149,6 +186,31 @@ mod tests {
             (800, 600),
             &ModIcons::default(),
         )
+    }
+
+    #[test]
+    fn a_widget_on_the_screen_draws_at_its_offset_without_panel_or_padding() {
+        let mut content = HudContent::default();
+        content.tick([100.0, 50.0, 2.0, 2.0], 0xffffff, 1.0);
+        content.segment(umicraft_builtin_mods::HudSegment {
+            from: [0.0, 0.0],
+            to: [300.0, 200.0],
+            thickness: 1.0,
+            color: 0xff0000,
+            alpha: 1.0,
+        });
+        let placement = HudPlacement {
+            scale: 2.5,
+            ..HudPlacement::at(Anchor::TopLeft, 3.0, 4.0)
+        };
+        let view = screen_widget_view((placement, &content), &ModIcons::default())
+            .expect("something to draw");
+        assert_eq!((view.position, view.scale), ([3.0, 4.0], 1.0));
+        assert_eq!((view.style.background, view.style.padding), (None, 0.0));
+        assert!(!view.mirrored);
+        assert_eq!(view.segments[0].to, [300.0, 200.0]);
+        let empty = HudContent::default();
+        assert!(screen_widget_view((placement, &empty), &ModIcons::default()).is_none());
     }
 
     #[test]

@@ -187,6 +187,21 @@ pub struct ModTick {
     pub alpha: f32,
 }
 
+/// A straight line of a widget, at any angle.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModSegment {
+    /// Start, in GUI units from the top-left of the content.
+    pub from: [f32; 2],
+    /// End, in GUI units from the top-left of the content.
+    pub to: [f32; 2],
+    /// Width, in GUI units.
+    pub thickness: f32,
+    /// The colour as `0xRRGGBB`.
+    pub color: u32,
+    /// Opacity, `0.0` to `1.0`.
+    pub alpha: f32,
+}
+
 /// A mod widget whose position is already resolved.
 ///
 /// A widget holds stacked lines, fixed boxes or freely placed labels and ticks;
@@ -201,6 +216,8 @@ pub struct ModWidgetView {
     pub labels: Vec<ModLabel>,
     /// The small rectangles.
     pub ticks: Vec<ModTick>,
+    /// The straight lines.
+    pub segments: Vec<ModSegment>,
     /// The size `[width, height]` in GUI units the content keeps at least.
     pub reserve: [f32; 2],
     /// Whether the rows are mirrored (text, then picture, against the right
@@ -222,6 +239,7 @@ impl Default for ModWidgetView {
             cells: Vec::new(),
             labels: Vec::new(),
             ticks: Vec::new(),
+            segments: Vec::new(),
             reserve: [0.0; 2],
             mirrored: false,
             position: [0.0; 2],
@@ -239,6 +257,7 @@ impl ModWidgetView {
             && self.cells.is_empty()
             && self.labels.is_empty()
             && self.ticks.is_empty()
+            && self.segments.is_empty()
             && self.reserve == [0.0; 2]
     }
 
@@ -250,7 +269,8 @@ impl ModWidgetView {
 }
 
 /// The size of the content (without the padding) of a widget, in GUI units at
-/// scale 1: the largest of its lines, boxes, labels, ticks and reserved size.
+/// scale 1: the largest of its lines, boxes, labels, ticks, segment ends and
+/// reserved size.
 fn content_size(font: &FontAtlas, widget: &ModWidgetView) -> (f32, f32) {
     let lines = &widget.lines;
     let rows = lines.iter().map(|line| line.height()).sum::<f32>();
@@ -274,6 +294,11 @@ fn content_size(font: &FontAtlas, widget: &ModWidgetView) -> (f32, f32) {
         let [x, y, width, height] = tick.rect;
         (w.max(x + width), h.max(y + height))
     });
+    let (width, height) = widget
+        .segments
+        .iter()
+        .flat_map(|segment| [segment.from, segment.to])
+        .fold((width, height), |(w, h), [x, y]| (w.max(x), h.max(y)));
     let (width, height) = widget.labels.iter().fold((width, height), |(w, h), label| {
         let text_width = font.measure(&label.text, 1.0) * label.scale;
         (
@@ -373,6 +398,16 @@ fn draw_widget(list: &mut DrawList, widget: &ModWidgetView, sf: f32, font: &Font
         let mut colour = rgb(tick.color);
         colour[3] = tick.alpha;
         list.rect(origin.rect(x, y, width, height), colour);
+    }
+    for segment in &widget.segments {
+        let mut colour = rgb(segment.color);
+        colour[3] = segment.alpha;
+        list.segment(
+            origin.at(segment.from[0], segment.from[1]),
+            origin.at(segment.to[0], segment.to[1]),
+            segment.thickness * origin.unit,
+            colour,
+        );
     }
     for label in &widget.labels {
         let text_width = font.measure(&label.text, 1.0) * label.scale;

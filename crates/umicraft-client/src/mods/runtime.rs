@@ -16,8 +16,8 @@ use umicraft_builtin_mods::{
 use umicraft_core::events::EventBus;
 use umicraft_game::legacy::LegacyAnimations;
 use umicraft_model::entity::BipedStyle;
-use umicraft_modhost::{Frame, FrameFacts};
-use umicraft_render::{MotionBlurSettings, MotionBlurVersion};
+use umicraft_modhost::{Frame, FrameCamera, FrameFacts};
+use umicraft_render::{gui_scale, Camera, MotionBlurSettings, MotionBlurVersion};
 use umicraft_ui::menus::{HudEditorOutcome, ModsOutcome};
 
 use crate::input::InputState;
@@ -90,6 +90,9 @@ pub struct ModsRuntime {
     history: History,
     /// The state when the mods menu opened, which "cancel" goes back to.
     origin: Option<ModsConfig>,
+    /// The facts of this frame's [`Frame`] event, built with the context the
+    /// built-in mods read and sent once the camera is final.
+    pending_frame: Option<FrameFacts>,
 }
 
 impl ModsRuntime {
@@ -109,6 +112,7 @@ impl ModsRuntime {
             right_clicks: 0,
             history: History::default(),
             origin: None,
+            pending_frame: None,
         };
         runtime.registry.apply_config(config);
         runtime
@@ -128,16 +132,27 @@ impl ModsRuntime {
     /// Updates every enabled mod for this frame and resets the click counters.
     ///
     /// The frame's snapshot is built once: the [`Frame`] event the external mods
-    /// (and any Rust module) receive on `bus` is derived from the very context the
-    /// built-in mods read, and dispatched first, so both see the same frame (F3.9).
-    pub fn update(&mut self, frame: &FrameInput, bus: &mut EventBus) {
+    /// (and any Rust module) receive is derived from the very context the built-in
+    /// mods read (F3.9), and kept for [`dispatch_frame`](Self::dispatch_frame).
+    pub fn update(&mut self, frame: &FrameInput) {
         let ctx = self.context(frame);
         self.left_clicks = 0;
         self.right_clicks = 0;
-        if bus.has_subscribers::<Frame>() {
-            bus.dispatch(&mut frame_event(&ctx));
-        }
+        self.pending_frame = Some(frame_facts(&ctx));
         self.registry.update(&ctx);
+    }
+
+    /// Sends this frame's [`Frame`] event on `bus` with `camera`, the camera the
+    /// frame is drawn with: called once the camera is final, so a projection made
+    /// with it lands on the pixels the renderer draws (API 1.1, ADR-0094). Does
+    /// nothing before [`update`](Self::update) or when nobody listens.
+    pub fn dispatch_frame(&mut self, camera: FrameCamera, bus: &mut EventBus) {
+        let Some(facts) = self.pending_frame.take() else {
+            return;
+        };
+        if bus.has_subscribers::<Frame>() {
+            bus.dispatch(&mut Frame::new(FrameFacts { camera, ..facts }));
+        }
     }
 
     /// The widgets to draw on the HUD, in drawing order.
@@ -355,8 +370,8 @@ impl ModsRuntime {
 
 /// The external mods' view of the built-in context (spec §8.4 item 1, ADR-0086
 /// F3.9): the same frame, without the key state, which mods never see.
-fn frame_event(ctx: &ModContext) -> Frame {
-    Frame::new(FrameFacts {
+fn frame_facts(ctx: &ModContext) -> FrameFacts {
+    FrameFacts {
         now_ms: ctx.now_ms,
         position: ctx.position,
         fps: ctx.fps,
@@ -367,7 +382,26 @@ fn frame_event(ctx: &ModContext) -> Frame {
         right_clicks: ctx.right_clicks,
         ping_ms: ctx.ping_ms,
         sprinting: ctx.sprinting,
-    })
+        camera: FrameCamera::default(),
+    }
+}
+
+/// The camera of a frame as the mods see it in `Frame` (API 1.1): the matrix the
+/// renderer draws the world with, relative to the same render origin, on a
+/// framebuffer of `viewport` physical pixels.
+#[must_use]
+pub fn frame_camera(camera: &Camera, (width, height): (u32, u32)) -> FrameCamera {
+    let origin = camera.render_origin();
+    FrameCamera {
+        eye: camera.eye().to_array(),
+        render_origin: origin.to_array(),
+        view_proj: camera.view_projection_from(origin).to_cols_array_2d(),
+        viewport: [width, height],
+        gui_scale: gui_scale(width, height) as f32,
+        fov_y: camera.effective_fov_degrees(),
+        aspect: camera.aspect(),
+        view_bob: camera.view_bob().to_cols_array_2d(),
+    }
 }
 
 /// What a change is about, for the history to merge the frames of one slider
@@ -406,7 +440,18 @@ mod tests {
         });
         let input = frame();
         let ctx = runtime.context(&input);
-        runtime.update(&input, &mut bus);
+        runtime.update(&input);
+        assert!(
+            seen.lock().expect("not poisoned").is_none(),
+            "not before the camera"
+        );
+        let camera = FrameCamera {
+            eye: [10.0, 70.0, -3.0],
+            gui_scale: 2.0,
+            ..FrameCamera::default()
+        };
+        runtime.dispatch_frame(camera, &mut bus);
+        runtime.dispatch_frame(camera, &mut bus);
         let facts = seen
             .lock()
             .expect("not poisoned")
@@ -417,6 +462,43 @@ mod tests {
             (ctx.yaw, ctx.pitch, ctx.fps)
         );
         assert_eq!((facts.left_clicks, facts.ping_ms), (1, ctx.ping_ms));
+        assert_eq!(facts.camera, camera);
+    }
+
+    #[test]
+    fn the_frame_camera_is_the_matrix_the_world_is_drawn_with() {
+        let mut camera = Camera::from_minecraft(1_000_000.25, 70.0, -2_000_000.75, 30.0, 10.0);
+        camera.set_aspect(1920, 1080);
+        camera.set_fov_degrees(70.0);
+        camera.set_view_effects(1.1, glam::Mat4::IDENTITY);
+        let facts = frame_camera(&camera, (1920, 1080));
+        assert_eq!(facts.render_origin, camera.render_origin().to_array());
+        assert!((facts.fov_y - 77.0).abs() < 1e-3, "the sprint factor is in");
+        assert_eq!(facts.viewport, [1920, 1080]);
+        // A point ahead of the eye lands in the middle of the screen.
+        let ahead = camera.eye() + camera.forward().as_dvec3() * 10.0;
+        let relative = (ahead - camera.render_origin()).as_vec3().extend(1.0);
+        let clip = glam::Mat4::from_cols_array_2d(&facts.view_proj) * relative;
+        assert!((clip.x / clip.w).abs() < 1e-3 && (clip.y / clip.w).abs() < 1e-3);
+    }
+
+    #[test]
+    fn the_frame_event_is_sent_once_per_update() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use std::sync::Arc;
+        use umicraft_core::module::ModuleId;
+        let mut runtime = runtime();
+        let count = Arc::new(AtomicU32::new(0));
+        let mut bus = EventBus::default();
+        let sink = Arc::clone(&count);
+        bus.on::<Frame, _>(ModuleId::new("test"), 0, move |_, _| {
+            sink.fetch_add(1, Ordering::Relaxed);
+        });
+        runtime.dispatch_frame(FrameCamera::default(), &mut bus);
+        runtime.update(&frame());
+        runtime.dispatch_frame(FrameCamera::default(), &mut bus);
+        runtime.dispatch_frame(FrameCamera::default(), &mut bus);
+        assert_eq!(count.load(Ordering::Relaxed), 1);
     }
 
     #[test]
@@ -451,7 +533,7 @@ mod tests {
         runtime.note_click(false);
         let ctx = runtime.context(&frame());
         assert_eq!((ctx.left_clicks, ctx.right_clicks), (2, 1));
-        runtime.update(&frame(), &mut EventBus::default());
+        runtime.update(&frame());
         let ctx = runtime.context(&frame());
         assert_eq!((ctx.left_clicks, ctx.right_clicks), (0, 0));
     }

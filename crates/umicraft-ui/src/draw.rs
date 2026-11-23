@@ -170,6 +170,18 @@ pub enum DrawCommand {
         /// Straight-alpha RGBA colour of the bottom edge.
         bottom: Color,
     },
+    /// Fill a straight band of `thickness` pixels from `from` to `to`, at any
+    /// angle (the line primitive of mod widgets, API 1.1).
+    Segment {
+        /// Start of the centre line, in physical pixels.
+        from: [f32; 2],
+        /// End of the centre line, in physical pixels.
+        to: [f32; 2],
+        /// Width of the band, in physical pixels.
+        thickness: f32,
+        /// Straight-alpha RGBA colour.
+        color: Color,
+    },
     /// Draw one line of text at `position` (top-left of the first glyph).
     Text {
         /// Top-left position of the text run.
@@ -328,6 +340,17 @@ impl DrawList {
         self.commands.push(DrawCommand::RoundedRect {
             rect,
             radius,
+            color,
+        });
+    }
+
+    /// Appends a band `thickness` pixels wide along the line from `from` to `to`.
+    pub fn segment(&mut self, from: [f32; 2], to: [f32; 2], thickness: f32, color: Color) {
+        let color = self.faded(color);
+        self.commands.push(DrawCommand::Segment {
+            from,
+            to,
+            thickness,
             color,
         });
     }

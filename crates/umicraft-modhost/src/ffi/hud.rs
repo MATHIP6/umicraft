@@ -139,6 +139,36 @@ pub(super) extern "C" fn host_hud_tick(
     })
 }
 
+pub(super) extern "C" fn host_hud_outline(
+    hud: *mut UmiHudCx,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
+    color: u32,
+    alpha: f32,
+) -> UmiStatus {
+    with_call(hud, |content| {
+        draw::outline(content, [x, y, width, height], color, alpha)
+    })
+}
+
+#[allow(clippy::too_many_arguments)] // the ABI signature of `UmiHost::hud_segment`
+pub(super) extern "C" fn host_hud_segment(
+    hud: *mut UmiHudCx,
+    x1: f32,
+    y1: f32,
+    x2: f32,
+    y2: f32,
+    color: u32,
+    alpha: f32,
+    thickness: f32,
+) -> UmiStatus {
+    with_call(hud, |content| {
+        draw::segment(content, [[x1, y1], [x2, y2]], color, alpha, thickness)
+    })
+}
+
 pub(super) extern "C" fn host_hud_reserve(
     hud: *mut UmiHudCx,
     width: f32,

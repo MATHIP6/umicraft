@@ -27,7 +27,7 @@ use umicraft_modapi_sys::{UmiBytes, UmiEventHeader, UmiEventId, UmiStr, UMI_EVEN
 use crate::manifest::ModId;
 
 pub use chat::{ChatReceived, ChatSend};
-pub use frame::{Frame, FrameFacts};
+pub use frame::{Frame, FrameCamera, FrameFacts};
 pub use key::KeyPressed;
 pub use packet::{PacketReceived, PacketSend};
 pub use screen::{ScreenClosed, ScreenOpened};

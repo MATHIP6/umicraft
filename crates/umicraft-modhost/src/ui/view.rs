@@ -29,6 +29,8 @@ pub struct WidgetView<'a> {
     pub placement: HudPlacement,
     /// Where the mod put it by default, for a "reset" button.
     pub default_placement: HudPlacement,
+    /// Anchored to the screen (API 1.1): not for the HUD editor.
+    pub screen: bool,
 }
 
 /// A declared key binding, listed on the controls page under its mod's name.
@@ -114,6 +116,7 @@ impl<'a> ModView<'a> {
             label: widget.label(),
             placement: widget.placement(),
             default_placement: widget.default_placement(),
+            screen: widget.is_on_screen(),
         })
     }
 

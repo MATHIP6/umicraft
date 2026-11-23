@@ -1,10 +1,32 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-//! The per-frame snapshot event, emitted on the render thread.
+//! The per-frame snapshot event, emitted on the render thread once the camera of
+//! the frame is final (API 1.1).
 
 use umicraft_modapi_sys::{UmiEventHeader, UmiEventId, UmiFrame};
 
 use super::{header_for, host_event, EventThread, HostEvent};
+
+/// The camera a frame is drawn with (API 1.1, ADR-0094), as the renderer uses it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct FrameCamera {
+    /// The camera eye, in blocks.
+    pub eye: [f64; 3],
+    /// The integer corner GPU positions are relative to.
+    pub render_origin: [f64; 3],
+    /// Column-major view-projection for points relative to `render_origin`.
+    pub view_proj: [[f32; 4]; 4],
+    /// Framebuffer size in physical pixels.
+    pub viewport: [u32; 2],
+    /// Physical pixels per GUI pixel.
+    pub gui_scale: f32,
+    /// Effective vertical field of view, in degrees.
+    pub fov_y: f32,
+    /// Viewport width over height.
+    pub aspect: f32,
+    /// Column-major camera-space view bobbing.
+    pub view_bob: [[f32; 4]; 4],
+}
 
 const IDENTITY: [[f32; 4]; 4] = [
     [1.0, 0.0, 0.0, 0.0],
@@ -12,6 +34,23 @@ const IDENTITY: [[f32; 4]; 4] = [
     [0.0, 0.0, 1.0, 0.0],
     [0.0, 0.0, 0.0, 1.0],
 ];
+
+impl Default for FrameCamera {
+    /// A camera at the world origin with identity matrices and a 1x1 viewport,
+    /// for frames without a world (tests, benchmarks).
+    fn default() -> Self {
+        Self {
+            eye: [0.0; 3],
+            render_origin: [0.0; 3],
+            view_proj: IDENTITY,
+            viewport: [1, 1],
+            gui_scale: 1.0,
+            fov_y: 70.0,
+            aspect: 1.0,
+            view_bob: IDENTITY,
+        }
+    }
+}
 
 /// What the player sees in one frame, in Rust types.
 ///
@@ -39,6 +78,8 @@ pub struct FrameFacts {
     pub ping_ms: Option<u32>,
     /// Whether the player sprints.
     pub sprinting: bool,
+    /// The final camera of the frame.
+    pub camera: FrameCamera,
 }
 
 /// Fired once per rendered frame, right before the built-in mods update.
@@ -75,15 +116,14 @@ impl Frame {
                     .and_then(|ping| i32::try_from(ping).ok())
                     .unwrap_or(-1),
                 sprinting: u8::from(facts.sprinting),
-                // The camera of the frame lands with phase 1.1.5 (ADR-0094).
-                eye: facts.position,
-                render_origin: [0.0; 3],
-                view_proj: IDENTITY,
-                viewport: [0; 2],
-                gui_scale: 1.0,
-                fov_y: 0.0,
-                aspect: 1.0,
-                view_bob: IDENTITY,
+                eye: facts.camera.eye,
+                render_origin: facts.camera.render_origin,
+                view_proj: facts.camera.view_proj,
+                viewport: facts.camera.viewport,
+                gui_scale: facts.camera.gui_scale,
+                fov_y: facts.camera.fov_y,
+                aspect: facts.camera.aspect,
+                view_bob: facts.camera.view_bob,
             },
         }
     }
@@ -102,6 +142,22 @@ impl Frame {
             right_clicks: raw.right_clicks,
             ping_ms: u32::try_from(raw.ping_ms).ok(),
             sprinting: raw.sprinting != 0,
+            camera: self.camera(),
+        }
+    }
+
+    /// The final camera of the frame.
+    pub fn camera(&self) -> FrameCamera {
+        let raw = &self.raw;
+        FrameCamera {
+            eye: raw.eye,
+            render_origin: raw.render_origin,
+            view_proj: raw.view_proj,
+            viewport: raw.viewport,
+            gui_scale: raw.gui_scale,
+            fov_y: raw.fov_y,
+            aspect: raw.aspect,
+            view_bob: raw.view_bob,
         }
     }
 

@@ -7,7 +7,7 @@
 use core::ffi::c_void;
 
 use umicraft_modapi_sys::{
-    UmiCameraCx, UmiCameraFn, UmiEntity, UmiHudCx, UmiModHandle, UmiServiceMode, UmiStatus,
+    UmiCameraCx, UmiCameraFn, UmiEntity, UmiModHandle, UmiServiceMode, UmiStatus,
 };
 
 pub(super) extern "C" fn host_register_camera(
@@ -28,32 +28,6 @@ pub(super) extern "C" fn host_world_entities_snapshot(
     _out: *mut UmiEntity,
     _capacity: usize,
     _count: *mut usize,
-) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
-}
-
-pub(super) extern "C" fn host_hud_outline(
-    _hud: *mut UmiHudCx,
-    _x: f32,
-    _y: f32,
-    _width: f32,
-    _height: f32,
-    _color: u32,
-    _alpha: f32,
-) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
-}
-
-#[allow(clippy::too_many_arguments)] // the ABI signature of `UmiHost::hud_segment`
-pub(super) extern "C" fn host_hud_segment(
-    _hud: *mut UmiHudCx,
-    _x1: f32,
-    _y1: f32,
-    _x2: f32,
-    _y2: f32,
-    _color: u32,
-    _alpha: f32,
-    _thickness: f32,
 ) -> UmiStatus {
     UmiStatus::UNSUPPORTED
 }

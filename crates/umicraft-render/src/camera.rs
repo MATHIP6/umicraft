@@ -172,6 +172,13 @@ impl Camera {
         self.fov_y * self.fov_modifier
     }
 
+    /// The vertical field of view the projection uses, in degrees: the base one
+    /// times the factor of sprinting or flying (what mods see, API 1.1).
+    #[must_use]
+    pub fn effective_fov_degrees(&self) -> f32 {
+        self.effective_fov().to_degrees()
+    }
+
     /// The vertical field of view, in degrees.
     #[must_use]
     pub fn fov_degrees(&self) -> f32 {

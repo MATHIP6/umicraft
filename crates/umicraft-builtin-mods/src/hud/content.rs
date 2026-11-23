@@ -74,6 +74,21 @@ pub struct HudTick {
     pub alpha: f32,
 }
 
+/// A straight line of a widget, at any angle (the `hud_segment` of mods).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct HudSegment {
+    /// Start, in GUI units from the top-left of the widget.
+    pub from: [f32; 2],
+    /// End, in GUI units from the top-left of the widget.
+    pub to: [f32; 2],
+    /// Width, in GUI units.
+    pub thickness: f32,
+    /// Color as `0xRRGGBB`.
+    pub color: u32,
+    /// Opacity, `0.0` to `1.0`.
+    pub alpha: f32,
+}
+
 /// The lines and boxes of one widget.
 ///
 /// `clear` keeps the strings allocated, so after the first frames a mod writes
@@ -87,6 +102,7 @@ pub struct HudContent {
     labels: Vec<HudLabel>,
     labels_used: usize,
     ticks: Vec<HudTick>,
+    segments: Vec<HudSegment>,
     /// The look of the widget, set by the registry from the shared options.
     pub style: HudStyle,
     /// Whether the player asked to swap the side of the pictures: they stand
@@ -105,6 +121,7 @@ impl HudContent {
         self.cells_used = 0;
         self.labels_used = 0;
         self.ticks.clear();
+        self.segments.clear();
         self.reserve = [0.0; 2];
     }
 
@@ -176,14 +193,26 @@ impl HudContent {
         &self.ticks
     }
 
-    /// Whether the widget shows nothing: no line, box, label or mark, and no
-    /// reserved size.
+    /// Adds a straight line.
+    pub fn segment(&mut self, segment: HudSegment) {
+        self.segments.push(segment);
+    }
+
+    /// The lines added since the last [`clear`](Self::clear).
+    #[must_use]
+    pub fn segments(&self) -> &[HudSegment] {
+        &self.segments
+    }
+
+    /// Whether the widget shows nothing: no line, box, label, mark or segment,
+    /// and no reserved size.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.used == 0
             && self.cells_used == 0
             && self.labels_used == 0
             && self.ticks.is_empty()
+            && self.segments.is_empty()
             && self.reserve == [0.0; 2]
     }
 
@@ -253,6 +282,11 @@ mod tests {
         let mut c = HudContent::default();
         c.label([10.0, 2.0], 0xff_ffff, 0.5, 1.5).push('S');
         c.tick([1.0, 2.0, 1.0, 3.0], 0xff_ffff, 1.0);
+        c.segment(HudSegment {
+            to: [4.0, 4.0],
+            thickness: 1.0,
+            ..HudSegment::default()
+        });
         c.reserve = [100.0, 20.0];
         assert_eq!(
             (c.labels()[0].text.as_str(), c.labels()[0].scale),
@@ -260,8 +294,8 @@ mod tests {
         );
         assert_eq!(c.ticks().len(), 1);
         c.clear();
-        assert!(c.labels().is_empty() && c.ticks().is_empty());
-        assert_eq!(c.reserve, [0.0; 2]);
+        assert!(c.labels().is_empty() && c.ticks().is_empty() && c.segments().is_empty());
+        assert!(c.is_empty());
         assert_eq!(
             c.label([0.0; 2], 0, 1.0, 1.0),
             "",

@@ -29,6 +29,11 @@ pub enum Anchor {
     BottomCenter = 7,
     /// Bottom right corner.
     BottomRight = 8,
+    /// The top-left corner of the screen, with the offset in absolute GUI
+    /// pixels, a scale of 1 and no panel or padding; the player cannot move it.
+    /// For annotations placed with
+    /// [`Frame::world_to_screen`](crate::Frame::world_to_screen). Added in API 1.1.
+    Screen = 9,
 }
 
 /// The default position of a widget; the player can move and scale it.
@@ -144,5 +149,26 @@ impl Hud<'_> {
     /// size the widget by themselves.
     pub fn reserve(&mut self, w: f32, h: f32) {
         self.emit(|host, raw| (host.hud_reserve)(raw, w, h));
+    }
+
+    /// Adds the one-pixel outline of a `w` x `h` rectangle at `(x, y)`.
+    pub fn outline(&mut self, x: f32, y: f32, w: f32, h: f32, color: u32, alpha: f32) {
+        self.emit(|host, raw| (host.hud_outline)(raw, x, y, w, h, color, alpha));
+    }
+
+    /// Adds a line from `(x1, y1)` to `(x2, y2)`, `thickness` pixels wide (the
+    /// host keeps it within 0.5..=8).
+    #[allow(clippy::too_many_arguments)] // mirrors `hud_segment` of the C ABI
+    pub fn segment(
+        &mut self,
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        color: u32,
+        alpha: f32,
+        thickness: f32,
+    ) {
+        self.emit(|host, raw| (host.hud_segment)(raw, x1, y1, x2, y2, color, alpha, thickness));
     }
 }

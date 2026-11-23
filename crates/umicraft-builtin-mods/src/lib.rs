@@ -33,7 +33,7 @@ pub use context::{ArmorPiece, CombatInfo, EffectInfo, KeyState, ModContext, MAX_
 pub use history::History;
 pub use hud::{
     Anchor, HudCell, HudContent, HudIcon, HudLabel, HudLine, HudPlacement, HudPreset, HudRect,
-    HudStyle, HudTick, Shadow, MAX_SCALE, MIN_SCALE,
+    HudSegment, HudStyle, HudTick, Shadow, MAX_SCALE, MIN_SCALE,
 };
 pub use id::{ModCategory, ModId};
 pub use meta::ModMeta;

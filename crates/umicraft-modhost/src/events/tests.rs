@@ -183,6 +183,15 @@ fn facts() -> FrameFacts {
         right_clicks: 1,
         ping_ms: Some(42),
         sprinting: true,
+        camera: FrameCamera {
+            eye: [1.5, 65.62, -3.25],
+            render_origin: [1.0, 65.0, -4.0],
+            viewport: [1920, 1080],
+            gui_scale: 3.0,
+            fov_y: 77.0,
+            aspect: 1920.0 / 1080.0,
+            ..FrameCamera::default()
+        },
     }
 }
 

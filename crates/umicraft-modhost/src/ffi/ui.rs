@@ -15,7 +15,7 @@ use umicraft_modapi_sys::{
 
 use super::{guarded, text_of, UserPtr};
 use crate::error::DeclareError;
-use crate::ui::hud::placement_of;
+use crate::ui::hud::{placement_of, DeclaredPlacement};
 use crate::ui::settings::{SettingSpec, SettingSpecKind};
 use crate::ui::{MAX_CHAT_BYTES, MAX_CHOICES, MAX_LABEL_BYTES, MAX_OPTION_BYTES, MAX_USAGE_BYTES};
 
@@ -129,8 +129,15 @@ pub(super) extern "C" fn host_register_hud_widget(
         let result = (|| {
             let key = text_of(key, "widget key", MAX_KEY_BYTES)?;
             let label = text_of(label, "widget label", MAX_LABEL_BYTES)?;
-            let placement = placement_of(placement)?;
-            cx.register_widget(key, label, placement, draw, UserPtr::new(user))
+            let user = UserPtr::new(user);
+            match placement_of(placement)? {
+                DeclaredPlacement::Anchored(placement) => {
+                    cx.register_widget(key, label, placement, draw, user)
+                }
+                DeclaredPlacement::Screen(at) => {
+                    cx.register_screen_widget(key, label, at, draw, user)
+                }
+            }
         })();
         cx.report(result)
     })

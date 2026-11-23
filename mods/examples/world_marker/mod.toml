@@ -1,0 +1,9 @@
+[mod]
+id = "world_marker"
+name = "World marker"
+version = "0.1.0"
+authors = ["Umicraft contributors"]
+api_version = "1.1"
+license = "MIT"
+description = "Teaching example: press the bound key to drop a marker where you stand; a box and its distance stay on that point as you move and look around."
+library = "world_marker"

@@ -29,6 +29,10 @@ pub(crate) fn extend(
     icons: &ModIcons<'_>,
 ) {
     host.visit_widgets(|drawn| {
+        // A widget on the screen (API 1.1) is placed by its mod, not the player.
+        if drawn.screen {
+            return;
+        }
         let empty;
         let content = if drawn.content.is_empty() {
             empty = placeholder(drawn.label);
@@ -45,13 +49,17 @@ pub(crate) fn extend(
     });
     for mod_view in host.mods() {
         let enabled = mod_view.enabled && !mod_view.failed;
-        view.entries
-            .extend(mod_view.widgets().map(|widget| HudEntryView {
-                id: widget_id(mod_view.id, widget.key),
-                card: card_id(mod_view.id),
-                name: widget.label.to_owned(),
-                enabled,
-                locked: false,
-            }));
+        view.entries.extend(
+            mod_view
+                .widgets()
+                .filter(|widget| !widget.screen)
+                .map(|widget| HudEntryView {
+                    id: widget_id(mod_view.id, widget.key),
+                    card: card_id(mod_view.id),
+                    name: widget.label.to_owned(),
+                    enabled,
+                    locked: false,
+                }),
+        );
     }
 }

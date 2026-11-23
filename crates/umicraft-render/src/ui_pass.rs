@@ -377,6 +377,19 @@ impl UiPass {
                     );
                     self.push_rounded_rect(*rect, *radius, *color, atlas);
                 }
+                DrawCommand::Segment {
+                    from,
+                    to,
+                    thickness,
+                    color,
+                } => {
+                    self.flush_batch_if_needed(
+                        UiBatchKind::Font,
+                        &mut current_kind,
+                        &mut batch_start,
+                    );
+                    self.push_segment([*from, *to], *thickness, *color, atlas);
+                }
                 DrawCommand::VerticalGradient { rect, top, bottom } => {
                     self.flush_batch_if_needed(
                         UiBatchKind::Font,
@@ -473,6 +486,37 @@ impl UiPass {
             uv,
             color,
         );
+    }
+
+    /// A band `thickness` wide around the line `ends`, as a quad clipped to the
+    /// current scope. A degenerate or non-finite line draws nothing.
+    fn push_segment(
+        &mut self,
+        [from, to]: [[f32; 2]; 2],
+        thickness: f32,
+        color: [f32; 4],
+        atlas: &FontAtlas,
+    ) {
+        let Some(clip) = self.clip else {
+            return;
+        };
+        let (dx, dy) = (to[0] - from[0], to[1] - from[1]);
+        let length = dx.hypot(dy);
+        if !(length.is_finite() && thickness.is_finite()) || length < f32::EPSILON {
+            return;
+        }
+        let half = thickness / 2.0 / length;
+        let (nx, ny) = (-dy * half, dx * half);
+        let corner =
+            |[x, y]: [f32; 2], side: f32| FringeVertex::opaque_at([x + nx * side, y + ny * side]);
+        let corners = [
+            corner(from, 1.0),
+            corner(to, 1.0),
+            corner(to, -1.0),
+            corner(from, -1.0),
+        ];
+        let uv = white_texel_uv(atlas);
+        self.emit_polygon(&corners, color, uv, clip);
     }
 
     /// Two triangles whose corner colours interpolate `colors` (top, bottom)
@@ -1041,6 +1085,33 @@ mod tests {
         let vertices = pass.vertices();
         assert_eq!(vertices[0].position, vertices[6].position);
         assert_eq!(vertices[6].color, uv);
+    }
+
+    #[test]
+    fn a_segment_is_a_band_of_its_thickness_around_the_line() {
+        let mut list = DrawList::new();
+        list.segment([10.0, 50.0], [90.0, 50.0], 4.0, COLOR);
+        let mut pass = UiPass::new(100, 100);
+        pass.rebuild(&list, &atlas());
+
+        assert_eq!(pass.vertex_count(), 6, "one quad");
+        for vertex in pass.vertices() {
+            let [x, y] = vertex.position;
+            assert!((-0.8 - 1e-5..=0.8 + 1e-5).contains(&x), "{x}");
+            assert!((y.abs() - 0.04).abs() < 1e-5, "{y}");
+            assert_eq!(vertex.color, COLOR);
+        }
+    }
+
+    #[test]
+    fn a_degenerate_or_non_finite_segment_draws_nothing() {
+        let mut list = DrawList::new();
+        list.segment([5.0, 5.0], [5.0, 5.0], 2.0, COLOR);
+        list.segment([0.0, 0.0], [f32::NAN, 1.0], 2.0, COLOR);
+        list.segment([0.0, 0.0], [10.0, 1.0], f32::INFINITY, COLOR);
+        let mut pass = UiPass::new(100, 100);
+        pass.rebuild(&list, &atlas());
+        assert_eq!(pass.vertex_count(), 0);
     }
 
     #[test]

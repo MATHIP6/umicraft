@@ -171,8 +171,8 @@ pub fn host_table() -> UmiHost {
         register_camera: pending::host_register_camera,
         camera_next: pending::host_camera_next,
         world_entities_snapshot: pending::host_world_entities_snapshot,
-        hud_outline: pending::host_hud_outline,
-        hud_segment: pending::host_hud_segment,
+        hud_outline: hud::host_hud_outline,
+        hud_segment: hud::host_hud_segment,
     }
 }
 

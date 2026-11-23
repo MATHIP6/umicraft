@@ -182,15 +182,22 @@ fn placements_are_validated_like_the_abi_says() {
         offset_y: 0.0,
         scale,
     };
+    let anchored = |raw| match placement_of(raw) {
+        Ok(DeclaredPlacement::Anchored(placement)) => placement,
+        other => panic!("{other:?}"),
+    };
     assert_eq!(
-        placement_of(raw(8, 1.0, 10.0)).unwrap().scale,
+        anchored(raw(8, 1.0, 10.0)).scale,
         umicraft_builtin_mods::MAX_SCALE
     );
+    assert_eq!(anchored(raw(8, 1.0, 1.0)).anchor, Anchor::BottomRight);
+    // API 1.1: 9 is the screen itself, whatever the scale; 10 means nothing.
     assert_eq!(
-        placement_of(raw(8, 1.0, 1.0)).unwrap().anchor,
-        Anchor::BottomRight
+        placement_of(raw(9, 12.5, 7.0)).ok(),
+        Some(DeclaredPlacement::Screen([12.5, 0.0]))
     );
-    assert!(placement_of(raw(9, 1.0, 1.0)).is_err());
+    assert!(placement_of(raw(9, f32::NAN, 1.0)).is_err());
+    assert!(placement_of(raw(10, 1.0, 1.0)).is_err());
     assert!(placement_of(raw(0, f32::NAN, 1.0)).is_err());
     assert!(placement_of(raw(0, 0.0, f32::INFINITY)).is_err());
 }
@@ -209,4 +216,20 @@ fn widget_declarations_are_validated() {
     assert!(register("Bad Key", "x", Some(draw_lines)).is_err());
     assert!(register("empty_label", "", Some(draw_lines)).is_err());
     assert!(register("no_draw", "x", None).is_err());
+}
+
+#[test]
+fn a_widget_on_the_screen_stays_where_its_mod_put_it() {
+    let cx = crate::ModContext::new("hud".to_owned().try_into().unwrap());
+    cx.register_screen_widget("marks", "Marks", [3.0, 4.0], Some(draw_lines), user())
+        .unwrap();
+    cx.finish_init(true);
+    cx.set_placement("marks", HudPlacement::at(Anchor::BottomRight, 50.0, 60.0))
+        .unwrap();
+    cx.draw_widgets();
+    let mut seen = None;
+    cx.visit_widgets(|w| seen = Some((w.screen, w.placement)));
+    let (screen, placement) = seen.expect("the widget is visited");
+    assert!(screen);
+    assert_eq!(placement, HudPlacement::at(Anchor::TopLeft, 3.0, 4.0));
 }

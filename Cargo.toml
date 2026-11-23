@@ -25,6 +25,7 @@ members = [
     "mods/examples/panicking",
     "mods/examples/physics_tweak",
     "mods/examples/shader_pass",
+    "mods/examples/world_marker",
     "mods/template",
 ]
 

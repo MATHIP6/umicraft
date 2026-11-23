@@ -63,8 +63,8 @@ pub use frame_pacing::{FramePacingStats, FramePacingTracker, SurfaceInfo};
 pub use gpu_timer::{DrawCallStats, GpuTimings, VramStats, GROUP_NAMES};
 pub use hud::{
     chat_input_hit, chat_run_at, draw_hud_gui, measure_mod_widget, measure_mod_widget_view,
-    HudSheets, InputHit, ModCell, ModIcon, ModLabel, ModLine, ModTick, ModWidgetView, ShadowStyle,
-    WidgetStyle,
+    HudSheets, InputHit, ModCell, ModIcon, ModLabel, ModLine, ModSegment, ModTick, ModWidgetView,
+    ShadowStyle, WidgetStyle,
 };
 pub use hud::{
     plain_text, ActionBarView, BossView, ChatInputView, ChatLineView, ChatRunView, ChatStyle,

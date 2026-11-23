@@ -247,6 +247,62 @@ impl Frame {
     pub fn sprinting(&self) -> bool {
         self.0.sprinting != 0
     }
+
+    /// The camera eye this frame is drawn from, in blocks (it differs from the
+    /// player's eye in the third person or under a camera mod).
+    pub fn eye(&self) -> [f64; 3] {
+        self.0.eye
+    }
+
+    /// The integer corner GPU positions are relative to; see
+    /// [`view_proj`](Self::view_proj).
+    pub fn render_origin(&self) -> [f64; 3] {
+        self.0.render_origin
+    }
+
+    /// The column-major view-projection of the frame, for points relative to
+    /// [`render_origin`](Self::render_origin): `clip = view_proj * (p - origin, 1)`,
+    /// depth 0..1. It holds the effective field of view and the view bobbing.
+    pub fn view_proj(&self) -> [[f32; 4]; 4] {
+        self.0.view_proj
+    }
+
+    /// The framebuffer size, in physical pixels.
+    pub fn viewport(&self) -> [u32; 2] {
+        self.0.viewport
+    }
+
+    /// Physical pixels per GUI pixel (the unit HUD widgets draw in).
+    pub fn gui_scale(&self) -> f32 {
+        self.0.gui_scale
+    }
+
+    /// The effective vertical field of view in degrees: the option times the
+    /// zoom, sprint and flight modifiers.
+    pub fn fov_y(&self) -> f32 {
+        self.0.fov_y
+    }
+
+    /// The viewport width over its height.
+    pub fn aspect(&self) -> f32 {
+        self.0.aspect
+    }
+
+    /// The column-major camera-space view bobbing, identity when still.
+    pub fn view_bob(&self) -> [[f32; 4]; 4] {
+        self.0.view_bob
+    }
+
+    /// Where `point` (in blocks) is on the screen, in GUI pixels from the
+    /// top-left corner, for a widget anchored with
+    /// [`Anchor::Screen`](crate::Anchor::Screen); `None` when the point is behind
+    /// the camera or outside the viewport.
+    ///
+    /// It uses the exact camera of this frame: the render origin in `f64`, the
+    /// effective field of view and the view bobbing.
+    pub fn world_to_screen(&self, point: [f64; 3]) -> Option<[f32; 2]> {
+        crate::projection::world_to_screen(&self.0, point)
+    }
 }
 
 impl PostTick {

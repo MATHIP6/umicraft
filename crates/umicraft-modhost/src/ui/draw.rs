@@ -7,7 +7,7 @@
 //! sizes non-negative, opacity and text scale are clamped, text is cut to a
 //! bounded length and a widget has a bounded number of items (ADR-0086, F3.4).
 
-use umicraft_builtin_mods::HudContent;
+use umicraft_builtin_mods::{HudContent, HudSegment};
 use umicraft_modapi_sys::UmiStatus;
 
 use super::{MAX_HUD_ITEMS, MAX_HUD_TEXT_BYTES};
@@ -16,6 +16,10 @@ use super::{MAX_HUD_ITEMS, MAX_HUD_TEXT_BYTES};
 const MAX_RESERVE: f32 = 4096.0;
 /// Range of the scale of a free label, so a mod cannot draw invisible or screen-size text.
 const LABEL_SCALE: (f32, f32) = (0.25, 4.0);
+/// Range of the thickness of a segment, in GUI pixels (ADR-0094).
+const SEGMENT_THICKNESS: (f32, f32) = (0.5, 8.0);
+/// Width of the edges of an outline, in GUI pixels.
+const OUTLINE_WIDTH: f32 = 1.0;
 
 fn all_finite(values: &[f32]) -> bool {
     values.iter().all(|v| v.is_finite())
@@ -40,7 +44,12 @@ fn clip(text: &str) -> &str {
 
 /// `OK` while `used` items leave room for one more, `DENIED` otherwise.
 fn room(used: usize) -> Result<(), UmiStatus> {
-    if used < MAX_HUD_ITEMS {
+    room_for(used, 1)
+}
+
+/// `OK` while `used` items leave room for `more`, `DENIED` otherwise.
+fn room_for(used: usize, more: usize) -> Result<(), UmiStatus> {
+    if used + more <= MAX_HUD_ITEMS {
         Ok(())
     } else {
         Err(UmiStatus::DENIED)
@@ -103,6 +112,55 @@ pub(crate) fn tick(content: &mut HudContent, rect: [f32; 4], color: u32, alpha: 
     }))
 }
 
+/// `hud_outline`: adds the one-pixel outline of `rect` (`[x, y, width, height]`),
+/// as four rectangles that count against the rectangle cap.
+pub(crate) fn outline(
+    content: &mut HudContent,
+    rect: [f32; 4],
+    color: u32,
+    alpha: f32,
+) -> UmiStatus {
+    let [x, y, width, height] = rect;
+    if !all_finite(&[x, y, width, height, alpha]) || width < 0.0 || height < 0.0 {
+        return UmiStatus::INVALID_ARGUMENT;
+    }
+    status(room_for(content.ticks().len(), 4).map(|()| {
+        let (color, alpha) = (rgb(color), alpha.clamp(0.0, 1.0));
+        let edge = OUTLINE_WIDTH.min(width).min(height);
+        let inner = (height - 2.0 * edge).max(0.0);
+        for side in [
+            [x, y, width, edge],
+            [x, y + height - edge, width, edge],
+            [x, y + edge, edge, inner],
+            [x + width - edge, y + edge, edge, inner],
+        ] {
+            content.tick(side, color, alpha);
+        }
+    }))
+}
+
+/// `hud_segment`: adds a line from `from` to `to`, its thickness clamped.
+pub(crate) fn segment(
+    content: &mut HudContent,
+    [from, to]: [[f32; 2]; 2],
+    color: u32,
+    alpha: f32,
+    thickness: f32,
+) -> UmiStatus {
+    if !all_finite(&[from[0], from[1], to[0], to[1], alpha, thickness]) {
+        return UmiStatus::INVALID_ARGUMENT;
+    }
+    status(room(content.segments().len()).map(|()| {
+        content.segment(HudSegment {
+            from,
+            to,
+            thickness: thickness.clamp(SEGMENT_THICKNESS.0, SEGMENT_THICKNESS.1),
+            color: rgb(color),
+            alpha: alpha.clamp(0.0, 1.0),
+        });
+    }))
+}
+
 /// `hud_reserve`: keeps the widget at least `width` x `height` pixels big.
 pub(crate) fn reserve(content: &mut HudContent, width: f32, height: f32) -> UmiStatus {
     if !all_finite(&[width, height]) || width < 0.0 || height < 0.0 {
@@ -148,6 +206,69 @@ mod tests {
         assert_eq!(reserve(&mut c, -1.0, 1.0), bad);
         assert_eq!(reserve(&mut c, f32::NAN, 1.0), bad);
         assert!(c.is_empty());
+    }
+
+    #[test]
+    fn an_outline_is_four_edges_inside_its_rectangle() {
+        let mut c = HudContent::default();
+        assert_eq!(
+            outline(&mut c, [10.0, 20.0, 30.0, 40.0], 0xff_00ff00, 2.0),
+            UmiStatus::OK
+        );
+        let rects: Vec<_> = c.ticks().iter().map(|t| t.rect).collect();
+        assert_eq!(
+            rects,
+            [
+                [10.0, 20.0, 30.0, 1.0],
+                [10.0, 59.0, 30.0, 1.0],
+                [10.0, 21.0, 1.0, 38.0],
+                [39.0, 21.0, 1.0, 38.0],
+            ]
+        );
+        assert!(c
+            .ticks()
+            .iter()
+            .all(|t| t.color == 0x00ff00 && t.alpha == 1.0));
+        let bad = UmiStatus::INVALID_ARGUMENT;
+        assert_eq!(outline(&mut c, [0.0, 0.0, -1.0, 1.0], 0, 1.0), bad);
+        assert_eq!(outline(&mut c, [f32::NAN, 0.0, 1.0, 1.0], 0, 1.0), bad);
+    }
+
+    #[test]
+    fn an_outline_needs_room_for_its_four_edges() {
+        let mut c = HudContent::default();
+        for _ in 0..MAX_HUD_ITEMS - 3 {
+            tick(&mut c, [0.0; 4], 0, 1.0);
+        }
+        assert_eq!(
+            outline(&mut c, [0.0, 0.0, 4.0, 4.0], 0, 1.0),
+            UmiStatus::DENIED
+        );
+        assert_eq!(c.ticks().len(), MAX_HUD_ITEMS - 3, "nothing half drawn");
+    }
+
+    #[test]
+    fn a_segment_is_recorded_with_its_thickness_clamped() {
+        let mut c = HudContent::default();
+        assert_eq!(
+            segment(&mut c, [[0.0, 1.0], [5.0, 6.0]], 0xff_123456, 0.5, 100.0),
+            UmiStatus::OK
+        );
+        assert_eq!(
+            segment(&mut c, [[0.0, 1.0], [5.0, 6.0]], 0, 0.5, 0.0),
+            UmiStatus::OK
+        );
+        let [wide, thin] = c.segments() else {
+            panic!("two segments");
+        };
+        assert_eq!(
+            (wide.from, wide.to, wide.color),
+            ([0.0, 1.0], [5.0, 6.0], 0x123456)
+        );
+        assert_eq!(
+            (wide.thickness, thin.thickness),
+            (SEGMENT_THICKNESS.1, SEGMENT_THICKNESS.0)
+        );
     }
 
     #[test]

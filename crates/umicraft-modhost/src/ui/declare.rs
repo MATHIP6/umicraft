@@ -47,6 +47,26 @@ impl ModContext {
         })
     }
 
+    /// Declares a HUD widget anchored to the screen itself (API 1.1): its content
+    /// starts at `at`, in GUI pixels from the top-left corner, at scale 1, and the
+    /// player cannot move it. For annotations over the world.
+    ///
+    /// # Errors
+    ///
+    /// As [`register_widget`](Self::register_widget).
+    pub fn register_screen_widget(
+        &self,
+        key: &str,
+        label: &str,
+        at: [f32; 2],
+        draw: Option<UmiHudDrawFn>,
+        user: UserPtr,
+    ) -> Result<(), DeclareError> {
+        self.ui.register(|declared| {
+            declared.add_widget(WidgetSlot::on_screen(key, label, at, draw, user)?)
+        })
+    }
+
     /// Declares a key binding; `default_binding` may be empty (unbound).
     ///
     /// # Errors
