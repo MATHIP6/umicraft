@@ -13,7 +13,7 @@ use umicraft_game::item_use::drop_item;
 use umicraft_game::piston::motion;
 use umicraft_game::InputIntent;
 
-use super::abilities::{apply_movement_stats, report_flight};
+use super::abilities::{apply_movement_stats, settle_after_physics};
 use super::actions::attack::run_attack;
 use super::actions::hotbar::{
     run_hotbar_keys, run_pick_blocks, sync_held_item, sync_held_item_before_click,
@@ -178,6 +178,7 @@ pub(super) fn tick(
         .state
         .as_ref()
         .is_some_and(|state| state.player().flying);
+    game.physics_mode.set(game.gamemode);
 
     // The simulation runs even before the player's column arrives: the
     // vanilla client does (`ChunkProviderClient.chunkExists` is always
@@ -211,7 +212,7 @@ pub(super) fn tick(
             run.after(state.player());
         }
     }
-    report_flight(game, was_flying, queue);
+    settle_after_physics(game, was_flying, queue);
     follow_body(game);
     tick_overlays(game);
     if let Some(state) = game.state.as_ref() {

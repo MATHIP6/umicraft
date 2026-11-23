@@ -90,7 +90,7 @@ pub use hud::{Anchor, Hud, Placement};
 pub use init::{InitCx, Mod};
 pub use logger::Logger;
 pub use packets::Packets;
-pub use physics::{Input, Physics, PlayerState};
+pub use physics::{GameMode, Input, Physics, PlayerState};
 pub use post::PostPass;
 pub use setting::Setting;
 pub use world::{Block, Entity, World};

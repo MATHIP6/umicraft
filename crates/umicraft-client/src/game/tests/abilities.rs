@@ -2,7 +2,15 @@
 
 //! The game mode, the abilities and the movement stats of the local player.
 
+use umicraft_game::physics::{PhysicsOverride, Player};
+use umicraft_game::ServerCorrection;
+use umicraft_modapi_sys::{
+    UmiPlayerPhysics, UMI_GAME_MODE_CREATIVE, UMI_GAME_MODE_SPECTATOR, UMI_PHYSICS_FLYING,
+};
+
 use super::*;
+use crate::game::mod_world::{run_layers, SharedGameMode};
+use crate::game::net::player::apply_correction;
 
 #[test]
 fn the_elder_guardian_curse_haunts_the_player() {
@@ -192,4 +200,176 @@ fn the_depth_strider_of_the_boots_reaches_the_player() {
         game.state.as_ref().expect("placed").player().depth_strider,
         3
     );
+}
+
+/// A stand-in for the mods' physics chain: one layer that edits the ABI state
+/// before the built-in step, through the code the real override runs.
+struct TestLayer {
+    mode: SharedGameMode,
+    edit: fn(&mut UmiPlayerPhysics),
+}
+
+impl PhysicsOverride for TestLayer {
+    fn step(
+        &mut self,
+        player: &mut Player,
+        intent: &InputIntent,
+        vanilla: &mut dyn FnMut(&mut Player),
+    ) {
+        let edit = self.edit;
+        run_layers(
+            |state, _input, vanilla| {
+                edit(state);
+                vanilla(state);
+            },
+            &self.mode,
+            player,
+            intent,
+            vanilla,
+        );
+    }
+}
+
+/// A game on a floor whose server granted creative abilities and whose
+/// physics runs `edit` as a layer.
+fn game_with_layer(edit: fn(&mut UmiPlayerPhysics)) -> Game {
+    use umicraft_protocol::packets::play::clientbound::PlayerAbilities;
+
+    let mut game = game_on_floor_with(BlockState::AIR);
+    game.server.apply_abilities(&PlayerAbilities {
+        flags: 0b1100,
+        fly_speed: 0.05,
+        walk_speed: 0.1,
+    });
+    apply_mode_rules(&mut game);
+    let mode = game.physics_mode.clone();
+    let layer = TestLayer { mode, edit };
+    game.state
+        .as_mut()
+        .expect("placed")
+        .set_physics(Some(Box::new(layer)));
+    game
+}
+
+fn start_flying(state: &mut UmiPlayerPhysics) {
+    state.flags |= UMI_PHYSICS_FLYING;
+}
+
+fn flight_reports(queue: &CommandQueue) -> Vec<bool> {
+    queue
+        .ordered
+        .iter()
+        .filter_map(|command| match command {
+            ClientCommand::PlayerAbilities { flying, .. } => Some(*flying),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_layer_that_starts_flying_is_reported_to_the_server_once() {
+    let mut game = game_with_layer(start_flying);
+    let mut queue = CommandQueue::default();
+    run_ticks(&mut game, &mut queue, 1);
+    assert!(game.state.as_ref().expect("placed").player().flying);
+    assert_eq!(flight_reports(&queue), [true]);
+    // The layer keeps asking for the flight it already has: no new packet.
+    run_ticks(&mut game, &mut queue, 3);
+    assert_eq!(flight_reports(&queue), [true]);
+}
+
+#[test]
+fn a_layer_flight_is_applied_even_without_the_ability_and_still_reported() {
+    let mut game = game_with_layer(start_flying);
+    // The server then revokes the flight ability: the client still predicts
+    // the layer's request and leaves the verdict to the server.
+    game.server.apply_abilities(
+        &umicraft_protocol::packets::play::clientbound::PlayerAbilities {
+            flags: 0,
+            fly_speed: 0.05,
+            walk_speed: 0.1,
+        },
+    );
+    game.gamemode = GameMode::Survival;
+    let mut queue = CommandQueue::default();
+    run_ticks(&mut game, &mut queue, 1);
+    assert!(game.state.as_ref().expect("placed").player().flying);
+    assert_eq!(flight_reports(&queue), [true]);
+}
+
+#[test]
+fn the_replay_of_a_correction_sends_no_second_flight_report() {
+    let mut game = game_with_layer(start_flying);
+    let mut queue = CommandQueue::default();
+    run_ticks(&mut game, &mut queue, 4);
+    assert_eq!(flight_reports(&queue), [true]);
+    let state = game.state.as_ref().expect("placed");
+    let base = state.position();
+    let correction = ServerCorrection::new(base.x, base.y, base.z, 0.0, 0.0, false);
+    apply_correction(&mut game, &correction, &mut queue);
+    assert_eq!(flight_reports(&queue), [true], "the replay reports nothing");
+    assert!(game.state.as_ref().expect("placed").player().flying);
+}
+
+#[test]
+fn a_layer_game_mode_is_a_local_prediction_without_a_packet() {
+    let mut game = game_with_layer(|state| state.game_mode = UMI_GAME_MODE_SPECTATOR);
+    let mut queue = CommandQueue::default();
+    run_ticks(&mut game, &mut queue, 1);
+    assert_eq!(game.gamemode, GameMode::Spectator);
+    assert_eq!(game.status_data.gamemode, 3);
+    let player = game.state.as_ref().expect("placed").player();
+    assert!(
+        player.no_clip && player.allow_flying,
+        "the mode rules apply"
+    );
+    assert!(
+        queue.ordered.is_empty(),
+        "no packet is sent: {:?}",
+        queue.ordered
+    );
+
+    // The server's next game-mode packet wins; the layer is asked again on
+    // the next tick and, being a function of its input, predicts again.
+    let change = PlayEvent::ChangeGameState(
+        umicraft_protocol::packets::play::clientbound::ChangeGameState {
+            reason: 3,
+            value: 0.0,
+        },
+    );
+    let (frames, _received) = mpsc::sync_channel(16);
+    handle_net(&mut game, change, &mut queue, &frames);
+    assert_eq!(game.gamemode, GameMode::Survival);
+}
+
+#[test]
+fn an_invalid_layer_game_mode_is_ignored() {
+    let mut game = game_with_layer(|state| state.game_mode = 9);
+    game.gamemode = GameMode::Adventure;
+    let mut queue = CommandQueue::default();
+    run_ticks(&mut game, &mut queue, 2);
+    assert_eq!(game.gamemode, GameMode::Adventure);
+}
+
+#[test]
+fn a_game_mode_prediction_keeps_the_flight_the_layer_made() {
+    let mut game = game_with_layer(|state| {
+        state.flags |= UMI_PHYSICS_FLYING;
+        state.game_mode = UMI_GAME_MODE_CREATIVE;
+    });
+    let mut queue = CommandQueue::default();
+    run_ticks(&mut game, &mut queue, 1);
+    assert_eq!(game.gamemode, GameMode::Creative);
+    assert!(game.state.as_ref().expect("placed").player().flying);
+    assert_eq!(flight_reports(&queue), [true]);
+}
+
+#[test]
+fn without_a_layer_the_flight_and_the_mode_do_not_change() {
+    let mut game = game_on_floor_with(BlockState::AIR);
+    let mut queue = CommandQueue::default();
+    run_ticks(&mut game, &mut queue, 3);
+    assert_eq!(game.gamemode, GameMode::Survival);
+    assert!(!game.state.as_ref().expect("placed").player().flying);
+    assert!(flight_reports(&queue).is_empty());
 }
