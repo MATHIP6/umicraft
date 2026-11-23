@@ -209,6 +209,9 @@ pub struct Frame {
     pub overlays: crate::scene::overlay_state::OverlayInputs,
     /// The world facts the F3 screen prints (P9-h).
     pub debug: Arc<crate::debug::world::DebugWorld>,
+    /// What the external mods may read about each entity, for the render-thread
+    /// snapshot (ADR-0094); empty when no external mod is loaded.
+    pub(crate) mod_entities: Arc<[crate::mods::entity_facts::ModEntity]>,
 }
 
 /// The statistics the debug overlay shows.

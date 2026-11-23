@@ -12,7 +12,6 @@ mod camera;
 mod event;
 mod hud;
 mod packet;
-mod pending;
 mod physics;
 mod post;
 mod service;
@@ -29,7 +28,7 @@ pub(crate) use hud::with_hud_cx;
 pub(crate) use physics::testing as physics_testing;
 pub(crate) use physics::PHYSICS_ACTIVE;
 pub(crate) use service::{with_service_cx, StatePtr};
-pub(crate) use world::lend_world;
+pub(crate) use world::{lend_snapshot, lend_world};
 
 use core::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -176,7 +175,7 @@ pub fn host_table() -> UmiHost {
         post_set_param: post::host_post_set_param,
         register_camera: camera::host_register_camera,
         camera_next: camera::host_camera_next,
-        world_entities_snapshot: pending::host_world_entities_snapshot,
+        world_entities_snapshot: world::host_world_entities_snapshot,
         hud_outline: hud::host_hud_outline,
         hud_segment: hud::host_hud_segment,
     }

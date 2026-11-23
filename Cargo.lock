@@ -4389,6 +4389,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-example-entity-list"
+version = "0.1.0"
+dependencies = [
+ "umicraft-modapi",
+]
+
+[[package]]
 name = "umicraft-example-hello"
 version = "0.1.0"
 dependencies = [

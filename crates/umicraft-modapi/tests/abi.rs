@@ -700,13 +700,64 @@ extern "C" fn fake_camera_next(_cx: *mut UmiCameraCx) -> UmiStatus {
     UmiStatus::UNSUPPORTED
 }
 
+/// What the fake snapshot answers instead of its rows, `OK` for the rows.
+static SNAPSHOT_STATUS: Mutex<UmiStatus> = Mutex::new(UmiStatus::OK);
+
+/// The three entities of the fake snapshot, nearest first: id, kind, health.
+const SNAPSHOT_ROWS: [(i32, &str, f32); 3] =
+    [(7, "zombie", 12.5), (8, "player", 20.0), (9, "item", 0.0)];
+
+/// Answers the three rows of [`SNAPSHOT_ROWS`] as the real host does: at most
+/// `capacity` of them, the total in `*count`, and nothing for a refusal.
 extern "C" fn fake_world_entities_snapshot(
     _me: UmiModHandle,
-    _out: *mut UmiEntity,
-    _capacity: usize,
-    _count: *mut usize,
+    out: *mut UmiEntity,
+    capacity: usize,
+    count: *mut usize,
 ) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    let status = *SNAPSHOT_STATUS.lock().unwrap();
+    if status != UmiStatus::OK {
+        return status;
+    }
+    for (index, (id, kind, health)) in SNAPSHOT_ROWS.into_iter().enumerate().take(capacity) {
+        let living = kind != "item";
+        let entity = UmiEntity {
+            size: size_of::<UmiEntity>() as u32,
+            id,
+            kind: text(kind),
+            position: [f64::from(id), 64.0, 0.0],
+            yaw: 0.0,
+            pitch: 0.0,
+            name: if kind == "player" {
+                text("Ann")
+            } else {
+                UmiStr::EMPTY
+            },
+            health,
+            max_health: if living { 20.0 } else { 0.0 },
+            armor: 5.0,
+            team: if kind == "player" {
+                text("red")
+            } else {
+                UmiStr::EMPTY
+            },
+            width: 0.6,
+            height: 1.8,
+            velocity: [0.0, -0.0784, 0.25],
+            flags: if living {
+                UMI_ENTITY_LIVING | UMI_ENTITY_ON_FIRE | UMI_ENTITY_SPRINTING
+            } else {
+                0
+            },
+            is_player: u8::from(kind == "player"),
+            render_position: [f64::from(id) + 0.25, 64.0, 0.0],
+        };
+        // SAFETY: the module under test passes room for `capacity` entities.
+        unsafe { out.add(index).write(entity) };
+    }
+    // SAFETY: the module under test passes a writable `usize`.
+    unsafe { *count = SNAPSHOT_ROWS.len() };
+    UmiStatus::OK
 }
 
 extern "C" fn fake_hud_outline(
@@ -760,6 +811,7 @@ fn fresh() -> MutexGuard<'static, ()> {
     }
     POST_REFUSALS.lock().unwrap().clear();
     *PACKET_STATUS.lock().unwrap() = UmiStatus::OK;
+    *SNAPSHOT_STATUS.lock().unwrap() = UmiStatus::OK;
     *VALUES.lock().unwrap() = Some(HashMap::new());
     *UI.lock().unwrap() = None;
     SET_RESULTS.lock().unwrap().clear();
@@ -1779,4 +1831,101 @@ fn post_pass_sets_params_by_key_and_reports_a_bad_index() {
         post.set_param(4, [0.0; 4]),
         Err(ModError::HostRefused(UmiStatus::INVALID_ARGUMENT))
     );
+}
+
+#[test]
+fn snapshot_visits_the_rows_with_the_metadata_getters() {
+    let _guard = fresh();
+    init_ok();
+    let mut lines = Vec::new();
+    ui().world
+        .snapshot(|e| {
+            lines.push(format!(
+                "{} {} [{}] [{}] hp {}/{} armor {} {}x{} v{:?} fire {} sprint {} sneak {} item {} invisible {} living {} player {} at {:?} drawn {:?} flags {}",
+                e.id(),
+                e.kind(),
+                e.name(),
+                e.team(),
+                e.health(),
+                e.max_health(),
+                e.armor(),
+                e.width(),
+                e.height(),
+                e.velocity(),
+                e.on_fire(),
+                e.sprinting(),
+                e.sneaking(),
+                e.using_item(),
+                e.invisible(),
+                e.is_living(),
+                e.is_player(),
+                e.position(),
+                e.render_position(),
+                e.flags(),
+            ));
+            true
+        })
+        .unwrap();
+    assert_eq!(
+        lines,
+        [
+            "7 zombie [] [] hp 12.5/20 armor 5 0.6x1.8 v[0.0, -0.0784, 0.25] fire true sprint true sneak false item false invisible false living true player false at [7.0, 64.0, 0.0] drawn [7.25, 64.0, 0.0] flags 37",
+            "8 player [Ann] [red] hp 20/20 armor 5 0.6x1.8 v[0.0, -0.0784, 0.25] fire true sprint true sneak false item false invisible false living true player true at [8.0, 64.0, 0.0] drawn [8.25, 64.0, 0.0] flags 37",
+            "9 item [] [] hp 0/0 armor 5 0.6x1.8 v[0.0, -0.0784, 0.25] fire false sprint false sneak false item false invisible false living false player false at [9.0, 64.0, 0.0] drawn [9.25, 64.0, 0.0] flags 0",
+        ]
+    );
+}
+
+#[test]
+fn snapshot_stops_when_the_visitor_says_so() {
+    let _guard = fresh();
+    init_ok();
+    let mut visited = 0;
+    let result = ui().world.snapshot(|_| {
+        visited += 1;
+        visited < 2
+    });
+    assert_eq!((result, visited), (Ok(()), 2));
+}
+
+#[test]
+fn snapshot_maps_the_host_answers_to_errors() {
+    let _guard = fresh();
+    init_ok();
+    for (status, error) in [
+        (UmiStatus::UNAVAILABLE, ModError::Unavailable),
+        (
+            UmiStatus::UNSUPPORTED,
+            ModError::HostRefused(UmiStatus::UNSUPPORTED),
+        ),
+        (UmiStatus::DENIED, ModError::HostRefused(UmiStatus::DENIED)),
+    ] {
+        *SNAPSHOT_STATUS.lock().unwrap() = status;
+        let mut visited = 0;
+        let result = ui().world.snapshot(|_| {
+            visited += 1;
+            true
+        });
+        assert_eq!((result, visited), (Err(error), 0));
+    }
+}
+
+#[test]
+fn a_visitor_may_read_the_snapshot_again() {
+    let _guard = fresh();
+    init_ok();
+    let world = ui().world;
+    let mut inner = 0;
+    world
+        .snapshot(|_| {
+            world
+                .snapshot(|_| {
+                    inner += 1;
+                    true
+                })
+                .unwrap();
+            false
+        })
+        .unwrap();
+    assert_eq!(inner, 3);
 }

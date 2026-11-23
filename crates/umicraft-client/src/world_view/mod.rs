@@ -42,6 +42,7 @@ use crate::error::ClientError;
 use crate::game::{ChunkEvent, GameStatus, RenderEvent, TextScreenRequest};
 use crate::meshing::pool::MeshPool;
 use crate::meshing::queue::MeshQueue;
+use crate::mods::entity_facts::ModEntity;
 use crate::pack_offer::ServerPackRequest;
 use crate::resources::terrain::{InstalledTerrain, TerrainMesher};
 use crate::scene::cracks::{crack_mesh, Crack, STAGES};
@@ -111,6 +112,8 @@ pub struct WorldView {
     frames: usize,
     /// Active living entities interpolation data from the latest frame.
     entities: Arc<[EntityFrameData]>,
+    /// What the external mods may read about each entity, from the latest frame.
+    mod_entities: Arc<[ModEntity]>,
     /// A text screen the game thread asked for, until the window takes it.
     text_request: Option<TextScreenRequest>,
     /// Resource pack offers the window has not taken yet, oldest first.
@@ -182,6 +185,7 @@ impl WorldView {
             connect_stage: ConnectStage::Connecting,
             frames: 0,
             entities: Arc::from([]),
+            mod_entities: Arc::from([]),
             local_body: None,
             text_request: None,
             pack_requests: Vec::new(),
@@ -243,6 +247,7 @@ impl WorldView {
             RenderEvent::Frame(frame) => {
                 self.frames += 1;
                 self.entities = Arc::clone(&frame.entities);
+                self.mod_entities = Arc::clone(&frame.mod_entities);
                 self.local_body = Some(Arc::clone(&frame.local_body));
                 self.hand_light = frame.hand_light;
                 self.selection = Arc::clone(&frame.selection);
@@ -338,6 +343,7 @@ impl WorldView {
         self.faces.clear();
         self.block_entities.clear();
         self.entities = Arc::from([]);
+        self.mod_entities = Arc::from([]);
         target.clear_meshes();
     }
 }

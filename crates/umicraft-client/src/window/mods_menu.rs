@@ -14,7 +14,7 @@ use winit::keyboard::KeyCode;
 
 use umicraft_builtin_mods::{CombatInfo, KeyState, MAX_EFFECTS};
 use umicraft_core::lang::Lang;
-use umicraft_modhost::{ModHost, PreRender};
+use umicraft_modhost::{with_entity_snapshot, ModHost, PreRender};
 use umicraft_render::ModWidgetView;
 use umicraft_ui::menus::{ModsOutcome, ModsView};
 use umicraft_ui::FontAtlas;
@@ -183,21 +183,32 @@ impl App {
         });
     }
 
-    /// Runs the mods' `render_camera` layers on the camera of this frame, then sends
-    /// `PreRender` with the result (API 1.1). Only in a world: the menus have no
-    /// camera of their own to move.
-    pub(super) fn place_mod_camera(&mut self, elapsed: f32) {
+    /// Rebuilds this frame's entity snapshot, runs the mods' `render_camera` layers
+    /// on the camera of this frame, then sends `PreRender` with the result (API
+    /// 1.1). Layers and handlers run inside the snapshot scope, so they can read
+    /// the entities. Only in a world: the menus have no camera of their own to
+    /// move.
+    pub(super) fn place_mod_camera(&mut self, elapsed: f32, now: Instant) {
+        self.refresh_entity_snapshot(now);
         if self.world.is_none() {
             return;
         }
-        if let Some(chain) = &self.camera_layers {
-            let input = camera_input(&self.key_state(), self.frame_look, elapsed);
-            place_camera(chain, &mut self.camera, &input);
-        }
-        if self.render_bus.has_subscribers::<PreRender>() {
-            self.render_bus
-                .dispatch(&mut PreRender::new(camera_of(&self.camera)));
-        }
+        let input = camera_input(&self.key_state(), self.frame_look, elapsed);
+        let Self {
+            camera,
+            camera_layers,
+            render_bus,
+            entity_snapshot,
+            ..
+        } = self;
+        with_entity_snapshot(entity_snapshot.snapshot(), || {
+            if let Some(chain) = camera_layers {
+                place_camera(chain, camera, &input);
+            }
+            if render_bus.has_subscribers::<PreRender>() {
+                render_bus.dispatch(&mut PreRender::new(camera_of(camera)));
+            }
+        });
     }
 
     /// Sends this frame's `Frame` event, with the camera the frame is drawn with,
@@ -205,13 +216,42 @@ impl App {
     /// HUD or the HUD editor shows them). Called once the camera is final, so a
     /// widget placing an annotation with the projection of `Frame` draws it where
     /// the world shows the point (API 1.1, ADR-0094).
+    ///
+    /// Both run inside the entity-snapshot scope, so the `Frame` intercepts and the
+    /// widget draws read the entities the frame draws (ADR-0094).
+    /// The snapshot is the one [`place_mod_camera`](Self::place_mod_camera) built
+    /// for this frame.
     pub(super) fn publish_frame(&mut self, (width, height): (u32, u32)) {
         let camera = frame_camera(&self.camera, (width, height));
-        self.mods.dispatch_frame(camera, &mut self.render_bus);
-        if self.session.is_some() {
-            if let Some(host) = self.external_mods.as_ref().and_then(ExternalMods::host) {
-                host.draw_widgets();
+        let Self {
+            mods,
+            render_bus,
+            external_mods,
+            session,
+            entity_snapshot,
+            ..
+        } = self;
+        with_entity_snapshot(entity_snapshot.snapshot(), || {
+            mods.dispatch_frame(camera, render_bus);
+            if session.is_some() {
+                if let Some(host) = external_mods.as_ref().and_then(ExternalMods::host) {
+                    host.draw_widgets();
+                }
             }
+        });
+    }
+
+    /// Rebuilds the snapshot the external mods read this frame: the entities nearest
+    /// to the camera in a session, none outside one. Skipped without external mods.
+    fn refresh_entity_snapshot(&mut self, now: Instant) {
+        if self.external_mods.is_none() {
+            return;
+        }
+        match (&self.session, &self.world) {
+            (Some(_), Some(world)) => {
+                world.refresh_entity_snapshot(now, self.camera.eye(), &mut self.entity_snapshot);
+            }
+            _ => self.entity_snapshot.clear(),
         }
     }
 

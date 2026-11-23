@@ -193,18 +193,24 @@ pub(super) fn tick(
         match seat {
             Some(feet) => state.ride(feet),
             // The mods' physics layers may query the world (F3.6).
-            None => lend(Some(world), &game.entities, || {
-                state.tick(
-                    &intent,
-                    &WithMovingBlocks {
-                        world: &WithEntities {
-                            world,
-                            boxes: &game.solid_entities,
+            None => lend(
+                Some(world),
+                &game.entities,
+                &game.social.scoreboard,
+                &game.hud_view,
+                || {
+                    state.tick(
+                        &intent,
+                        &WithMovingBlocks {
+                            world: &WithEntities {
+                                world,
+                                boxes: &game.solid_entities,
+                            },
+                            moving: game.server.moving_blocks(),
                         },
-                        moving: game.server.moving_blocks(),
-                    },
-                )
-            }),
+                    )
+                },
+            ),
         }
     }
     if let (Some(run), Some(state)) = (game.e1.as_mut(), game.state.as_ref()) {

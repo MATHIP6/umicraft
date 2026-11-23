@@ -22,6 +22,7 @@ members = [
     "crates/umicraft-modhost",
     "mods/examples/camera_orbit",
     "mods/examples/depth_fog",
+    "mods/examples/entity_list",
     "mods/examples/hello",
     "mods/examples/packet_logger",
     "mods/examples/panicking",

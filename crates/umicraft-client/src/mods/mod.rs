@@ -5,6 +5,7 @@
 //! (ADR-0086).
 
 pub(crate) mod camera;
+pub(crate) mod entity_facts;
 pub(crate) mod external;
 pub(crate) mod external_config;
 pub(crate) mod external_menu;
