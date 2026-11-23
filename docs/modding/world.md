@@ -54,10 +54,32 @@ in load order is refused).
 - **Replace** (`cx.replace_physics`): the layer is the step; `next()` is
   `UNSUPPORTED`.
 
-The state exposes the position, velocity, fall distance, `on_ground` and `sprinting`
-(writable) and `sneaking`, `flying`, `in_water`, yaw and pitch (read-only). The client
-writes back only the fields a layer changed, so a wrapper that changes nothing leaves
-the vanilla trajectory bit for bit as it was.
+The state exposes the position, velocity, fall distance, `on_ground`, `sprinting`,
+`flying` and the game mode (writable) and `sneaking`, `in_water`, `allow_flying`,
+`fly_speed`, yaw and pitch (read-only). The client writes back only the fields a layer
+changed, so a wrapper that changes nothing leaves the vanilla trajectory bit for bit as
+it was.
+
+### Flight and game mode (API 1.1)
+
+- `set_flying(bool)` is applied even when `allow_flying()` is false: the client
+  predicts it and the server, which is the authority, may stop a flight it refuses. The
+  change is reported to the server once, as the vanilla `Player Abilities` packet (MCP
+  `EntityPlayerSP.sendPlayerAbilities`), after the step and only when the state really
+  differs from the one before it. The replay of a server correction reports through the
+  same comparison, so a replayed tick never sends a second packet.
+- `set_game_mode(GameMode)` is a local prediction. The client applies it as it applies
+  the server's own change (HUD, no-clip, flight rules) and sends nothing; the next
+  game-mode packet of the server wins. A value outside `UMI_GAME_MODE_*` is ignored.
+  The client stores its real mode before every run, so a layer that sets a mode every
+  tick keeps predicting it until the server says otherwise.
+- `allow_flying()` and `fly_speed()` are the abilities the server granted.
+- On a host that gives the 1.0 struct (72 bytes) the getters answer `false`, `0.05`
+  and survival, and the setters do nothing. A 1.1 mod does not load on a 1.0 host, so
+  this only guards the view.
+
+A layer must be idempotent (`set_flying(true)`, not a toggle): the step is re-run on
+replay, starting from the state the previous run left.
 
 A layer runs on the game thread under the 1 ms budget, counted on its own time (the
 time inside `next()` is not charged to it). A layer that panics, returns an error or
@@ -69,4 +91,5 @@ The step is re-run for past ticks when the server corrects the position (the cli
 replays the inputs the server had not seen yet), so a layer must be a function of the
 state and the input; a counter of calls is not a tick counter.
 
-The server-compatible mode (`packets.md`) holds every `movement` mod off.
+The server-compatible mode (`packets.md`) holds every `movement` mod off, so flight and
+game-mode writes never reach a server that asked for vanilla behaviour.
