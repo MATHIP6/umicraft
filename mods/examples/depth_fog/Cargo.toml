@@ -1,0 +1,22 @@
+[package]
+name = "umicraft-example-depth-fog"
+description = "Example Umicraft mod: scene depth in a post-process pass (API 1.1)."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "depth_fog"
+crate-type = ["cdylib"]
+
+[dependencies]
+umicraft-modapi.workspace = true
+
+[dev-dependencies]
+# Dev-only: validates the shader the way the host does, never shipped in the mod.
+naga = { version = "30.0.1", features = ["wgsl-in"] }
+
+[lints]
+workspace = true

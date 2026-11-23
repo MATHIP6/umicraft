@@ -76,7 +76,8 @@ pub(super) fn create_depth(device: &wgpu::Device, width: u32, height: u32) -> wg
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: DEPTH_FORMAT,
-        // Sampled by the motion blur, which works out the motion from the depth.
+        // Sampled by the motion blur, which works out the motion from the depth, and by
+        // the post passes of the mods (`umi_depth`).
         usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
         view_formats: &[],
     });
@@ -129,8 +130,12 @@ impl Renderer {
         self.depth_view = create_depth(&self.device, width, height);
         self.scene_blur
             .resize(&self.device, &self.queue, (width, height));
-        self.post_chain
-            .resize(&self.device, self.scene_blur.scene_view(), (width, height));
+        self.post_chain.resize(
+            &self.device,
+            self.scene_blur.scene_view(),
+            Some(&self.depth_view),
+            (width, height),
+        );
         self.motion_blur.invalidate();
         self.ui_pass.resize(width, height);
         if self.offscreen.is_some() {

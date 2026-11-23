@@ -8,7 +8,7 @@ Status: **in progress** (started 2026-11-23). Design: ADR-0094. Base: API 1.0
 | 1.1.0 | ADR-0094 and this plan | ADR accepted | done |
 | 1.1.1 | `umicraft-modapi-sys`: every type below, `UMI_API_VERSION = 1.1`, host functions appended (stubs answering `UNSUPPORTED` until their phase) | layout tests of the new fields; a 1.0 mod still loads, a 1.1 mod is refused by a 1.0 host | done |
 | 1.1.2 | Flight and game mode from a physics layer | a layer toggles flying: the player changes and one `PlayerAbilities` is queued | |
-| 1.1.3 | Depth in post passes | example pass fades by distance; undeclared resources still refused | |
+| 1.1.3 | Depth in post passes | example pass fades by distance; undeclared resources still refused | done |
 | 1.1.4 | Entity metadata and the render-thread snapshot | snapshot equals the game-thread query of the same tick; example lists names and health | |
 | 1.1.5 | Camera facts in `FRAME`, `world_to_screen`, `Anchor::Screen`, `hud_outline`, `hud_segment`; `FRAME` and external widgets after the final camera | axis projection test; example box follows a world point | |
 | 1.1.6 | `render_camera` service, `PRE_RENDER`, generic service chain | orbit example; player state bit-identical with a camera layer | |
