@@ -228,6 +228,11 @@ fn api_version_acceptance_table() {
         (v(2, 0), v(1, 0), false),
         (v(1, 0), v(2, 0), false),
         (v(1, 0), v(0, 0), false),
+        // API 1.1 (ADR-0094): 1.0 mods load, a 1.0 client refuses 1.1 mods.
+        (v(1, 1), v(1, 0), true),
+        (v(1, 1), v(1, 1), true),
+        (v(1, 0), v(1, 1), false),
+        (v(1, 1), v(1, 2), false),
     ];
     for (host, required, expected) in table {
         assert_eq!(

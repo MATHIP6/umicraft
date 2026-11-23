@@ -48,7 +48,8 @@ fn layouts_are_stable_on_64_bit() {
         assert_eq!((size, align, header, tick), (24, 8, 0, 16));
     }
 
-    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (184, 8));
+    // 184 in 1.0; appended functions grow it (1.1: 224).
+    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (224, 8));
     assert_eq!(offset_of!(UmiHost, size), 0);
     assert_eq!(offset_of!(UmiHost, version), 8);
     assert_eq!(offset_of!(UmiHost, log), 16);
@@ -75,7 +76,8 @@ fn version_compatibility_rules() {
         assert_eq!(host.accepts(module), expected, "{host:?} vs {module:?}");
     }
     assert!(UMI_API_VERSION.accepts(UMI_API_VERSION));
-    assert_eq!(UMI_API_VERSION, v(1, 0));
+    // 1.0 at the freeze; the current minor is pinned by `api_1_1_layouts`.
+    assert_eq!(UMI_API_VERSION.major, 1);
 }
 
 #[test]
@@ -217,14 +219,14 @@ fn service_and_world_layouts() {
     assert_eq!(offset_of!(UmiPlayerPhysics, velocity), 32);
     assert_eq!(offset_of!(UmiPlayerPhysics, yaw), 56);
     assert_eq!(offset_of!(UmiPlayerPhysics, fall_distance), 64);
-    assert_eq!(size_of::<UmiPlayerPhysics>(), 72);
+    assert_eq!(size_of::<UmiPlayerPhysics>(), 80); // 72 in 1.0
     assert_eq!(offset_of!(UmiPhysicsInput, forward), 8);
     assert_eq!(size_of::<UmiPhysicsInput>(), 24);
     assert_eq!(offset_of!(UmiEntity, kind), 8);
     assert_eq!(offset_of!(UmiEntity, position), 24);
     assert_eq!(offset_of!(UmiEntity, yaw), 48);
     assert_eq!(offset_of!(UmiEntity, name), 56);
-    assert_eq!(size_of::<UmiEntity>(), 72);
+    assert_eq!(size_of::<UmiEntity>(), 168); // 72 in 1.0
     assert_eq!(offset_of!(UmiHost, register_physics), 136);
     assert_eq!(offset_of!(UmiHost, physics_next), 144);
     assert_eq!(offset_of!(UmiHost, world_block), 152);
@@ -249,5 +251,88 @@ fn frame_payload_layout() {
     assert_eq!(offset_of!(UmiFrame, right_clicks), 68);
     assert_eq!(offset_of!(UmiFrame, ping_ms), 72);
     assert_eq!(offset_of!(UmiFrame, sprinting), 76);
-    assert_eq!(size_of::<UmiFrame>(), 80);
+    assert_eq!(size_of::<UmiFrame>(), 280); // 80 in 1.0
+}
+
+/// API 1.1 (ADR-0094): every addition sits after the last 1.0 field.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn api_1_1_layouts() {
+    assert_eq!(UMI_API_VERSION, UmiVersion { major: 1, minor: 1 });
+    assert_eq!(UmiEventId::PRE_RENDER, UmiEventId(13));
+
+    assert_eq!(offset_of!(UmiFrame, eye), 80);
+    assert_eq!(offset_of!(UmiFrame, render_origin), 104);
+    assert_eq!(offset_of!(UmiFrame, view_proj), 128);
+    assert_eq!(offset_of!(UmiFrame, viewport), 192);
+    assert_eq!(offset_of!(UmiFrame, gui_scale), 200);
+    assert_eq!(offset_of!(UmiFrame, fov_y), 204);
+    assert_eq!(offset_of!(UmiFrame, aspect), 208);
+    assert_eq!(offset_of!(UmiFrame, view_bob), 212);
+
+    assert_eq!(offset_of!(UmiRenderCamera, flags), 4);
+    assert_eq!(offset_of!(UmiRenderCamera, eye), 8);
+    assert_eq!(offset_of!(UmiRenderCamera, yaw), 32);
+    assert_eq!(offset_of!(UmiRenderCamera, pitch), 36);
+    assert_eq!(offset_of!(UmiRenderCamera, fov_y), 40);
+    assert_eq!(offset_of!(UmiRenderCamera, aspect), 44);
+    assert_eq!(offset_of!(UmiRenderCamera, view_bob), 48);
+    assert_eq!(size_of::<UmiRenderCamera>(), 112);
+    assert_eq!(offset_of!(UmiPreRender, camera), 16);
+    assert_eq!(size_of::<UmiPreRender>(), 128);
+    assert_eq!(offset_of!(UmiCameraInput, look_dx), 8);
+    assert_eq!(offset_of!(UmiCameraInput, up), 24);
+    assert_eq!(offset_of!(UmiCameraInput, frame_seconds), 28);
+    assert_eq!(size_of::<UmiCameraInput>(), 32);
+
+    assert_eq!(offset_of!(UmiPlayerPhysics, fly_speed), 68);
+    assert_eq!(offset_of!(UmiPlayerPhysics, game_mode), 72);
+    assert_eq!(UMI_PHYSICS_ALLOW_FLYING, 32);
+    assert_eq!(
+        [
+            UMI_GAME_MODE_SURVIVAL,
+            UMI_GAME_MODE_CREATIVE,
+            UMI_GAME_MODE_ADVENTURE,
+            UMI_GAME_MODE_SPECTATOR
+        ],
+        [0, 1, 2, 3]
+    );
+
+    assert_eq!(offset_of!(UmiEntity, health), 72);
+    assert_eq!(offset_of!(UmiEntity, max_health), 76);
+    assert_eq!(offset_of!(UmiEntity, armor), 80);
+    assert_eq!(offset_of!(UmiEntity, team), 88);
+    assert_eq!(offset_of!(UmiEntity, width), 104);
+    assert_eq!(offset_of!(UmiEntity, height), 108);
+    assert_eq!(offset_of!(UmiEntity, velocity), 112);
+    assert_eq!(offset_of!(UmiEntity, flags), 136);
+    assert_eq!(offset_of!(UmiEntity, is_player), 140);
+    assert_eq!(offset_of!(UmiEntity, render_position), 144);
+    assert_eq!(
+        [
+            UMI_ENTITY_ON_FIRE,
+            UMI_ENTITY_SNEAKING,
+            UMI_ENTITY_SPRINTING,
+            UMI_ENTITY_USING_ITEM,
+            UMI_ENTITY_INVISIBLE,
+            UMI_ENTITY_LIVING
+        ],
+        [1, 2, 4, 8, 16, 32]
+    );
+
+    assert_eq!(UMI_HUD_ANCHOR_SCREEN, 9);
+    assert_eq!(offset_of!(UmiHost, register_camera), 184);
+    assert_eq!(offset_of!(UmiHost, camera_next), 192);
+    assert_eq!(offset_of!(UmiHost, world_entities_snapshot), 200);
+    assert_eq!(offset_of!(UmiHost, hud_outline), 208);
+    assert_eq!(offset_of!(UmiHost, hud_segment), 216);
+}
+
+#[test]
+fn a_1_1_host_loads_1_0_mods_and_a_1_0_host_refuses_1_1_mods() {
+    let v = |major, minor| UmiVersion { major, minor };
+    assert!(UMI_API_VERSION.accepts(v(1, 0)));
+    assert!(UMI_API_VERSION.accepts(v(1, 1)));
+    assert!(!v(1, 0).accepts(v(1, 1)));
+    assert!(!UMI_API_VERSION.accepts(v(1, 2)));
 }

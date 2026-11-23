@@ -11,6 +11,7 @@
 mod event;
 mod hud;
 mod packet;
+mod pending;
 mod physics;
 mod post;
 mod ui;
@@ -167,6 +168,11 @@ pub fn host_table() -> UmiHost {
         world_entities: world::host_world_entities,
         register_post_pass: post::host_register_post_pass,
         post_set_param: post::host_post_set_param,
+        register_camera: pending::host_register_camera,
+        camera_next: pending::host_camera_next,
+        world_entities_snapshot: pending::host_world_entities_snapshot,
+        hud_outline: pending::host_hud_outline,
+        hud_segment: pending::host_hud_segment,
     }
 }
 

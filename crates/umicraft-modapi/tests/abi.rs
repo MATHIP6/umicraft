@@ -575,6 +575,16 @@ extern "C" fn fake_world_entities(
             yaw: 90.0,
             pitch: -10.0,
             name: text(name),
+            health: 0.0,
+            max_health: 0.0,
+            armor: 0.0,
+            team: UmiStr::EMPTY,
+            width: 0.0,
+            height: 0.0,
+            velocity: [0.0; 3],
+            flags: 0,
+            is_player: 0,
+            render_position: [f64::from(id), 64.0, -1.5],
         };
         let status = visit(&entity, user);
         if status != UmiStatus::OK {
@@ -649,7 +659,60 @@ fn host() -> UmiHost {
         world_entities: fake_world_entities,
         register_post_pass: fake_register_post_pass,
         post_set_param: fake_post_set_param,
+        register_camera: fake_register_camera,
+        camera_next: fake_camera_next,
+        world_entities_snapshot: fake_world_entities_snapshot,
+        hud_outline: fake_hud_outline,
+        hud_segment: fake_hud_segment,
     }
+}
+
+extern "C" fn fake_register_camera(
+    _me: UmiModHandle,
+    _mode: UmiServiceMode,
+    _step: Option<UmiCameraFn>,
+    _user: *mut c_void,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+extern "C" fn fake_camera_next(_cx: *mut UmiCameraCx) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+extern "C" fn fake_world_entities_snapshot(
+    _me: UmiModHandle,
+    _out: *mut UmiEntity,
+    _capacity: usize,
+    _count: *mut usize,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+extern "C" fn fake_hud_outline(
+    _hud: *mut UmiHudCx,
+    _x: f32,
+    _y: f32,
+    _width: f32,
+    _height: f32,
+    _color: u32,
+    _alpha: f32,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+#[allow(clippy::too_many_arguments)]
+extern "C" fn fake_hud_segment(
+    _hud: *mut UmiHudCx,
+    _x1: f32,
+    _y1: f32,
+    _x2: f32,
+    _y2: f32,
+    _color: u32,
+    _alpha: f32,
+    _thickness: f32,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
 }
 
 fn me() -> UmiModHandle {
@@ -1031,8 +1094,23 @@ fn frame_payload(ping_ms: i32, sprinting: u8) -> UmiFrame {
         right_clicks: 1,
         ping_ms,
         sprinting,
+        eye: [1.5, 65.62, -2.0],
+        render_origin: [1.0, 65.0, -2.0],
+        view_proj: IDENTITY,
+        viewport: [854, 480],
+        gui_scale: 2.0,
+        fov_y: 70.0,
+        aspect: 854.0 / 480.0,
+        view_bob: IDENTITY,
     }
 }
+
+const IDENTITY: [[f32; 4]; 4] = [
+    [1.0, 0.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.0],
+    [0.0, 0.0, 0.0, 1.0],
+];
 
 #[test]
 fn frame_view_reads_every_field() {
@@ -1433,6 +1511,8 @@ fn physics_state() -> UmiPlayerPhysics {
         yaw: 30.0,
         pitch: 40.0,
         fall_distance: 0.5,
+        fly_speed: 0.05,
+        game_mode: UMI_GAME_MODE_SURVIVAL,
     }
 }
 

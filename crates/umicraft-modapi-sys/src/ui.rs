@@ -83,7 +83,8 @@ pub struct UmiSettingValue {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct UmiHudPlacement {
     /// 0..=8, row by row: top left, top centre, top right, middle left,
-    /// centre, middle right, bottom left, bottom centre, bottom right.
+    /// centre, middle right, bottom left, bottom centre, bottom right; or
+    /// [`UMI_HUD_ANCHOR_SCREEN`] (API 1.1).
     pub anchor: u32,
     /// Horizontal offset from the anchor, in GUI pixels.
     pub offset_x: f32,
@@ -92,6 +93,11 @@ pub struct UmiHudPlacement {
     /// Scale, clamped by the host to the built-in widgets' range.
     pub scale: f32,
 }
+
+/// [`UmiHudPlacement::anchor`]: the offset is absolute GUI pixels from the
+/// top-left corner of the screen, the scale is 1 and the player cannot move the
+/// widget; for annotations placed with the `FRAME` projection. Added in API 1.1.
+pub const UMI_HUD_ANCHOR_SCREEN: u32 = 9;
 
 /// The host's buffer a widget fills while it is drawn; opaque to mods.
 #[repr(C)]

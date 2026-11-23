@@ -5,7 +5,7 @@
 //! Strings in payloads are borrowed from the host for the duration of the
 //! handler call only; a mod that keeps one must copy it.
 
-use crate::{UmiBytes, UmiStr};
+use crate::{UmiBytes, UmiRenderCamera, UmiStr};
 
 /// Stable event id; ids are never reused (ADR-0087).
 #[repr(transparent)]
@@ -49,6 +49,10 @@ impl UmiEventId {
     /// render thread. The same snapshot the built-in mods read. Not
     /// cancellable, not mutable. Added in API 1.0.
     pub const FRAME: Self = Self(12);
+    /// Once per drawn frame in a world, after the `render_camera` layers and
+    /// before the camera is handed to the GPU; payload [`UmiPreRender`], render
+    /// thread. Not cancellable, not mutable. Added in API 1.1.
+    pub const PRE_RENDER: Self = Self(13);
 }
 
 /// `UmiEventHeader::flags` bit: a handler may cancel the event.
@@ -204,4 +208,35 @@ pub struct UmiFrame {
     pub ping_ms: i32,
     /// `1` while the player sprints, else `0`.
     pub sprinting: u8,
+    /// The camera eye, in blocks. Added in API 1.1: check `header.size`.
+    pub eye: [f64; 3],
+    /// The integer corner GPU positions are relative to. Added in API 1.1.
+    pub render_origin: [f64; 3],
+    /// Column-major view-projection for points relative to `render_origin`:
+    /// `clip = view_proj * (point - render_origin, 1)`, depth 0..1. It already
+    /// holds the effective FOV and `view_bob`. Added in API 1.1.
+    pub view_proj: [[f32; 4]; 4],
+    /// Framebuffer size in physical pixels. Added in API 1.1.
+    pub viewport: [u32; 2],
+    /// Physical pixels per GUI pixel. Added in API 1.1.
+    pub gui_scale: f32,
+    /// Effective vertical field of view in degrees (option, zoom, sprint and
+    /// flight modifiers). Added in API 1.1.
+    pub fov_y: f32,
+    /// Viewport width over height. Added in API 1.1.
+    pub aspect: f32,
+    /// Column-major camera-space view bobbing, identity when still. Added in
+    /// API 1.1.
+    pub view_bob: [[f32; 4]; 4],
+}
+
+/// Payload of [`UmiEventId::PRE_RENDER`]: the camera the frame is drawn with.
+/// Added in API 1.1.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct UmiPreRender {
+    /// Common header.
+    pub header: UmiEventHeader,
+    /// The final camera of the frame (a copy: changing it has no effect).
+    pub camera: UmiRenderCamera,
 }

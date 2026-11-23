@@ -16,9 +16,9 @@ use umicraft_game::entity::EntityStore;
 use umicraft_game::input::InputIntent;
 use umicraft_game::physics::{PhysicsOverride, Player};
 use umicraft_modapi_sys::{
-    UmiPhysicsInput, UmiPlayerPhysics, UMI_INPUT_JUMP, UMI_INPUT_SNEAK, UMI_INPUT_SPRINT,
-    UMI_PHYSICS_FLYING, UMI_PHYSICS_IN_WATER, UMI_PHYSICS_ON_GROUND, UMI_PHYSICS_SNEAKING,
-    UMI_PHYSICS_SPRINTING,
+    UmiPhysicsInput, UmiPlayerPhysics, UMI_GAME_MODE_SURVIVAL, UMI_INPUT_JUMP, UMI_INPUT_SNEAK,
+    UMI_INPUT_SPRINT, UMI_PHYSICS_FLYING, UMI_PHYSICS_IN_WATER, UMI_PHYSICS_ON_GROUND,
+    UMI_PHYSICS_SNEAKING, UMI_PHYSICS_SPRINTING,
 };
 use umicraft_modhost::{EntityView, PhysicsChain, WorldQuery};
 use umicraft_world::{BlockPos, World};
@@ -116,6 +116,9 @@ fn state_of(player: &Player) -> UmiPlayerPhysics {
         yaw: player.yaw,
         pitch: player.pitch,
         fall_distance: player.fall_distance,
+        fly_speed: player.fly_speed,
+        // The game mode and the writable flight land with phase 1.1.2 (ADR-0094).
+        game_mode: UMI_GAME_MODE_SURVIVAL,
     }
 }
 

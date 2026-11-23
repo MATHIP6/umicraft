@@ -6,6 +6,13 @@ use umicraft_modapi_sys::{UmiEventHeader, UmiEventId, UmiFrame};
 
 use super::{header_for, host_event, EventThread, HostEvent};
 
+const IDENTITY: [[f32; 4]; 4] = [
+    [1.0, 0.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.0],
+    [0.0, 0.0, 0.0, 1.0],
+];
+
 /// What the player sees in one frame, in Rust types.
 ///
 /// The client fills it from its one per-frame snapshot (F3.9) and hands it to
@@ -68,6 +75,15 @@ impl Frame {
                     .and_then(|ping| i32::try_from(ping).ok())
                     .unwrap_or(-1),
                 sprinting: u8::from(facts.sprinting),
+                // The camera of the frame lands with phase 1.1.5 (ADR-0094).
+                eye: facts.position,
+                render_origin: [0.0; 3],
+                view_proj: IDENTITY,
+                viewport: [0; 2],
+                gui_scale: 1.0,
+                fov_y: 0.0,
+                aspect: 1.0,
+                view_bob: IDENTITY,
             },
         }
     }

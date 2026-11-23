@@ -3,9 +3,9 @@
 //! Services a mod may wrap or replace, and the read-only world queries (API 0.5,
 //! ADR-0086).
 //!
-//! v1 opens one service, `player_physics`: the step that moves the local player
-//! once per tick. A mod declares it in `mod.toml` (`wraps` or `replaces`) and
-//! needs the `movement` permission.
+//! `player_physics` is the step that moves the local player once per tick; a mod
+//! declares it in `mod.toml` (`wraps` or `replaces`) and needs the `movement`
+//! permission. API 1.1 adds `render_camera` (see the `camera` module).
 
 use core::ffi::c_void;
 
@@ -32,10 +32,23 @@ pub const UMI_PHYSICS_ON_GROUND: u32 = 1;
 pub const UMI_PHYSICS_SPRINTING: u32 = 2;
 /// [`UmiPlayerPhysics::flags`]: the player sneaks. Read-only.
 pub const UMI_PHYSICS_SNEAKING: u32 = 4;
-/// [`UmiPlayerPhysics::flags`]: the player flies (creative). Read-only.
+/// [`UmiPlayerPhysics::flags`]: the player flies. Writable since API 1.1 (a
+/// change is reported to the server like a vanilla toggle).
 pub const UMI_PHYSICS_FLYING: u32 = 8;
 /// [`UmiPlayerPhysics::flags`]: the player is in water. Read-only.
 pub const UMI_PHYSICS_IN_WATER: u32 = 16;
+/// [`UmiPlayerPhysics::flags`]: the abilities allow flight. Read-only. Added in
+/// API 1.1.
+pub const UMI_PHYSICS_ALLOW_FLYING: u32 = 32;
+
+/// [`UmiPlayerPhysics::game_mode`]: survival.
+pub const UMI_GAME_MODE_SURVIVAL: u32 = 0;
+/// [`UmiPlayerPhysics::game_mode`]: creative.
+pub const UMI_GAME_MODE_CREATIVE: u32 = 1;
+/// [`UmiPlayerPhysics::game_mode`]: adventure.
+pub const UMI_GAME_MODE_ADVENTURE: u32 = 2;
+/// [`UmiPlayerPhysics::game_mode`]: spectator.
+pub const UMI_GAME_MODE_SPECTATOR: u32 = 3;
 
 /// The local player's movement state, lent to a `player_physics` layer.
 ///
@@ -59,6 +72,12 @@ pub struct UmiPlayerPhysics {
     pub pitch: f32,
     /// Distance fallen since the last landing, in blocks.
     pub fall_distance: f32,
+    /// Flying speed of the abilities (read-only). Added in API 1.1: check
+    /// `size`.
+    pub fly_speed: f32,
+    /// `UMI_GAME_MODE_*`. Writable: a change is a local prediction, the
+    /// server's next game-mode packet wins. Added in API 1.1.
+    pub game_mode: u32,
 }
 
 /// [`UmiPhysicsInput::flags`]: the jump key is held.
@@ -124,7 +143,42 @@ pub struct UmiEntity {
     pub pitch: f32,
     /// A player's name or the name tag, empty when there is none.
     pub name: UmiStr,
+    /// Health points; 0 unless `UMI_ENTITY_LIVING`. Added in API 1.1: check
+    /// `size`.
+    pub health: f32,
+    /// Maximum health points; 0 unless `UMI_ENTITY_LIVING`. Added in API 1.1.
+    pub max_health: f32,
+    /// Armour points of the equipment the client sees. Added in API 1.1.
+    pub armor: f32,
+    /// Scoreboard team name, empty when none. Added in API 1.1.
+    pub team: UmiStr,
+    /// Width of the bounding box, in blocks. Added in API 1.1.
+    pub width: f32,
+    /// Height of the bounding box, in blocks. Added in API 1.1.
+    pub height: f32,
+    /// Position change over the last tick, in blocks per tick. Added in API 1.1.
+    pub velocity: [f64; 3],
+    /// Bit set of `UMI_ENTITY_*`. Added in API 1.1.
+    pub flags: u32,
+    /// `1` for a player, else `0`. Added in API 1.1.
+    pub is_player: u8,
+    /// Where the frame being drawn shows the entity (interpolated); equal to
+    /// `position` in a game-thread query. Added in API 1.1.
+    pub render_position: [f64; 3],
 }
+
+/// [`UmiEntity::flags`]: the entity burns.
+pub const UMI_ENTITY_ON_FIRE: u32 = 1;
+/// [`UmiEntity::flags`]: the entity sneaks.
+pub const UMI_ENTITY_SNEAKING: u32 = 2;
+/// [`UmiEntity::flags`]: the entity sprints.
+pub const UMI_ENTITY_SPRINTING: u32 = 4;
+/// [`UmiEntity::flags`]: the entity eats, drinks, blocks or draws a bow.
+pub const UMI_ENTITY_USING_ITEM: u32 = 8;
+/// [`UmiEntity::flags`]: the entity is invisible.
+pub const UMI_ENTITY_INVISIBLE: u32 = 16;
+/// [`UmiEntity::flags`]: a living entity; the health fields are meaningful.
+pub const UMI_ENTITY_LIVING: u32 = 32;
 
 /// Receives one entity; any status but `OK` stops the visit.
 pub type UmiEntityVisitFn = extern "C" fn(entity: *const UmiEntity, user: *mut c_void) -> UmiStatus;

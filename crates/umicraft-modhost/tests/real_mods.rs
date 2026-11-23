@@ -117,7 +117,7 @@ fn hello_loads_panicking_fails_and_handlers_run() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 1, minor: 0 });
+    let resolution = resolve(candidates, host_version());
     assert_eq!(resolution.order.len(), 2);
 
     let mut trust = TrustList::default();
@@ -198,7 +198,7 @@ fn hello_declares_settings_a_widget_a_key_and_a_command() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 1, minor: 0 });
+    let resolution = resolve(candidates, host_version());
     let (host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -273,7 +273,7 @@ fn packet_logger_observes_injects_and_yields_to_the_compatible_mode() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 1, minor: 0 });
+    let resolution = resolve(candidates, host_version());
     let (mut host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -331,6 +331,8 @@ fn falling(y: f64) -> UmiPlayerPhysics {
         yaw: 0.0,
         pitch: 0.0,
         fall_distance: 0.0,
+        fly_speed: 0.05,
+        game_mode: 0,
     }
 }
 
@@ -343,7 +345,7 @@ fn physics_tweak_wraps_the_step_and_queries_the_world() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 1, minor: 0 });
+    let resolution = resolve(candidates, host_version());
     let (mut host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -409,7 +411,7 @@ fn shader_pass_registers_a_valid_pass_and_feeds_its_params() {
         manifest: d.manifest.unwrap(),
         enabled: true,
     });
-    let resolution = resolve(candidates, ApiVersion { major: 1, minor: 0 });
+    let resolution = resolve(candidates, host_version());
     let (mut host, failures) =
         ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
     assert!(failures.is_empty(), "{failures:?}");
@@ -444,4 +446,13 @@ fn shader_pass_registers_a_valid_pass_and_feeds_its_params() {
     host.refuse_post_pass(&id("shader_pass"), "sepia", "test");
     assert!(!host.post_passes().next().unwrap().enabled);
     host.shutdown_all();
+}
+
+/// The API this client implements: the examples still declare 1.0, so every test
+/// here also proves that 1.0 mods load on a 1.1 host (ADR-0094).
+fn host_version() -> ApiVersion {
+    ApiVersion {
+        major: umicraft_modapi_sys::UMI_API_VERSION.major,
+        minor: umicraft_modapi_sys::UMI_API_VERSION.minor,
+    }
 }

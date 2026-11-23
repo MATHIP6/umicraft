@@ -80,8 +80,11 @@ pub struct UmiVersion {
 /// added the `player_physics` service and the world queries (F3.6); 0.6 added
 /// the post-process passes (F3.7); 1.0 added `FRAME` and froze the ABI (F3.9):
 /// from now on fields and functions are only appended, with a minor bump, and
-/// nothing is removed or reordered within major 1 (ADR-0087).
-pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 1, minor: 0 };
+/// nothing is removed or reordered within major 1 (ADR-0087); 1.1 added the
+/// `render_camera` service, `PRE_RENDER`, the camera of `FRAME`, the entity
+/// snapshot and metadata, writable flight and game mode, two HUD primitives and
+/// the screen anchor (ADR-0094).
+pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 1, minor: 1 };
 
 impl UmiVersion {
     /// Whether a host of version `self` can load a mod built for `mod_version`.

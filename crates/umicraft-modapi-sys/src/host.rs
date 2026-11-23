@@ -5,9 +5,9 @@
 use core::ffi::c_void;
 
 use crate::{
-    UmiBytes, UmiCommandFn, UmiEntityVisitFn, UmiEventHeader, UmiEventId, UmiHudCx, UmiHudDrawFn,
-    UmiHudPlacement, UmiModHandle, UmiPhysicsCx, UmiPhysicsFn, UmiServiceMode, UmiSettingDef,
-    UmiSettingValue, UmiStatus, UmiStr, UmiVersion,
+    UmiBytes, UmiCameraCx, UmiCameraFn, UmiCommandFn, UmiEntity, UmiEntityVisitFn, UmiEventHeader,
+    UmiEventId, UmiHudCx, UmiHudDrawFn, UmiHudPlacement, UmiModHandle, UmiPhysicsCx, UmiPhysicsFn,
+    UmiServiceMode, UmiSettingDef, UmiSettingValue, UmiStatus, UmiStr, UmiVersion,
 };
 
 /// How a handler takes part in an event.
@@ -204,5 +204,52 @@ pub struct UmiHost {
         y: f32,
         z: f32,
         w: f32,
+    ) -> UmiStatus,
+    /// Wraps or replaces the `render_camera` service (during `umi_mod_init`
+    /// only). `DENIED` without the `camera` permission or when `mod.toml` does
+    /// not declare the service in `wraps` (or `replaces`), `CONFLICT` for a
+    /// second layer of the same mod. Added in API 1.1.
+    pub register_camera: extern "C" fn(
+        me: UmiModHandle,
+        mode: UmiServiceMode,
+        step: Option<UmiCameraFn>,
+        user: *mut c_void,
+    ) -> UmiStatus,
+    /// Runs the inner camera layers (and the built-in camera) once, like
+    /// `physics_next`. Added in API 1.1.
+    pub camera_next: extern "C" fn(cx: *mut UmiCameraCx) -> UmiStatus,
+    /// Copies up to `capacity` entities of the render-thread snapshot (at most
+    /// 256, nearest first, the local player excluded) into `out` and stores the
+    /// number available in `count`. Only on the render thread inside one of the
+    /// mod's callbacks, else `UNSUPPORTED`; `UNAVAILABLE` outside a world. The
+    /// strings stay valid until the callback returns. Added in API 1.1.
+    pub world_entities_snapshot: extern "C" fn(
+        me: UmiModHandle,
+        out: *mut UmiEntity,
+        capacity: usize,
+        count: *mut usize,
+    ) -> UmiStatus,
+    /// Adds the outline of a rectangle to the widget being drawn, one GUI
+    /// pixel thick. Added in API 1.1.
+    pub hud_outline: extern "C" fn(
+        hud: *mut UmiHudCx,
+        x: f32,
+        y: f32,
+        width: f32,
+        height: f32,
+        color: u32,
+        alpha: f32,
+    ) -> UmiStatus,
+    /// Adds a line from `(x1, y1)` to `(x2, y2)`; `thickness` in GUI pixels,
+    /// clamped to 0.5..=8. Added in API 1.1.
+    pub hud_segment: extern "C" fn(
+        hud: *mut UmiHudCx,
+        x1: f32,
+        y1: f32,
+        x2: f32,
+        y2: f32,
+        color: u32,
+        alpha: f32,
+        thickness: f32,
     ) -> UmiStatus,
 }

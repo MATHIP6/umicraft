@@ -209,6 +209,8 @@ fn physics(c: &mut Criterion) {
         yaw: 0.0,
         pitch: 0.0,
         fall_distance: 0.0,
+        fly_speed: 0.05,
+        game_mode: 0,
     };
     c.bench_function("modhost_physics/physics_chain_one_identity_wrapper", |b| {
         b.iter(|| {

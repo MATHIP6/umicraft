@@ -117,6 +117,17 @@ fn abi_entity(view: &EntityView<'_>) -> UmiEntity {
         yaw: view.yaw,
         pitch: view.pitch,
         name: text(view.name),
+        // The 1.1 metadata lands with phase 1.1.4 (ADR-0094).
+        health: 0.0,
+        max_health: 0.0,
+        armor: 0.0,
+        team: UmiStr::EMPTY,
+        width: 0.0,
+        height: 0.0,
+        velocity: [0.0; 3],
+        flags: 0,
+        is_player: 0,
+        render_position: view.position,
     }
 }
 
