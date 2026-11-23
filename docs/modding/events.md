@@ -34,8 +34,13 @@ outside the viewport.
 Since 1.1 the client sends `FRAME`, and lets the external widgets draw, only after it
 has placed the camera for the frame. Before, it did both at the start of the frame
 and showed the previous frame's camera. The event still fires once per frame, before
-the HUD, so a 1.0 mod sees no difference except fresher data. A widget fed by a
+the HUD, so a 1.0 mod sees no difference except fresher data. `position`, `yaw` and
+`pitch` describe the player, not the camera. Before 1.1, `position` followed the
+third-person orbit (the camera eye minus the eye height); now it is the player's feet
+in every perspective and under a camera mod. A widget fed by a
 `FRAME` intercept therefore draws with the projection of the frame it is shown in.
+
+| `PRE_RENDER` | 13 | render | `camera`: eye, yaw, pitch, effective `fov_y`, aspect, view bob | no | no | Once per drawn frame in a world, after the `render_camera` layers, before the camera reaches the GPU and before `FRAME` (API 1.1, `camera.md`) |
 
 Every string and byte view is borrowed for the duration of the call: copy it to keep it.
 

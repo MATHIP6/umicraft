@@ -62,9 +62,9 @@ itself. Dependencies load first.
 | `replaces` | array of service ids | `[]` | Services this mod replaces entirely; a second mod replacing the same one does not load. |
 | `wraps` | array of service ids | `[]` | Services this mod wraps; any number of mods may, chained in load order. |
 
-A service id matches `^[a-z][a-z0-9_.]{0,63}$`. The only service is
-`player_physics` (see [world.md](world.md)); an unknown one is refused before the
-library is opened. A service may not be listed twice, nor in both lists.
+A service id matches `^[a-z][a-z0-9_.]{0,63}$`. The services are `player_physics`
+(see [world.md](world.md)) and, since 1.1, `render_camera` (see
+[camera.md](camera.md)); an unknown one is refused before the library is opened. A service may not be listed twice, nor in both lists.
 
 ### `[permissions]` (all `false` by default)
 
@@ -72,6 +72,7 @@ library is opened. A service may not be listed twice, nor in both lists.
 |---|---|
 | `network_packets` | Gates the packet events (`PACKET_RECEIVED`, `PACKET_SEND`) and packet injection. Without it the host answers `DENIED`. |
 | `movement` | Gates `player_physics` (wrapping or replacing it). |
+| `camera` | Gates `render_camera` (API 1.1). Not held off by server-compatible mode: it changes what is drawn, not what the server sees. |
 | `filesystem` | Shown to the player only ("files"). |
 | `network_http` | Shown to the player only ("http"). |
 
@@ -106,7 +107,7 @@ Handlers run on the thread that owns the event and must be quick.
 | Thread | What runs there | Budget |
 |---|---|---|
 | game | `PRE_TICK`, `POST_TICK`, `CHAT_*` intercepts, commands, physics layers; the world queries answer only here | 1 ms per call |
-| render | `CONNECTED`, screen and key events, HUD widget draws | 1 ms per call; 0.5 ms for a widget's draw function |
+| render | `CONNECTED`, screen and key events, `FRAME`, `PRE_RENDER`, camera layers, HUD widget draws | 1 ms per call; 0.5 ms for a widget's draw function |
 | network | packet intercepts | 1 ms per call |
 | worker | one per mod: every `observe` handler | none; its queue holds 256 events |
 
@@ -122,6 +123,7 @@ dropped and counted, never waited for. Counters feed the F3 profiler.
 - [packets.md](packets.md): raw packet events and injection (needs `network_packets`).
 - [world.md](world.md): block and entity queries, the `player_physics` layer.
 - [post.md](post.md): WGSL post-process passes over the picture of the world.
+- [camera.md](camera.md): the `render_camera` service and `PRE_RENDER` (API 1.1).
 
 ## Safety and fair play
 
@@ -141,7 +143,7 @@ The F3 screen lists one line per external mod, right after the CPU/GPU lines:
 <dropped> dropped`, plus `off`, `held` or `failed` when the mod is not running.
 Rates come from snapshots one second apart; with no external mod there is
 no line. The mods menu shows each mod's description, version, authors,
-permissions (`packets`, `movement`, `files`, `http`), the first 12 hex digits of its
+permissions (`packets`, `movement`, `files`, `http`, `camera`), the first 12 hex digits of its
 hash and the reason of a failure. A library that is not trusted gets a card
 ("Not trusted: <hash>") whose switch trusts it and loads it at the next start.
 
