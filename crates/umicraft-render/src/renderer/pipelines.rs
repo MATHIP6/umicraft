@@ -32,12 +32,19 @@ pub(super) struct TerrainPipelineState {
 impl TerrainPipelineState {
     /// Opaque pass: closer depth wins, depth is written, alpha cutout runs in
     /// the fragment shader.
+    ///
+    /// `LessEqual`, not `Less`: a model may stack coplanar quads, and the
+    /// later one must win at equal depth. The grass side draws its tinted
+    /// `grass_side_overlay` over `grass_side` (a CUTOUT quad after a SOLID
+    /// one); `Less` rejected the overlay and the side lost its biome colour.
+    /// Vanilla sets `GL_LEQUAL` (MCP `Minecraft.startGame`:
+    /// `GlStateManager.depthFunc(515)`).
     pub(super) fn opaque() -> Self {
         Self {
             label: "terrain pipeline",
             fragment_entry: "fs_main",
             depth_write: true,
-            depth_compare: wgpu::CompareFunction::Less,
+            depth_compare: wgpu::CompareFunction::LessEqual,
             blend: wgpu::BlendState::REPLACE,
             bias: wgpu::DepthBiasState::default(),
             cull_mode: Some(wgpu::Face::Back),

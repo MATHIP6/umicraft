@@ -143,7 +143,9 @@ The main render pass is ordered:
 
 1. **Sky pass** — fullscreen sky, sun/moon and procedural clouds, no depth
    writes.
-2. **Opaque terrain** — depth test `Less`, depth write on, blend `REPLACE`.
+2. **Opaque terrain** — depth test `LessEqual` (was `Less`; changed so coplanar
+   overlay quads such as the grass side overlay win, as vanilla `GL_LEQUAL`),
+   depth write on, blend `REPLACE`.
 3. **Transparent terrain** — depth test `LessEqual`, depth write off,
    premultiplied or straight alpha blending (the textures use straight alpha;
    `SrcAlpha`/`OneMinusSrcAlpha` is the default), back-face culling on.

@@ -198,8 +198,9 @@ impl Renderer {
 
     /// The opaque terrain, nearest chunk first: the SOLID quads (no alpha
     /// test, early depth rejection) and then the CUTOUT ones, which discard
-    /// texels. Both write depth and do not depend on the order. Returns the
-    /// draw calls.
+    /// texels. Both write depth with `LessEqual`, so a CUTOUT quad coplanar
+    /// with a SOLID one (the grass side overlay) is drawn over it. Returns
+    /// the draw calls.
     fn draw_opaque_terrain(&self, pass: &mut wgpu::RenderPass<'_>) -> u32 {
         let mut draws = 0;
         self.quad_indices.bind(pass);

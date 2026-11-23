@@ -163,6 +163,25 @@ fn offscreen_smoke_renders_sky_and_overlay() {
     assert!(image.rgba.chunks_exact(4).any(|pixel| &pixel[..3] != first));
 }
 
+/// Regression: the opaque terrain pipelines used `Less`, so the tinted grass
+/// side overlay (a CUTOUT quad drawn after the coplanar SOLID `grass_side`)
+/// failed the depth test and the side kept the untinted texture colour.
+#[test]
+fn opaque_terrain_lets_a_later_coplanar_quad_win() {
+    for state in [
+        TerrainPipelineState::opaque(),
+        TerrainPipelineState::solid(),
+        TerrainPipelineState::icon(),
+    ] {
+        assert_eq!(
+            state.depth_compare,
+            wgpu::CompareFunction::LessEqual,
+            "{}",
+            state.label
+        );
+    }
+}
+
 /// The terrain shader is only compiled on a GPU device; this parses and
 /// validates it (all three fragment entry points) without one.
 #[test]
