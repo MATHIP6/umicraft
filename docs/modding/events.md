@@ -16,9 +16,26 @@ shown below; an event nobody subscribes to costs nothing.
 | `KEY_PRESSED` | 9 | render | `key: str` | no | no | When one of the mod's own key bindings is pressed with no screen open; only that mod receives it (see `ui.md`) |
 | `PACKET_RECEIVED` | 10 | network | `id: u32`, `data: bytes` | yes: the client never sees it (not `Set Compression` 0x46 nor `Disconnect` 0x40) | no | For every play packet read from the server, before the client decodes it. Needs `network_packets` (see `packets.md`) |
 | `PACKET_SEND` | 11 | network | `id: u32`, `data: bytes` | yes: nothing is written | no | For every play packet about to be written: the client's own, its automatic replies (keepalives) and injected ones. Needs `network_packets` |
-| `FRAME` | 12 | render | `now_ms`, feet `position`, `fps`, `frame_ms`, `yaw`, `pitch`, `left_clicks`/`right_clicks` since the last frame, `ping_ms` (`-1` unknown), `sprinting` | no | no | Once per drawn frame, before the HUD; the snapshot the built-in mods read, without the key state |
+| `FRAME` | 12 | render | `now_ms`, feet `position`, `fps`, `frame_ms`, `yaw`, `pitch`, `left_clicks`/`right_clicks` since the last frame, `ping_ms` (`-1` unknown), `sprinting`; since 1.1 the camera: `eye`, `render_origin`, `view_proj`, `viewport`, `gui_scale`, `fov_y`, `aspect`, `view_bob` | no | no | Once per drawn frame, once the camera of the frame is final and before the external widgets and the HUD are drawn; built from the snapshot the built-in mods read, without the key state |
 
 The intercept handlers of the game-thread events may query the world (`world.md`).
+
+## The camera of `FRAME` (API 1.1)
+
+`view_proj` is the matrix the renderer draws the world with. Its input is a point
+relative to `render_origin`, the integer corner the GPU positions are relative to:
+`clip = view_proj * (point - render_origin, 1)`. Subtracting in `f64` first keeps the
+precision far from the world origin (F2-1a). The matrix already holds the effective
+field of view (option, zoom, sprint, flight; `fov_y`) and the view bobbing
+(`view_bob`). `Frame::world_to_screen(point)` applies all of this. It returns GUI
+pixels from the top-left corner, or `None` when the point is behind the camera or
+outside the viewport.
+
+Since 1.1 the client sends `FRAME`, and lets the external widgets draw, only after it
+has placed the camera for the frame. Before, it did both at the start of the frame
+and showed the previous frame's camera. The event still fires once per frame, before
+the HUD, so a 1.0 mod sees no difference except fresher data. A widget fed by a
+`FRAME` intercept therefore draws with the projection of the frame it is shown in.
 
 Every string and byte view is borrowed for the duration of the call: copy it to keep it.
 

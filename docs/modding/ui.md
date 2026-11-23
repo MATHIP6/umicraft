@@ -24,6 +24,31 @@ before each call. A draw call has a 0.5 ms budget: a failing or slow draw functi
 fails the mod. The player can move, scale and reset the widget in the HUD editor
 (ids `ext:<mod>:<widget>`); locking a widget is not offered for external mods.
 
+API 1.1 adds two primitives. Both count against the existing caps (256 items of each
+kind per widget), and both fall under the same 0.5 ms budget:
+
+- `Hud::outline(x, y, w, h, color, alpha)` (C: `hud_outline`) draws the one-pixel
+  edges of a rectangle. They are four rectangles, so an outline needs room for four
+  more ticks.
+- `Hud::segment(x1, y1, x2, y2, color, alpha, thickness)` (C: `hud_segment`) draws a
+  line at any angle. The thickness is in GUI pixels and is clamped to 0.5..=8.
+
+### Widgets on the screen (API 1.1)
+
+`Placement::new(Anchor::Screen).offset(x, y)` (C: anchor `UMI_HUD_ANCHOR_SCREEN` =
+9) anchors a widget to the screen itself:
+
+- its coordinates are GUI pixels from the top-left corner of the screen, shifted by
+  the offset;
+- the scale is always 1;
+- there is no panel, no padding and no mirroring;
+- the widget is neither listed nor movable in the HUD editor, and a saved layout does
+  not move it.
+
+This is the widget for annotations over the world. A `FRAME` intercept projects a
+world point with `Frame::world_to_screen`, and the widget draws at the result in the
+same frame (`mods/examples/world_marker`).
+
 ## Key bindings
 
 `InitCx::key(key, label, default_binding)`. The binding names are the ones of

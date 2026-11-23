@@ -10,7 +10,7 @@ Status: **in progress** (started 2026-11-23). Design: ADR-0094. Base: API 1.0
 | 1.1.2 | Flight and game mode from a physics layer | a layer toggles flying: the player changes and one `PlayerAbilities` is queued | |
 | 1.1.3 | Depth in post passes | example pass fades by distance; undeclared resources still refused | |
 | 1.1.4 | Entity metadata and the render-thread snapshot | snapshot equals the game-thread query of the same tick; example lists names and health | |
-| 1.1.5 | Camera facts in `FRAME`, `world_to_screen`, `Anchor::Screen`, `hud_outline`, `hud_segment`; `FRAME` and external widgets after the final camera | axis projection test; example box follows a world point | |
+| 1.1.5 | Camera facts in `FRAME`, `world_to_screen`, `Anchor::Screen`, `hud_outline`, `hud_segment`; `FRAME` and external widgets after the final camera | axis projection test; example box follows a world point | done |
 | 1.1.6 | `render_camera` service, `PRE_RENDER`, generic service chain | orbit example; player state bit-identical with a camera layer | |
 | 1.1.7 | Docs, template and examples on `api_version = "1.1"`, header | fmt, clippy `-D warnings`, workspace tests | |
 
@@ -128,9 +128,10 @@ pub hud_segment: extern "C" fn(hud, x1, y1, x2, y2, color: u32, alpha: f32, thic
 ### `umicraft-modapi` (safe side)
 
 - `Frame`: `eye()`, `render_origin()`, `view_proj()`, `viewport()`, `gui_scale()`,
-  `fov_y()`, `aspect()`, `view_bob()` (each `Option` when `header.size` is a 1.0
-  payload), `world_to_screen([f64; 3]) -> Option<[f32; 2]>` (GUI pixels; `None`
-  behind the camera, outside the viewport, or on a 1.0 host).
+  `fov_y()`, `aspect()`, `view_bob()`, `world_to_screen([f64; 3]) -> Option<[f32; 2]>`
+  (GUI pixels; `None` behind the camera or outside the viewport). Plain getters: a
+  mod built against 1.1 exports version 1.1, and a 1.0 host refuses it. The
+  trampolines also refuse a payload smaller than the 1.1 struct.
 - `PreRender` event view with `camera() -> CameraState`.
 - `CameraState` (getters/setters), `Camera<'a>` (`state()`, `state_mut()`,
   `next()`), `CameraInput` getters, `cx.wrap_camera(..)`, `cx.replace_camera(..)`.
