@@ -236,3 +236,35 @@ fn a_post_pass_filters_the_picture_and_a_bad_one_is_refused() {
         .chunks_exact(4)
         .all(|pixel| pixel[0] == pixel[1] && pixel[1] == pixel[2]));
 }
+
+#[test]
+#[ignore = "requires a GPU adapter"]
+fn a_post_pass_can_read_the_scene_depth() {
+    use crate::post_chain::{PostPassFrame, PostPassSource, POST_PRELUDE};
+
+    // Shows the linear depth in blocks / 512 as grey: the empty sky reads FAR.
+    let fragment = "@fragment fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {\n\
+        let d = umi_linear_depth(in.uv) / umi.depth.y;\n\
+        return vec4<f32>(d, d, d, 1.0);\n\
+    }\n";
+    let sources = [PostPassSource {
+        label: "depth".into(),
+        wgsl: format!("{POST_PRELUDE}{fragment}"),
+    }];
+    let mut renderer = Renderer::new_offscreen(32, 32).expect("offscreen renderer");
+    assert!(renderer.set_post_passes(&sources)[0].is_ok());
+    let on = PostPassFrame {
+        enabled: true,
+        ..PostPassFrame::default()
+    };
+    renderer.update_post(&[on]);
+    renderer
+        .render(&Camera::default(), &Overlay::new(32, 32))
+        .expect("render");
+    let image = renderer.read_pixels().expect("readback");
+    // The sky dome is drawn at a finite depth in places, so the picture is not a
+    // flat colour: depth was read, and part of it is the far plane.
+    let reds: Vec<u8> = image.rgba.chunks_exact(4).map(|pixel| pixel[0]).collect();
+    assert!(reds.iter().any(|&red| red >= 250), "far pixels read FAR");
+    assert!(reds.iter().any(|&red| red < 250), "nearer pixels read less");
+}

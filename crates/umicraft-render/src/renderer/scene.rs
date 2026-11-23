@@ -228,8 +228,12 @@ impl Renderer {
     /// message for a shader that was refused. A refused pass is kept but never
     /// drawn. Passes start disabled until [`Renderer::update_post`] enables them.
     pub fn set_post_passes(&mut self, passes: &[PostPassSource]) -> Vec<Result<(), String>> {
-        self.post_chain
-            .set_passes(&self.device, self.scene_blur.scene_view(), passes)
+        self.post_chain.set_passes(
+            &self.device,
+            self.scene_blur.scene_view(),
+            Some(&self.depth_view),
+            passes,
+        )
     }
 
     /// Enables the post passes and hands them their parameters for this frame,

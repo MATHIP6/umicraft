@@ -7,7 +7,8 @@
 //! naga's own message in the log instead of failing on the GPU thread later. The
 //! renderer compiles the same composed text, which is why the checks are strict: the
 //! module must offer exactly the two entry points the renderer binds and no resource
-//! the renderer does not provide.
+//! the renderer does not provide. A shader written for API 1.0 never mentions the
+//! depth binding added by 1.1 and validates unchanged.
 
 use naga::valid::{Capabilities, ValidationFlags, Validator};
 use naga::ShaderStage;
@@ -24,10 +25,12 @@ pub const PRELUDE: &str = r"struct UmiPost {
     time: f32,
     frame: u32,
     params: array<vec4<f32>, 4>,
+    depth: vec4<f32>,
 };
 @group(0) @binding(0) var umi_scene: texture_2d<f32>;
 @group(0) @binding(1) var umi_sampler: sampler;
 @group(0) @binding(2) var<uniform> umi: UmiPost;
+@group(0) @binding(3) var umi_depth: texture_depth_2d;
 
 struct UmiVertexOut {
     @builtin(position) position: vec4<f32>,
@@ -42,12 +45,22 @@ fn umi_vs(@builtin(vertex_index) index: u32) -> UmiVertexOut {
     out.uv = uv;
     return out;
 }
+
+fn umi_linear_depth(uv: vec2<f32>) -> f32 {
+    if umi.depth.z < 0.5 {
+        return umi.depth.y;
+    }
+    let size = vec2<i32>(textureDimensions(umi_depth));
+    let texel = clamp(vec2<i32>(uv * vec2<f32>(size)), vec2<i32>(0), size - vec2<i32>(1));
+    let d = textureLoad(umi_depth, texel, 0);
+    return umi.depth.x * umi.depth.y / (umi.depth.y - d * (umi.depth.y - umi.depth.x));
+}
 ";
 
 const VERTEX_ENTRY: &str = "umi_vs";
 const FRAGMENT_ENTRY: &str = "fs_main";
 /// The bindings of the prelude, all in group 0.
-const PRELUDE_BINDINGS: [(u32, u32); 3] = [(0, 0), (0, 1), (0, 2)];
+const PRELUDE_BINDINGS: [(u32, u32); 4] = [(0, 0), (0, 1), (0, 2), (0, 3)];
 
 /// Why a post-process shader was refused.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -73,7 +86,7 @@ pub enum PostShaderError {
         found: Vec<String>,
     },
     /// The shader declares a resource the pass is not given.
-    #[error("resource @group({group}) @binding({binding}) is not provided; only the prelude's three exist")]
+    #[error("resource @group({group}) @binding({binding}) is not provided; only the prelude's four exist")]
     ExtraResource {
         /// Bind group of the extra resource.
         group: u32,
@@ -233,12 +246,42 @@ fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {
 
     #[test]
     fn a_storage_buffer_is_refused() {
-        let storage = format!("@group(0) @binding(3) var<storage, read> data: array<f32>;\n{GREY}");
+        let storage = format!("@group(0) @binding(4) var<storage, read> data: array<f32>;\n{GREY}");
         assert_eq!(
             validate(&storage),
             Err(PostShaderError::ExtraResource {
                 group: 0,
-                binding: 3
+                binding: 4
+            })
+        );
+    }
+
+    #[test]
+    fn a_shader_that_never_mentions_depth_validates_unchanged() {
+        // The API 1.0 greyscale shader of the guide: no depth, no helper.
+        assert!(validate(GREY).is_ok());
+    }
+
+    #[test]
+    fn a_shader_reading_the_scene_depth_validates() {
+        let fog = "@fragment
+fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {
+    let c = textureSample(umi_scene, umi_sampler, in.uv);
+    let blocks = umi_linear_depth(in.uv);
+    let raw = textureLoad(umi_depth, vec2<i32>(0, 0), 0);
+    return vec4<f32>(c.rgb * (raw + 1.0 / (1.0 + blocks)), c.a);
+}";
+        assert!(validate(fog).is_ok());
+    }
+
+    #[test]
+    fn a_resource_at_binding_4_is_refused() {
+        let extra = format!("@group(0) @binding(4) var extra: texture_2d<f32>;\n{GREY}");
+        assert_eq!(
+            validate(&extra),
+            Err(PostShaderError::ExtraResource {
+                group: 0,
+                binding: 4
             })
         );
     }

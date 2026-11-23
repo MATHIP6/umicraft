@@ -3,7 +3,7 @@
 //! Loads the real `hello` and `panicking` example cdylibs (F3.2 acceptance test) and
 //! dispatches events to them through a core `EventBus` (F3.3); `packet_logger`
 //! observes and injects packets (F3.5); `physics_tweak` wraps the player physics and
-//! queries the world (F3.6); `shader_pass` registers a validated post-process pass
+//! queries the world (F3.6); `shader_pass` and `depth_fog` register validated post-process passes
 //! (F3.7).
 //!
 //! The libraries are built once per test binary with `cargo build --offline`. The
@@ -45,6 +45,8 @@ fn built_libraries() -> &'static Path {
                 "umicraft-example-physics-tweak",
                 "-p",
                 "umicraft-example-shader-pass",
+                "-p",
+                "umicraft-example-depth-fog",
                 "--offline",
             ])
             .status()
@@ -445,6 +447,38 @@ fn shader_pass_registers_a_valid_pass_and_feeds_its_params() {
 
     host.refuse_post_pass(&id("shader_pass"), "sepia", "test");
     assert!(!host.post_passes().next().unwrap().enabled);
+    host.shutdown_all();
+}
+
+/// The real `depth_fog` (API 1.1): its WGSL reads `umi_linear_depth`, passes the host's
+/// validation and gets its settings as `umi.params[0]`.
+#[test]
+fn depth_fog_registers_a_pass_that_reads_the_scene_depth() {
+    let tmp = TempDir::new();
+    install(&tmp.0, "depth_fog");
+    let candidates = discover(&tmp.0).into_iter().map(|d| Candidate {
+        manifest: d.manifest.unwrap(),
+        enabled: true,
+    });
+    let resolution = resolve(candidates, host_version());
+    let (mut host, failures) =
+        ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
+    assert!(failures.is_empty(), "{failures:?}");
+    let pass = host.post_passes().next().expect("one pass");
+    assert_eq!((pass.key, pass.enabled), ("fog", true));
+    assert!(pass.wgsl.contains("umi_linear_depth(in.uv)"));
+    assert!(pass.wgsl.contains("var umi_depth: texture_depth_2d"));
+
+    host.set_setting(&id("depth_fog"), "start", &SettingValue::Number(96.0))
+        .unwrap();
+    let mut game = EventBus::default();
+    host.install(&mut game, EventThread::Game);
+    game.dispatch(&mut PreTick::new(0));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while host.post_passes().next().unwrap().params()[0][0] != 96.0 {
+        assert!(std::time::Instant::now() < deadline, "params never set");
+        std::thread::yield_now();
+    }
     host.shutdown_all();
 }
 

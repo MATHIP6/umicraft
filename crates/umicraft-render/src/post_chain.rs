@@ -17,6 +17,12 @@
 //! carry the tests. With no enabled pass nothing here runs and the extra target
 //! does not exist, so the frame is the one of a renderer without mods.
 //!
+//! Every pass also reads the scene depth buffer (`umi_depth`, API 1.1). The post
+//! passes are encoded after the main pass that writes the depth has ended and carry
+//! no depth attachment themselves, so the texture is only ever sampled while they
+//! run; the depth stays intact for the passes drawn over the screen afterwards.
+//! Without a depth view a 1x1 placeholder is bound and `umi.depth.z` is 0.
+//!
 //! The WGSL prelude (bindings, uniform, the `umi_vs` vertex shader) is owned by
 //! `umicraft-modhost`, which hands the composed source over. A source that the
 //! GPU refuses is kept as a failed pass: it is never drawn and the error comes
@@ -25,6 +31,8 @@
 use std::time::Instant;
 
 use bytemuck::{Pod, Zeroable};
+
+use crate::camera::{FAR, NEAR};
 
 /// A post pass to compile: the composed WGSL (prelude included) of a mod.
 #[derive(Debug, Clone)]
@@ -44,7 +52,10 @@ pub struct PostPassFrame {
     pub params: [[f32; 4]; 4],
 }
 
-/// The uniform of a pass: the `UmiPost` struct of the prelude, 80 bytes.
+/// The uniform of a pass: the `UmiPost` struct of the prelude, 96 bytes.
+///
+/// `depth` closes the struct (offset 80, a 16-aligned `vec4`), so a 1.0 shader's
+/// view of the earlier fields is unchanged.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct PostUniform {
@@ -52,6 +63,8 @@ pub(crate) struct PostUniform {
     time: f32,
     frame: u32,
     params: [[f32; 4]; 4],
+    /// `x` near, `y` far, `z` 1.0 when `umi_depth` is the real scene depth, `w` unused.
+    depth: [f32; 4],
 }
 
 /// Where a pass reads and writes: the `scene` texture or the extra target.
@@ -106,6 +119,10 @@ struct Extra {
 pub(crate) struct PostChain {
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
+    /// Bound as `umi_depth` when the renderer has no depth view to offer.
+    placeholder_depth: wgpu::TextureView,
+    /// Whether the bound depth is the real scene depth.
+    depth_valid: bool,
     format: wgpu::TextureFormat,
     size: (u32, u32),
     started: Instant,
@@ -137,6 +154,8 @@ impl PostChain {
                 min_filter: wgpu::FilterMode::Linear,
                 ..Default::default()
             }),
+            placeholder_depth: create_placeholder_depth(device),
+            depth_valid: false,
             format,
             size,
             started: Instant::now(),
@@ -155,11 +174,13 @@ impl PostChain {
 
     /// Replaces the passes. Each source is compiled inside a validation error
     /// scope, so a bad shader is reported instead of panicking; the result has
-    /// one entry per source. `scene` is the view the first pass reads.
+    /// one entry per source. `scene` is the view the first pass reads and `depth`
+    /// the scene depth view (`None` binds the placeholder, marked invalid).
     pub(crate) fn set_passes(
         &mut self,
         device: &wgpu::Device,
         scene: &wgpu::TextureView,
+        depth: Option<&wgpu::TextureView>,
         sources: &[PostPassSource],
     ) -> Vec<Result<(), String>> {
         self.passes.clear();
@@ -179,7 +200,7 @@ impl PostChain {
         self.enabled.clear();
         self.enabled.resize(self.passes.len(), false);
         self.active = 0;
-        self.rebuild_targets(device, scene);
+        self.rebuild_targets(device, scene, depth);
         results
     }
 
@@ -245,8 +266,15 @@ impl PostChain {
     }
 
     /// Recreates the extra target and the bind groups for the current size and
-    /// the (possibly new) scene view. Nothing is allocated without a pass.
-    fn rebuild_targets(&mut self, device: &wgpu::Device, scene: &wgpu::TextureView) {
+    /// the (possibly new) scene and depth views. Nothing is allocated without a pass.
+    fn rebuild_targets(
+        &mut self,
+        device: &wgpu::Device,
+        scene: &wgpu::TextureView,
+        depth: Option<&wgpu::TextureView>,
+    ) {
+        self.depth_valid = depth.is_some();
+        let depth = depth.unwrap_or(&self.placeholder_depth);
         if self.passes.iter().all(Option::is_none) {
             self.extra = None;
             return;
@@ -286,6 +314,10 @@ impl PostChain {
                             binding: 2,
                             resource: pass.uniform.as_entire_binding(),
                         },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: wgpu::BindingResource::TextureView(depth),
+                        },
                     ],
                 })
             };
@@ -295,15 +327,16 @@ impl PostChain {
     }
 
     /// Follows a window resize: the extra target and the groups are rebuilt
-    /// around the new `scene` view.
+    /// around the new `scene` and `depth` views.
     pub(crate) fn resize(
         &mut self,
         device: &wgpu::Device,
         scene: &wgpu::TextureView,
+        depth: Option<&wgpu::TextureView>,
         size: (u32, u32),
     ) {
         self.size = size;
-        self.rebuild_targets(device, scene);
+        self.rebuild_targets(device, scene, depth);
     }
 
     /// Sets which passes run and writes their uniforms. Extra or missing
@@ -312,6 +345,7 @@ impl PostChain {
         self.frame = self.frame.wrapping_add(1);
         let time = self.started.elapsed().as_secs_f32();
         let resolution = [self.size.0 as f32, self.size.1 as f32];
+        let depth = [NEAR, FAR, f32::from(u8::from(self.depth_valid)), 0.0];
         self.active = 0;
         for (index, enabled) in self.enabled.iter_mut().enumerate() {
             let frame = frames.get(index).filter(|frame| frame.enabled);
@@ -326,6 +360,7 @@ impl PostChain {
                 time,
                 frame: self.frame,
                 params: frame.params,
+                depth,
             };
             queue.write_buffer(&pass.uniform, 0, bytemuck::bytes_of(&uniform));
         }
@@ -388,7 +423,27 @@ impl PostChain {
     }
 }
 
-/// The layout of the contract: the scene, a linear sampler, the uniform.
+/// A 1x1 depth texture bound when the scene depth cannot be.
+fn create_placeholder_depth(device: &wgpu::Device) -> wgpu::TextureView {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("post placeholder depth"),
+        size: wgpu::Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Depth32Float,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    texture.create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+/// The layout of the contract: the scene, a linear sampler, the uniform and the
+/// scene depth (read with `textureLoad`: a depth texture takes no filtering sampler).
 fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("post layout"),
@@ -396,7 +451,7 @@ fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     })
 }
 
-fn layout_entries() -> [wgpu::BindGroupLayoutEntry; 3] {
+fn layout_entries() -> [wgpu::BindGroupLayoutEntry; 4] {
     let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -424,6 +479,14 @@ fn layout_entries() -> [wgpu::BindGroupLayoutEntry; 3] {
                 min_binding_size: wgpu::BufferSize::new(std::mem::size_of::<PostUniform>() as u64),
             },
         ),
+        entry(
+            3,
+            wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Depth,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+        ),
     ]
 }
 
@@ -439,10 +502,12 @@ const PRELUDE_TEXT: &str = r#"struct UmiPost {
     time: f32,
     frame: u32,
     params: array<vec4<f32>, 4>,
+    depth: vec4<f32>,
 };
 @group(0) @binding(0) var umi_scene: texture_2d<f32>;
 @group(0) @binding(1) var umi_sampler: sampler;
 @group(0) @binding(2) var<uniform> umi: UmiPost;
+@group(0) @binding(3) var umi_depth: texture_depth_2d;
 
 struct UmiVertexOut {
     @builtin(position) position: vec4<f32>,
@@ -456,6 +521,16 @@ fn umi_vs(@builtin(vertex_index) index: u32) -> UmiVertexOut {
     out.position = vec4<f32>(uv * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0), 0.0, 1.0);
     out.uv = uv;
     return out;
+}
+
+fn umi_linear_depth(uv: vec2<f32>) -> f32 {
+    if umi.depth.z < 0.5 {
+        return umi.depth.y;
+    }
+    let size = vec2<i32>(textureDimensions(umi_depth));
+    let texel = clamp(vec2<i32>(uv * vec2<f32>(size)), vec2<i32>(0), size - vec2<i32>(1));
+    let d = textureLoad(umi_depth, texel, 0);
+    return umi.depth.x * umi.depth.y / (umi.depth.y - d * (umi.depth.y - umi.depth.x));
 }
 "#;
 
@@ -485,12 +560,13 @@ fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {
     }
 
     #[test]
-    fn the_uniform_is_80_bytes_like_the_prelude_struct() {
-        assert_eq!(std::mem::size_of::<PostUniform>(), 80);
+    fn the_uniform_is_96_bytes_like_the_prelude_struct() {
+        assert_eq!(std::mem::size_of::<PostUniform>(), 96);
         assert_eq!(std::mem::offset_of!(PostUniform, resolution), 0);
         assert_eq!(std::mem::offset_of!(PostUniform, time), 8);
         assert_eq!(std::mem::offset_of!(PostUniform, frame), 12);
         assert_eq!(std::mem::offset_of!(PostUniform, params), 16);
+        assert_eq!(std::mem::offset_of!(PostUniform, depth), 80);
     }
 
     #[test]
@@ -554,6 +630,19 @@ fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {
                     naga::AddressSpace::Handle,
                 ) => {}
                 (
+                    wgpu::BindingType::Texture {
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                        sample_type: wgpu::TextureSampleType::Depth,
+                    },
+                    naga::TypeInner::Image {
+                        dim: naga::ImageDimension::D2,
+                        arrayed: false,
+                        class: naga::ImageClass::Depth { multi: false },
+                    },
+                    naga::AddressSpace::Handle,
+                ) => {}
+                (
                     wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     naga::TypeInner::Sampler { comparison: false },
                     naga::AddressSpace::Handle,
@@ -569,6 +658,40 @@ fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {
                 other => panic!("binding {} mismatch: {other:?}", binding.binding),
             }
         }
+    }
+
+    /// The inverse of the DirectX-style perspective depth, as `umi_linear_depth`
+    /// writes it in the prelude (kept in step with the WGSL by this test).
+    fn linear_depth(depth: f32, near: f32, far: f32) -> f32 {
+        near * far / (far - depth * (far - near))
+    }
+
+    #[test]
+    fn the_prelude_depth_formula_inverts_the_camera_projection() {
+        let projection = glam::camera::rh::proj::directx::perspective(1.0, 1.0, NEAR, FAR);
+        for blocks in [NEAR, 1.0_f32, 8.0, 64.0, 300.0, FAR] {
+            let clip = projection * glam::Vec4::new(0.0, 0.0, -blocks, 1.0);
+            let depth = clip.z / clip.w;
+            let back = linear_depth(depth, NEAR, FAR);
+            assert!((back - blocks).abs() <= blocks * 1.0e-3, "{blocks}: {back}");
+        }
+        assert!((linear_depth(0.0, NEAR, FAR) - NEAR).abs() < 1.0e-6);
+        assert!((linear_depth(1.0, NEAR, FAR) - FAR).abs() < FAR * 2.0e-3);
+    }
+
+    #[test]
+    fn the_prelude_declares_the_depth_texture_and_helper() {
+        let module = module();
+        assert!(module
+            .functions
+            .iter()
+            .any(|(_, f)| f.name.as_deref() == Some("umi_linear_depth")));
+        let (_, depth) = module
+            .global_variables
+            .iter()
+            .find(|(_, global)| global.binding.as_ref().is_some_and(|b| b.binding == 3))
+            .expect("binding 3");
+        assert_eq!(depth.name.as_deref(), Some("umi_depth"));
     }
 
     #[test]

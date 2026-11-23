@@ -1,0 +1,9 @@
+[mod]
+id = "depth_fog"
+name = "Depth fog"
+version = "0.1.0"
+authors = ["Umicraft contributors"]
+api_version = "1.1"
+license = "MIT"
+description = "Teaching example: a post-process shader that reads the scene depth and fades everything beyond a distance toward a fog colour. It only hides detail, so it gives no advantage."
+library = "depth_fog"
