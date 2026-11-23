@@ -25,7 +25,7 @@ use umicraft_protocol::packets::play::clientbound::{
 use umicraft_world::World;
 
 use super::wire::VELOCITY_UNITS;
-use crate::game::abilities::{apply_mode_rules, set_gamemode};
+use crate::game::abilities::{apply_mode_rules, set_gamemode, settle_after_physics};
 use crate::game::commands::{command_of, CommandQueue};
 use crate::game::messages::{RenderEvent, ViewAngle};
 use crate::game::mod_world::ModPhysics;
@@ -99,7 +99,8 @@ pub(in crate::game) fn apply_placement(
         None => {
             let mut state = GameState::new(position);
             if let Some(chain) = &game.physics {
-                state.set_physics(Some(Box::new(ModPhysics::new(chain.clone()))));
+                let mode = game.physics_mode.clone();
+                state.set_physics(Some(Box::new(ModPhysics::new(chain.clone(), mode))));
             }
             game.state = Some(state);
             game.status_data.placed = true;
@@ -184,6 +185,13 @@ pub(in crate::game) fn apply_correction(
     correction: &ServerCorrection,
     queue: &mut CommandQueue,
 ) {
+    // The replay runs the mods' physics layers again; what it changes is
+    // settled like a tick's (see `settle_after_physics`).
+    game.physics_mode.set(game.gamemode);
+    let was_flying = game
+        .state
+        .as_ref()
+        .is_some_and(|state| state.player().flying);
     if let Some(state) = game.state.as_mut() {
         if let Some(world) = game.world.as_ref() {
             state.apply_correction(correction, world);
@@ -191,6 +199,7 @@ pub(in crate::game) fn apply_correction(
         game.yaw = state.player().yaw;
         game.pitch = state.player().pitch;
     }
+    settle_after_physics(game, was_flying, queue);
     queue.push(ClientCommand::AckPosition {
         x: correction.x,
         y: correction.y,

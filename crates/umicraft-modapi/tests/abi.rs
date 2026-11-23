@@ -14,8 +14,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use umicraft_modapi::{
     umicraft_mod, Anchor, Block, Chat, ChatReceived, ChatSend, Connected, Disconnected, Frame,
-    InitCx, KeyPressed, Mod, ModError, PacketReceived, PacketSend, Packets, Physics, Placement,
-    PostPass, PostTick, PreTick, ScreenClosed, ScreenOpened, Setting, World,
+    GameMode, InitCx, KeyPressed, Mod, ModError, PacketReceived, PacketSend, Packets, Physics,
+    Placement, PostPass, PostTick, PreTick, ScreenClosed, ScreenOpened, Setting, World,
 };
 use umicraft_modapi_sys::*;
 
@@ -39,6 +39,8 @@ static REFUSE_HUD: AtomicBool = AtomicBool::new(false);
 /// Make the physics layer fail, or register it as a replacing layer.
 static FAIL_PHYSICS: AtomicBool = AtomicBool::new(false);
 static REPLACE_PHYSICS: AtomicBool = AtomicBool::new(false);
+/// Make the physics layer toggle flight and the game mode (API 1.1).
+static FLIGHT_LAYER: AtomicBool = AtomicBool::new(false);
 /// Calls of the fake `physics_next`.
 static NEXT_CALLS: AtomicUsize = AtomicUsize::new(0);
 /// The physics layers the fake host registered, with their mode.
@@ -209,8 +211,26 @@ fn register_ui(cx: &mut InitCx<'_>) -> Result<(), ModError> {
     })
 }
 
+/// Reports the flight facts, then starts flying and predicts creative.
+fn flight_layer(physics: &mut Physics<'_>) -> Result<(), ModError> {
+    let state = physics.state_mut();
+    see(format!(
+        "flight {} {} {} {:?}",
+        state.flying(),
+        state.allow_flying(),
+        state.fly_speed(),
+        state.game_mode()
+    ));
+    state.set_flying(true);
+    state.set_game_mode(GameMode::Creative);
+    Ok(())
+}
+
 /// Reads the input, changes the writable state and runs the inner layers.
 fn physics_layer(physics: &mut Physics<'_>) -> Result<(), ModError> {
+    if FLIGHT_LAYER.load(SeqCst) {
+        return flight_layer(physics);
+    }
     let input = physics.input();
     see(format!(
         "input {} {} {} {} {} {} {}",
@@ -753,6 +773,7 @@ fn fresh() -> MutexGuard<'static, ()> {
         &REFUSE_HUD,
         &FAIL_PHYSICS,
         &REPLACE_PHYSICS,
+        &FLIGHT_LAYER,
     ] {
         flag.store(false, SeqCst);
     }
@@ -1617,6 +1638,47 @@ fn physics_layer_refuses_bad_pointers_and_small_structs() {
         UmiStatus::INVALID_ARGUMENT
     );
     assert_eq!(NEXT_CALLS.load(SeqCst), 0);
+}
+
+#[test]
+fn a_layer_reads_and_writes_the_flight_and_the_game_mode() {
+    let _guard = fresh();
+    FLIGHT_LAYER.store(true, SeqCst);
+    init_ok();
+    let mut state = UmiPlayerPhysics {
+        flags: UMI_PHYSICS_ALLOW_FLYING,
+        ..physics_state()
+    };
+    assert_eq!(run_layer(&mut state, &physics_input()), UmiStatus::OK);
+    assert_eq!(seen(), ["flight false true 0.05 Survival"]);
+    assert_eq!(
+        state.flags & (UMI_PHYSICS_FLYING | UMI_PHYSICS_ALLOW_FLYING),
+        UMI_PHYSICS_FLYING | UMI_PHYSICS_ALLOW_FLYING
+    );
+    assert_eq!(state.game_mode, UMI_GAME_MODE_CREATIVE);
+    assert_eq!(state.fly_speed, 0.05, "read-only");
+}
+
+#[test]
+fn a_1_0_sized_state_is_refused_before_a_layer_could_reach_past_it() {
+    // The safe view spans the 1.1 struct; a 1.0 host (72 bytes) cannot load a
+    // 1.1 mod anyway, and the view's own 1.0 fallbacks are unit-tested.
+    let _guard = fresh();
+    FLIGHT_LAYER.store(true, SeqCst);
+    init_ok();
+    let layer = LAYERS.lock().unwrap()[0];
+    let mut state = UmiPlayerPhysics {
+        size: 72,
+        ..physics_state()
+    };
+    let cx: *mut UmiPhysicsCx = (&mut state as *mut UmiPlayerPhysics).cast();
+    let input = physics_input();
+    assert_eq!(
+        (layer.step)(cx, &mut state, &input, layer.user as *mut c_void),
+        UmiStatus::INVALID_ARGUMENT
+    );
+    assert!(seen().is_empty());
+    assert_eq!(state.flags & UMI_PHYSICS_FLYING, 0);
 }
 
 #[test]

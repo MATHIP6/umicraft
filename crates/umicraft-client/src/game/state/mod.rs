@@ -29,6 +29,7 @@ use umicraft_world::{BlockPos, ChunkPos, World};
 use super::combat;
 use super::look::LookSlot;
 use super::messages::GameStatus;
+use super::mod_world::SharedGameMode;
 use crate::hud::social as social_view;
 use crate::scene::cracks::Crack;
 use crate::screens::connection_end::ConnectionEnd;
@@ -180,6 +181,9 @@ pub(super) struct Game {
     /// The mods' `player_physics` layers, set on every new player state; `None`
     /// when no mod registered one (F3.6).
     pub(super) physics: Option<PhysicsChain>,
+    /// The game mode the physics layers read and may change; the game stores
+    /// its own before every physics run and applies a change after it.
+    pub(super) physics_mode: SharedGameMode,
 }
 
 impl Game {
@@ -239,6 +243,7 @@ impl Game {
             bus: EventBus::default(),
             commands: None,
             physics: None,
+            physics_mode: SharedGameMode::default(),
         }
     }
 

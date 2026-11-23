@@ -72,6 +72,39 @@ pub(super) fn apply_movement_stats(game: &mut Game) {
     );
 }
 
+/// Settles what the physics run changed: first the game mode a mod's layer
+/// predicted, then the flying state, reported to the server.
+///
+/// Both the tick and the replay of a server correction end here, so a flight
+/// change reaches the server once whichever of them made it, and neither the
+/// layers nor the replay send anything themselves: the one `C13` of a change
+/// is `report_flight`'s, comparing the state before the run (`was_flying`)
+/// with the state after it.
+pub(super) fn settle_after_physics(game: &mut Game, was_flying: bool, queue: &mut CommandQueue) {
+    predict_game_mode(game);
+    report_flight(game, was_flying, queue);
+}
+
+/// Applies the game mode a physics layer asked for, as a local prediction.
+///
+/// It takes the path of a server change ([`set_gamemode`]) and sends no packet:
+/// the next game-mode packet of the server wins. The mode rules reset the
+/// abilities to the server's, so the flying state the run ended with (a layer's
+/// or the player's own) is put back; whether it stands is the server's call.
+fn predict_game_mode(game: &mut Game) {
+    let predicted = game.physics_mode.get();
+    if predicted == game.gamemode {
+        return;
+    }
+    let flying = game.state.as_ref().map(|state| state.player().flying);
+    set_gamemode(game, predicted);
+    if let (Some(state), Some(flying)) = (game.state.as_mut(), flying) {
+        let player = state.player();
+        let (allow_flying, fly_speed) = (player.allow_flying, player.fly_speed);
+        state.set_abilities(allow_flying, flying, fly_speed);
+    }
+}
+
 /// Tells the server about a change of the flying state.
 ///
 /// MCP `EntityPlayerSP.sendPlayerAbilities` (`C13PacketPlayerAbilities`)
