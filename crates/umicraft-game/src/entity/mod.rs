@@ -25,6 +25,8 @@ pub mod meta;
 pub mod mob_state;
 pub mod motion;
 pub mod nametag;
+mod object_hits;
+mod object_liquid;
 pub mod objects;
 pub mod painting;
 pub mod profile;

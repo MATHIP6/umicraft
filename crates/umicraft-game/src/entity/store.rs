@@ -873,13 +873,21 @@ impl EntityStore {
     /// the water, by one tick, with the collisions of `world`.
     /// Call it right after [`Self::tick`].
     pub fn tick_objects<S: crate::shapes::BlockSource + ?Sized>(&mut self, world: &S) {
+        let targets = super::objects::arrow_targets(self.entities.values());
+        let mut vanished = Vec::new();
         for entity in self.entities.values_mut() {
             // `World.updateEntities` skips a rider: its vehicle puts it at the
             // seat, so an item on a hologram mount does not fall.
-            if entity.collecting.is_none() && entity.vehicle.is_none() {
-                super::objects::step(entity, world);
+            if entity.collecting.is_none()
+                && entity.vehicle.is_none()
+                && super::objects::step(entity, world, &targets) == super::objects::Fate::Vanishes
+            {
+                vanished.push(entity.id);
             }
             swim_guardian(entity, world);
+        }
+        for id in vanished {
+            self.entities.remove(&id);
         }
         // `EntityLightningBolt.onUpdate`: the bolt flashes one to three times
         // and dies; the number of ticks it takes is random, so it is spread

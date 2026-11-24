@@ -116,6 +116,9 @@ pub struct EntityRecord {
     pub ghost_visible: bool,
     /// Ticks the entity has lived since it was spawned.
     pub age_ticks: u32,
+    /// Ticks an arrow has flown since it was spawned or last bounced off an
+    /// entity (MCP `EntityArrow.ticksInAir`).
+    pub air_ticks: u32,
     /// Wall direction of an item frame: 0 south, 1 west, 2 north, 3 east.
     pub frame_direction: u8,
     /// Rotation step (0..=7) of the item inside an item frame.
@@ -298,6 +301,7 @@ impl EntityRecord {
             local: false,
             ghost_visible: false,
             age_ticks: 0,
+            air_ticks: 0,
             frame_direction: 0,
             frame_rotation: 0,
             flags: EntityFlags::default(),

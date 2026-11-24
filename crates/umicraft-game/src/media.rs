@@ -85,17 +85,14 @@ fn normalize(vector: DVec3) -> DVec3 {
     }
 }
 
-/// Whether the player is in water, pushing it along the current.
+/// Scans the water between `min` and `max` the way
+/// `World.handleMaterialAcceleration` does (line 2077).
 ///
-/// MCP `Entity.handleWaterMovement` (line 1101) and
-/// `World.handleMaterialAcceleration` (line 2077): the water blocks that
-/// overlap the box shrunk by 0.4 vertically and 0.001 on every side count
-/// when the top of the scanned range reaches their surface; their flow
-/// directions are summed, normalised and applied as 0.014 of motion.
-pub fn handle_water_movement<S: BlockSource + ?Sized>(player: &mut Player, world: &S) -> bool {
-    let bounds = player.bounding_box();
-    let min = bounds.min + DVec3::new(0.001, 0.4 + 0.001, 0.001);
-    let max = bounds.max - DVec3::new(0.001, 0.4 + 0.001, 0.001);
+/// The water blocks that overlap the box count when the top of the scanned
+/// range reaches their surface. Returns `None` when there is none, else the
+/// push of the current: the flow directions of those blocks summed,
+/// normalised and scaled to 0.014 (zero in still water).
+pub fn water_current<S: BlockSource + ?Sized>(min: DVec3, max: DVec3, world: &S) -> Option<DVec3> {
     let top = (max.y + 1.0).floor() as i32;
     let mut in_water = false;
     let mut current = DVec3::ZERO;
@@ -120,10 +117,23 @@ pub fn handle_water_movement<S: BlockSource + ?Sized>(player: &mut Player, world
             }
         }
     }
-    if current.length() > 0.0 {
-        player.velocity += normalize(current) * CURRENT_PUSH;
+    in_water.then(|| normalize(current) * CURRENT_PUSH)
+}
+
+/// Whether the player is in water, pushing it along the current.
+///
+/// MCP `Entity.handleWaterMovement` (line 1101): the box shrunk by 0.4
+/// vertically and 0.001 on every side is scanned by [`water_current`].
+pub fn handle_water_movement<S: BlockSource + ?Sized>(player: &mut Player, world: &S) -> bool {
+    let bounds = player.bounding_box();
+    let shrink = DVec3::new(0.001, 0.4 + 0.001, 0.001);
+    match water_current(bounds.min + shrink, bounds.max - shrink, world) {
+        Some(push) => {
+            player.velocity += push;
+            true
+        }
+        None => false,
     }
-    in_water
 }
 
 /// Whether any lava overlaps the box shrunk by 0.1 horizontally and 0.4
