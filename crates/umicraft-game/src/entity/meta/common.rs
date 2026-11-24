@@ -13,6 +13,8 @@ use crate::entity::kind::EntityKind;
 const CUSTOM_NAME: u8 = 2;
 /// Entry of the custom name visibility.
 const CUSTOM_NAME_VISIBLE: u8 = 3;
+/// Entry of the silent flag (MCP `Entity.entityInit`, `isSilent`).
+const SILENT: u8 = 4;
 /// Entry of the health (MCP `EntityLivingBase.entityInit`).
 const HEALTH: u8 = 6;
 /// Entry of the potion effect colour.
@@ -78,6 +80,9 @@ pub(super) fn apply(meta: &mut EntityMeta, kind: EntityKind, metadata: &Metadata
     if let Some(visible) = metadata.get_byte(CUSTOM_NAME_VISIBLE) {
         meta.custom_name_visible = visible != 0;
     }
+    if let Some(silent) = metadata.get_byte(SILENT) {
+        meta.silent = silent != 0;
+    }
     if !kind.is_living() {
         return;
     }
@@ -129,6 +134,15 @@ mod tests {
         assert_eq!(state.living.potion_color, 0x00FF_00AA);
         assert!(state.living.potion_ambient);
         assert_eq!(state.living.arrows, 3);
+    }
+
+    #[test]
+    fn the_silent_flag_is_decoded_for_any_entity() {
+        let mut state = EntityMeta::default();
+        state.apply(EntityKind::Dragon, &meta(vec![byte(4, 1)]));
+        assert!(state.silent);
+        state.apply(EntityKind::Dragon, &meta(vec![byte(4, 0)]));
+        assert!(!state.silent);
     }
 
     #[test]

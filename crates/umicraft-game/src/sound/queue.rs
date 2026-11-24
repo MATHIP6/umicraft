@@ -16,7 +16,7 @@ use umicraft_protocol::packets::play::clientbound::sound_effect::SoundEffect;
 use super::block_events::break_sound;
 use super::cue::SoundCue;
 use super::effect_packet::effect_cues;
-use super::entity_sounds::local_player_status_cue;
+use super::entity_sounds::{collect_item_cue, dragon_wing_cue, local_player_status_cue};
 use super::sound_packet::cue_from_packet;
 use super::step::Stepper;
 use crate::physics::Player;
@@ -87,6 +87,16 @@ impl SoundQueue {
     pub fn local_player_status(&mut self, status: i8, feet: DVec3) {
         let cue = local_player_status_cue(status, feet, &mut self.rng);
         self.cues.extend(cue);
+    }
+
+    /// Queues the pop of a collected item, or the chime of an orb, at `pos`.
+    pub fn collect_item(&mut self, orb: bool, pos: DVec3) {
+        self.cues.push(collect_item_cue(orb, pos, &mut self.rng));
+    }
+
+    /// Queues one wing beat of the ender dragon at `pos`.
+    pub fn dragon_wings(&mut self, pos: DVec3) {
+        self.cues.push(dragon_wing_cue(pos, &mut self.rng));
     }
 
     /// Queues the movement sounds of the tick the player just ran.

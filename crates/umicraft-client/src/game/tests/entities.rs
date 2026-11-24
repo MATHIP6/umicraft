@@ -113,6 +113,41 @@ fn a_collected_item_leaves_the_world() {
     assert!(game.entities.snapshots(0.0).is_empty());
 }
 
+fn collect_event(collected: i32) -> PlayEvent {
+    PlayEvent::CollectItem(umicraft_protocol::packets::play::clientbound::CollectItem {
+        collected_entity_id: collected,
+        collector_entity_id: 1,
+    })
+}
+
+#[test]
+fn collecting_an_item_pops_and_an_unknown_entity_is_silent() {
+    let mut game = game_on_floor_with(BlockState::AIR);
+    let mut queue = CommandQueue::default();
+    let (frames, _received) = mpsc::sync_channel(8);
+    handle_net(&mut game, spawn_object_event(7, 2, 1), &mut queue, &frames);
+    handle_net(&mut game, collect_event(99), &mut queue, &frames);
+    let state = game.state.as_mut().unwrap();
+    assert!(state.drain_sound_cues().is_empty(), "unknown entity");
+    handle_net(&mut game, collect_event(7), &mut queue, &frames);
+    let cues = game.state.as_mut().unwrap().drain_sound_cues();
+    assert_eq!(cues.len(), 1);
+    assert_eq!(cues[0].name, "random.pop");
+    assert_eq!(cues[0].volume, 0.2);
+}
+
+#[test]
+fn collecting_an_experience_orb_plays_the_orb_sound() {
+    let mut game = game_on_floor_with(BlockState::AIR);
+    let mut queue = CommandQueue::default();
+    let (frames, _received) = mpsc::sync_channel(8);
+    game.entities.spawn_xp_orb(EntityId(8), DVec3::ZERO, 1);
+    handle_net(&mut game, collect_event(8), &mut queue, &frames);
+    let cues = game.state.as_mut().unwrap().drain_sound_cues();
+    assert_eq!(cues.len(), 1);
+    assert_eq!(cues[0].name, "random.orb");
+}
+
 #[test]
 fn an_item_frame_takes_its_stack_rotation_and_direction() {
     use umicraft_protocol::packets::play::metadata::WatchedObject;

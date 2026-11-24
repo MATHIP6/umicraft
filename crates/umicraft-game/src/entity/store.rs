@@ -46,6 +46,8 @@ pub struct EntityStore {
     entities: BTreeMap<EntityId, EntityRecord>,
     /// The bodies whose death fall ended in the last tick, for their puff.
     deaths: Vec<MobBody>,
+    /// Where an ender dragon beat its wings in the last tick, for the sound.
+    wing_beats: Vec<DVec3>,
     /// The local player, whose body is not stored here, and its feet: what
     /// a mob that watches it looks at.
     viewer: Option<(EntityId, DVec3)>,
@@ -58,6 +60,7 @@ impl EntityStore {
         Self {
             entities: BTreeMap::new(),
             deaths: Vec::new(),
+            wing_beats: Vec::new(),
             viewer: None,
         }
     }
@@ -260,20 +263,26 @@ impl EntityStore {
 
     /// Sends the entity `item` flying to `collector` (`Collect Item`), half a
     /// block over its feet; `local` is where the local player is, who is not
-    /// tracked. An item that is not tracked is ignored.
-    pub fn collect(&mut self, item: EntityId, collector: EntityId, local: DVec3) {
+    /// tracked. Returns the kind and position of the item, where the pickup
+    /// sound plays; an item that is not tracked is ignored (`None`).
+    pub fn collect(
+        &mut self,
+        item: EntityId,
+        collector: EntityId,
+        local: DVec3,
+    ) -> Option<(EntityKind, DVec3)> {
         let target = self
             .entities
             .get(&collector)
             .map_or(local, |record| record.position)
             + DVec3::Y * 0.5;
-        if let Some(record) = self.entities.get_mut(&item) {
-            record.collecting = Some(super::record::Collecting {
-                start: record.position,
-                target,
-                ticks: 0,
-            });
-        }
+        let record = self.entities.get_mut(&item)?;
+        record.collecting = Some(super::record::Collecting {
+            start: record.position,
+            target,
+            ticks: 0,
+        });
+        Some((record.kind, record.position))
     }
 
     /// Ties `entity` to `holder`, or frees it when `holder` is `None`
@@ -689,6 +698,9 @@ impl EntityStore {
                 entity.glide_to_target();
             }
             entity.animate();
+            if entity.beat_wings() {
+                self.wing_beats.push(entity.position);
+            }
             entity.animation.tick();
             if let Variant::Creeper(creeper) = &entity.meta.variant {
                 // A lit creeper fuses whatever its state says.
@@ -862,6 +874,12 @@ impl EntityStore {
         Some(entity.position + DVec3::Y * (height * 0.5))
     }
 
+    /// Takes the places where an ender dragon beat its wings since the last
+    /// call, each of which plays the wing sound.
+    pub fn drain_wing_beats(&mut self) -> std::vec::Drain<'_, DVec3> {
+        self.wing_beats.drain(..)
+    }
+
     /// Takes the bodies whose death fall ended since the last call: each
     /// goes up in a puff of smoke (`ParticleEngine::spawn_death_puff`).
     pub fn drain_deaths(&mut self) -> std::vec::Drain<'_, MobBody> {
@@ -992,6 +1010,71 @@ mod tests {
         store.tick();
         store.tick();
         assert!(store.snapshots(1.0).is_empty());
+    }
+
+    #[test]
+    fn collecting_reports_the_kind_and_place_of_a_known_entity_only() {
+        let mut store = EntityStore::new();
+        spawn_object_at_origin(&mut store, 1, 2, 0);
+        store.spawn_xp_orb(EntityId(2), DVec3::new(4.0, 5.0, 6.0), 3);
+        let collected = store.collect(EntityId(1), EntityId(99), DVec3::ZERO);
+        assert_eq!(collected, Some((EntityKind::Item, DVec3::ZERO)));
+        let orb = store.collect(EntityId(2), EntityId(99), DVec3::ZERO);
+        assert_eq!(orb, Some((EntityKind::XpOrb, DVec3::new(4.0, 5.0, 6.0))));
+        assert_eq!(store.collect(EntityId(7), EntityId(99), DVec3::ZERO), None);
+    }
+
+    fn spawn_dragon(store: &mut EntityStore) {
+        store.spawn_mob(
+            EntityId(5),
+            63,
+            DVec3::new(1.0, 80.0, 2.0),
+            0.0,
+            0.0,
+            0.0,
+            Vec3::ZERO,
+            EntityFlags::default(),
+        );
+    }
+
+    fn wing_beats_in(store: &mut EntityStore, ticks: usize) -> Vec<DVec3> {
+        let mut beats = Vec::new();
+        for _ in 0..ticks {
+            store.tick();
+            beats.extend(store.drain_wing_beats());
+        }
+        beats
+    }
+
+    #[test]
+    fn a_flying_dragon_beats_its_wings_at_its_position() {
+        let mut store = EntityStore::new();
+        spawn_dragon(&mut store);
+        let beats = wing_beats_in(&mut store, 10);
+        assert_eq!(beats, vec![DVec3::new(1.0, 80.0, 2.0); 2]);
+    }
+
+    #[test]
+    fn a_silent_or_dead_dragon_makes_no_wing_sound() {
+        let mut silent = EntityStore::new();
+        spawn_dragon(&mut silent);
+        let watcher = umicraft_protocol::packets::play::metadata::WatchedObject {
+            type_id: 0,
+            index: 4,
+            value: vec![1],
+        };
+        silent.apply_metadata(
+            EntityId(5),
+            &Metadata {
+                objects: vec![watcher],
+            },
+        );
+        assert!(wing_beats_in(&mut silent, 10).is_empty());
+
+        let mut dead = EntityStore::new();
+        spawn_dragon(&mut dead);
+        dead.set_health(EntityId(5), 0.0);
+        assert!(wing_beats_in(&mut dead, 10).is_empty());
     }
 
     #[test]

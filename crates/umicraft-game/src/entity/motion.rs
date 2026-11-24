@@ -167,6 +167,19 @@ impl EntityRecord {
     }
 }
 
+impl EntityRecord {
+    /// Whether this is an audible ender dragon that beat its wings in the
+    /// tick that just ran (`EntityDragon.onLivingUpdate`: not `isSilent`).
+    pub(super) fn beat_wings(&self) -> bool {
+        let alive = self.health.is_none_or(|health| health > 0.0);
+        !self.meta.silent
+            && self
+                .flight
+                .as_ref()
+                .is_some_and(|flight| flight.beat_this_tick(alive))
+    }
+}
+
 /// The squash and stretch of a slime as it jumps and lands (MCP
 /// `EntitySlime.onUpdate`).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]

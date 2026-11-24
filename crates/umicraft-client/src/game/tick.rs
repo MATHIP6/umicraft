@@ -256,6 +256,12 @@ pub(super) fn tick(
             .set_viewer(EntityId(game.entity_id), state.position());
     }
     game.entities.tick();
+    let wing_beats: Vec<_> = game.entities.drain_wing_beats().collect();
+    if let Some(state) = game.state.as_mut() {
+        for pos in wing_beats {
+            state.on_dragon_wings(pos);
+        }
+    }
     if let Some(world) = game.world.as_ref() {
         game.entities.tick_objects(world);
     }

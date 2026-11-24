@@ -216,17 +216,21 @@ pub(super) fn spawn_object(game: &mut Game, packet: &SpawnObject) {
 }
 
 /// MCP `handleCollectItem`: the collected entity flies to the collector
-/// in three ticks and leaves the world. The pop is not played.
+/// in three ticks and leaves the world, with a pop (an orb chimes instead).
+/// An entity that is not known makes no sound.
 pub(super) fn collect_item(game: &mut Game, packet: &CollectItem) {
     let local = game
         .state
         .as_ref()
         .map_or(DVec3::ZERO, |state| state.position());
-    game.entities.collect(
+    let collected = game.entities.collect(
         EntityId(packet.collected_entity_id),
         EntityId(packet.collector_entity_id),
         local,
     );
+    if let (Some((kind, pos)), Some(state)) = (collected, game.state.as_mut()) {
+        state.on_item_collected(kind == EntityKind::XpOrb, pos);
+    }
 }
 
 /// MCP `handleSpawnGlobalEntity`: type 1 is a lightning bolt, the only

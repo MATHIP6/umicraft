@@ -256,6 +256,17 @@ impl GameState {
             .local_player_status(status, self.player.position);
     }
 
+    /// Queues the pop (or, for an experience orb, the chime) of an entity
+    /// the server says was picked up, at the entity.
+    pub fn on_item_collected(&mut self, orb: bool, pos: glam::DVec3) {
+        self.sounds.collect_item(orb, pos);
+    }
+
+    /// Queues one wing beat of an ender dragon at `pos`.
+    pub fn on_dragon_wings(&mut self, pos: glam::DVec3) {
+        self.sounds.dragon_wings(pos);
+    }
+
     /// Queues the cue of a Sound Effect packet.
     pub fn on_sound_effect(
         &mut self,

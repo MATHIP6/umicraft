@@ -67,12 +67,61 @@ pub fn local_player_status_cue(status: i8, feet: DVec3, rng: &mut JavaRandom) ->
     })
 }
 
+/// `NetHandlerPlayClient.handleCollectItem`: the pickup pop, or the orb
+/// sound for an experience orb, at the collected entity, with volume 0.2 and
+/// pitch `((rand - rand) * 0.7 + 1) * 2`.
+pub fn collect_item_cue(orb: bool, pos: DVec3, rng: &mut JavaRandom) -> SoundCue {
+    let spread = rng.next_float() - rng.next_float();
+    SoundCue {
+        name: Cow::Borrowed(if orb { "random.orb" } else { "random.pop" }),
+        pos: pos.to_array(),
+        volume: 0.2,
+        pitch: (spread * 0.7 + 1.0) * 2.0,
+        category: CueCategory::Players,
+    }
+}
+
+/// `EntityDragon.onLivingUpdate`: the wing beat at the dragon, volume 5 and
+/// pitch `0.8 + rand * 0.3`.
+pub fn dragon_wing_cue(pos: DVec3, rng: &mut JavaRandom) -> SoundCue {
+    SoundCue {
+        name: Cow::Borrowed("mob.enderdragon.wings"),
+        pos: pos.to_array(),
+        volume: 5.0,
+        pitch: 0.8 + rng.next_float() * 0.3,
+        category: CueCategory::Hostile,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn cue(status: i8) -> Option<SoundCue> {
         local_player_status_cue(status, DVec3::new(1.5, 64.0, -2.5), &mut JavaRandom::new(7))
+    }
+
+    #[test]
+    fn a_collected_item_pops_and_an_orb_chimes_quietly() {
+        let at = DVec3::new(1.0, 2.0, 3.0);
+        let pop = collect_item_cue(false, at, &mut JavaRandom::new(5));
+        let orb = collect_item_cue(true, at, &mut JavaRandom::new(5));
+        assert_eq!(
+            (pop.name.as_ref(), orb.name.as_ref()),
+            ("random.pop", "random.orb")
+        );
+        assert_eq!(pop.pos, [1.0, 2.0, 3.0]);
+        assert_eq!(pop.volume, 0.2);
+        assert!((0.6..=3.4).contains(&pop.pitch), "{}", pop.pitch);
+    }
+
+    #[test]
+    fn a_wing_beat_is_loud_and_slightly_varied() {
+        let cue = dragon_wing_cue(DVec3::ZERO, &mut JavaRandom::new(5));
+        assert_eq!(cue.name, "mob.enderdragon.wings");
+        assert_eq!(cue.volume, 5.0);
+        assert!((0.8..1.1).contains(&cue.pitch), "{}", cue.pitch);
+        assert_eq!(cue.category, CueCategory::Hostile);
     }
 
     #[test]

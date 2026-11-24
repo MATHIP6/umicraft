@@ -16,6 +16,19 @@ const RING: usize = 64;
 /// How many past offsets a pose carries: the model reads 0 to 10 and 11 to 23.
 pub const OFFSETS: usize = 24;
 
+/// Cosine of the phase below which a wing beat is heard (`-0.3` in
+/// `EntityDragon.onLivingUpdate`).
+const WING_BEAT_LEVEL: f32 = -0.3;
+
+/// Whether the wings beat between two wing phases (in turns): the cosine of
+/// the phase rises through `-0.3` (MCP `EntityDragon.onLivingUpdate`).
+#[must_use]
+pub fn wings_beat(prev_anim_time: f32, anim_time: f32) -> bool {
+    let now = (anim_time * std::f32::consts::TAU).cos();
+    let before = (prev_anim_time * std::f32::consts::TAU).cos();
+    before <= WING_BEAT_LEVEL && now >= WING_BEAT_LEVEL
+}
+
 /// The yaw and height of the dragon over the last 64 ticks and its wing phase.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DragonFlight {
@@ -75,6 +88,13 @@ impl DragonFlight {
         self.ring[self.index as usize] = [yaw, y];
     }
 
+    /// Whether the tick that just ran was a wing beat. A dead dragon stops
+    /// its wings, so it never beats them.
+    #[must_use]
+    pub fn beat_this_tick(&self, alive: bool) -> bool {
+        alive && wings_beat(self.prev_anim_time, self.anim_time)
+    }
+
     /// `getMovementOffsets(back, alpha)`: the yaw and height `back` ticks ago.
     #[must_use]
     pub fn offsets(&self, back: usize, alpha: f32, alive: bool) -> [f64; 2] {
@@ -116,6 +136,29 @@ mod tests {
             flight.tick(*yaw, 70.0 + tick as f64, Vec3::ZERO, true);
         }
         flight
+    }
+
+    #[test]
+    fn the_wings_beat_when_the_cosine_rises_through_minus_point_three() {
+        assert!(wings_beat(0.6, 0.8), "rising from -0.81 to 0.31");
+        assert!(!wings_beat(0.0, 0.2), "already above the level");
+        assert!(!wings_beat(0.2, 0.4), "falling through it");
+        assert!(!wings_beat(0.4, 0.6), "still below it");
+    }
+
+    #[test]
+    fn a_still_dragon_beats_on_the_fourth_tick_and_a_dead_one_never() {
+        let mut flight = DragonFlight::default();
+        let beats: Vec<bool> = (0..5)
+            .map(|_| {
+                flight.tick(0.0, 70.0, Vec3::ZERO, true);
+                flight.beat_this_tick(true)
+            })
+            .collect();
+        assert_eq!(beats, [false, false, false, true, false]);
+        flight.anim_time = 0.8;
+        flight.prev_anim_time = 0.6;
+        assert!(!flight.beat_this_tick(false));
     }
 
     #[test]
