@@ -6,18 +6,18 @@
 //! Adding a new mob texture = one new entry in [`texture_specs`].
 
 use umicraft_assets::skin::{
-    procedural_bat_texture, procedural_blaze_texture, procedural_cave_spider_texture,
-    procedural_chicken_texture, procedural_cow_texture, procedural_creeper_texture,
-    procedural_dragon_texture, procedural_enderman_texture, procedural_endermite_texture,
-    procedural_fallback_skin, procedural_ghast_texture, procedural_guardian_texture,
-    procedural_horse_texture, procedural_iron_golem_texture, procedural_magma_cube_texture,
-    procedural_mooshroom_texture, procedural_ocelot_texture, procedural_pig_texture,
-    procedural_rabbit_texture, procedural_sheep_fur_texture, procedural_sheep_texture,
-    procedural_silverfish_texture, procedural_skeleton_texture, procedural_slime_texture,
-    procedural_snowman_texture, procedural_spider_texture, procedural_squid_texture,
-    procedural_villager_texture, procedural_witch_texture, procedural_wither_texture,
-    procedural_wolf_texture, procedural_zombie_pigman_texture, procedural_zombie_skin,
-    procedural_zombie_villager_texture, SkinModel,
+    procedural_armor_stand_texture, procedural_bat_texture, procedural_blaze_texture,
+    procedural_cave_spider_texture, procedural_chicken_texture, procedural_cow_texture,
+    procedural_creeper_texture, procedural_dragon_texture, procedural_enderman_texture,
+    procedural_endermite_texture, procedural_fallback_skin, procedural_ghast_texture,
+    procedural_guardian_texture, procedural_horse_texture, procedural_iron_golem_texture,
+    procedural_magma_cube_texture, procedural_mooshroom_texture, procedural_ocelot_texture,
+    procedural_pig_texture, procedural_rabbit_texture, procedural_sheep_fur_texture,
+    procedural_sheep_texture, procedural_silverfish_texture, procedural_skeleton_texture,
+    procedural_slime_texture, procedural_snowman_texture, procedural_spider_texture,
+    procedural_squid_texture, procedural_villager_texture, procedural_witch_texture,
+    procedural_wither_texture, procedural_wolf_texture, procedural_zombie_pigman_texture,
+    procedural_zombie_skin, procedural_zombie_villager_texture, SkinModel,
 };
 use umicraft_model::entity::TextureSlot;
 
@@ -343,6 +343,11 @@ pub(super) fn texture_specs() -> Vec<TextureSpec> {
             slot: TextureSlot::IronGolem,
             jar_path: "assets/minecraft/textures/entity/iron_golem.png",
             fallback: || (procedural_iron_golem_texture(), 128, 128),
+        },
+        TextureSpec {
+            slot: TextureSlot::ArmorStand,
+            jar_path: "assets/minecraft/textures/entity/armorstand/wood.png",
+            fallback: || (procedural_armor_stand_texture(), 64, 64),
         },
         TextureSpec {
             slot: TextureSlot::Snowman,

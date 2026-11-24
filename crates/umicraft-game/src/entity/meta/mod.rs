@@ -208,6 +208,11 @@ impl EntityMeta {
                 self.baby = child;
             }
         }
+        // `EntityArmorStand.isChild` is `isSmall`: a small stand is drawn
+        // with the proportions of a child, armour and held item included.
+        if let Variant::ArmorStand(stand) = &self.variant {
+            self.baby = stand.small();
+        }
     }
 
     /// True when a zombie is a zombie villager (entry 13), whatever its

@@ -16,6 +16,7 @@ use umicraft_game::entity::wrap_degrees;
 
 use super::animals::animal_layers;
 use super::armor::armor_layers;
+use super::armor_stand::{armor_stand_layers, posed_stand_biped};
 use super::arrows::arrow_layers;
 use super::creatures::{creature_layers, creeper_layers};
 use super::custom_models::{mesh_with_custom, CustomModels, Meshes};
@@ -153,6 +154,9 @@ fn humanoid_layers(
     skins: &dyn SkinLookup,
     style: BipedStyle,
 ) -> Option<Vec<EntityLayer>> {
+    if let Some(layers) = armor_stand_layers(ent) {
+        return Some(layers);
+    }
     if ent.kind == EntityKind::Player {
         let (model, is_slim) = posed_player(ent, style);
         let slot = skin_slot(ent, is_slim, skins);
@@ -232,6 +236,13 @@ pub(crate) struct HumanoidMob {
 /// every other kind (players have [`posed_player`]). Shared by the body mesh
 /// and by the held item, which hangs on the posed right arm.
 pub(crate) fn posed_humanoid_mob(ent: &EntityRenderSnapshot) -> Option<HumanoidMob> {
+    if let Some(model) = posed_stand_biped(ent) {
+        return Some(HumanoidMob {
+            model,
+            slot: TextureSlot::ArmorStand,
+            scale: 1.0,
+        });
+    }
     let wither = matches!(ent.meta.variant, Variant::Skeleton { wither: true });
     let (mut model, slot, scale) = match ent.kind {
         EntityKind::Zombie if ent.meta.is_zombie_villager() => (

@@ -39,12 +39,13 @@ pub(super) fn skull_layers(ent: &EntityRenderSnapshot, skins: &dyn SkinLookup) -
     };
     let (head, scale) = match ent.kind {
         EntityKind::Player => (player_head(ent), 1.0),
-        EntityKind::Zombie | EntityKind::Skeleton | EntityKind::ZombiePigman => {
-            match posed_humanoid_mob(ent) {
-                Some(mob) => (mob.model.head, mob.scale),
-                None => return Vec::new(),
-            }
-        }
+        EntityKind::Zombie
+        | EntityKind::Skeleton
+        | EntityKind::ZombiePigman
+        | EntityKind::ArmorStand => match posed_humanoid_mob(ent) {
+            Some(mob) => (mob.model.head, mob.scale),
+            None => return Vec::new(),
+        },
         _ => return Vec::new(),
     };
     let (mut slot, humanoid) = skull_texture(skull.damage);

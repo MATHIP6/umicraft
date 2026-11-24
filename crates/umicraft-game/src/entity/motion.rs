@@ -156,6 +156,8 @@ impl EntityRecord {
                 let swinging = self.animation.is_swinging();
                 self.body_yaw.update_player(moved, self.yaw, swinging);
             }
+            // `EntityArmorStand.func_110146_f`: the body is the facing.
+            EntityKind::ArmorStand => self.body_yaw.face(self.yaw),
             kind if kind.is_living() => {
                 self.body_yaw
                     .update_mob(moved, self.yaw, &mut self.head_yaw);

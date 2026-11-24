@@ -146,4 +146,13 @@ mod tests {
         assert_eq!(stand.right_leg, [1.0, 2.0, 3.0]);
         assert_eq!(stand.body, [0.0, 0.0, 0.0]);
     }
+
+    #[test]
+    fn a_small_stand_is_drawn_as_a_child() {
+        let mut state = EntityMeta::default();
+        state.apply(EntityKind::ArmorStand, &meta(vec![byte(10, 1)]));
+        assert!(state.baby);
+        state.apply(EntityKind::ArmorStand, &meta(vec![byte(10, 4)]));
+        assert!(!state.baby, "growing back to full size");
+    }
 }

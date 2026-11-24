@@ -34,6 +34,17 @@ pub(super) fn armor_layers(
         style,
         ..humanoid_pose(ent, ent.kind != EntityKind::Player)
     };
+    posed_armor_layers(ent, scale, |model| model.set_pose(&pose))
+}
+
+/// The armour layers of `ent`, helmet first, each shell posed by `pose`:
+/// [`armor_layers`] poses it like a walking biped, the armour stand with its
+/// metadata angles (`ModelArmorStandArmor`).
+pub(super) fn posed_armor_layers(
+    ent: &EntityRenderSnapshot,
+    scale: f32,
+    pose: impl Fn(&mut HumanoidModel),
+) -> Vec<EntityLayer> {
     let mut layers = Vec::new();
     for slot in (1..=4u8).rev() {
         let Some(item) = &ent.armor[usize::from(slot) - 1] else {
@@ -43,7 +54,7 @@ pub(super) fn armor_layers(
             continue;
         };
         let mut model = HumanoidModel::armor(slot);
-        model.set_pose(&pose);
+        pose(&mut model);
         let mut vertices = if ent.meta.baby {
             model.emit_child_mesh()
         } else {

@@ -60,6 +60,13 @@ impl BodyYaw {
         self.idle_ticks = 0;
     }
 
+    /// Armour stand algorithm (MCP `EntityArmorStand.func_110146_f`): the
+    /// body points where the entity faces, without lag. The previous value
+    /// is the facing of the last tick, kept by [`Self::begin_tick`].
+    pub fn face(&mut self, yaw: f32) {
+        self.offset = yaw;
+    }
+
     /// Player algorithm. `moved` is the horizontal displacement this tick
     /// `(dx, dz)`, `yaw` the facing direction; `swinging` snaps the body to
     /// the facing direction while an arm swings.
@@ -124,6 +131,14 @@ fn bounded_towards(angle1: f32, angle2: f32, bound: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_armour_stand_body_is_its_facing() {
+        let mut body = BodyYaw::new(0.0);
+        body.begin_tick();
+        body.face(120.0);
+        assert_eq!((body.previous, body.offset), (0.0, 120.0));
+    }
 
     #[test]
     fn a_walking_player_turns_towards_the_movement_direction() {

@@ -628,6 +628,29 @@ pub fn procedural_snowman_texture() -> Vec<u8> {
     rgba
 }
 
+/// Generates an original procedural fallback armour stand texture (64×64
+/// RGBA8): plain wood for the sticks, grey stone for the base plate and a
+/// transparent headwear area, which the stand never paints.
+#[must_use]
+pub fn procedural_armor_stand_texture() -> Vec<u8> {
+    let mut rgba = vec![0u8; 64 * 64 * 4];
+    let wood = [150, 110, 65, 255];
+    let grain = [125, 90, 50, 255];
+    let stone = [125, 125, 125, 255];
+    for y in 0..64 {
+        for x in 0..64 {
+            let color = if y % 5 == 0 { grain } else { wood };
+            let idx = (y * 64 + x) * 4;
+            rgba[idx..idx + 4].copy_from_slice(&color);
+        }
+    }
+    // Base plate (`setTextureOffset(0, 32)`, 12 × 1 × 12).
+    fill_rect(&mut rgba, 64, 0, 32, 48, 13, stone);
+    // Headwear (`(32, 0)`, 8 × 8 × 8): left clear.
+    fill_rect(&mut rgba, 64, 32, 0, 32, 16, [0, 0, 0, 0]);
+    rgba
+}
+
 /// Generates an original procedural fallback wolf texture (64×32 RGBA8).
 #[must_use]
 pub fn procedural_wolf_texture() -> Vec<u8> {

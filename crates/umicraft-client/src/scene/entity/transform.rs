@@ -76,6 +76,12 @@ pub(crate) fn body_matrix(entity: &EntityRenderSnapshot) -> Mat4 {
     if is_tamed_cat(entity) {
         matrix *= Mat4::from_scale(Vec3::splat(TAMED_CAT_SCALE));
     }
+    if entity.kind == EntityKind::ArmorStand && entity.flags.is_sneaking() && !entity.meta.baby {
+        // `ModelArmorStand.render` (and `ModelBiped.render` for its armour)
+        // lowers a crouching full-size stand; a small one draws as a child,
+        // which has no crouch.
+        matrix *= Mat4::from_translation(Vec3::new(0.0, -SNEAK_SINK, 0.0));
+    }
     if is_player {
         matrix *= Mat4::from_scale(Vec3::splat(PLAYER_SCALE));
         if entity.flags.is_sneaking() {

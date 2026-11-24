@@ -470,6 +470,28 @@ pub(crate) fn make_snapshot(
     }
 }
 
+/// Gives the demo armour stand arms, a raised right arm, an iron helmet and
+/// a diamond chestplate, so that the pose and the armour layer show.
+fn dress_armor_stand(snapshot: &mut EntityRenderSnapshot) {
+    let stand = umicraft_game::entity::meta::ArmorStandMeta {
+        flags: 4,
+        right_arm: [-90.0, 0.0, 10.0],
+        head: [-15.0, 20.0, 0.0],
+        ..Default::default()
+    };
+    snapshot.meta.variant = umicraft_game::entity::meta::Variant::ArmorStand(stand);
+    let piece = |item_id| {
+        Some(EntityItem {
+            item_id,
+            damage: 0,
+            count: 1,
+            nbt: None,
+        })
+    };
+    snapshot.armor[3] = piece(306);
+    snapshot.armor[2] = piece(311);
+}
+
 /// Builds an exhibition scene featuring all 29 Minecraft 1.8 mobs plus Steve and Alex.
 #[must_use]
 pub fn build_all_mobs_scene() -> (Vec<EntityRenderSnapshot>, EntityDemoReport) {
@@ -624,7 +646,7 @@ pub struct MobCatalogEntry {
     pub yaw_deg: f32,
 }
 
-/// Catalog of all 35 Minecraft 1.8 entities with tailored camera framing.
+/// Catalog of the Minecraft 1.8 entities with tailored camera framing.
 pub static MOB_CATALOG: &[MobCatalogEntry] = &[
     MobCatalogEntry {
         id: "chicken",
@@ -924,6 +946,17 @@ pub static MOB_CATALOG: &[MobCatalogEntry] = &[
         yaw_deg: 25.0,
     },
     MobCatalogEntry {
+        id: "armor_stand",
+        display_name: "Armour Stand",
+        kind: EntityKind::ArmorStand,
+        uuid: None,
+        world_y_offset: 0.0,
+        camera_dist: 3.4,
+        camera_y: 1.10,
+        camera_pitch: -0.06,
+        yaw_deg: 25.0,
+    },
+    MobCatalogEntry {
         id: "blaze",
         display_name: "Blaze",
         kind: EntityKind::Blaze,
@@ -1112,7 +1145,8 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
     })?;
 
     println!(
-        "Rendering all 35 Minecraft 1.8 entities 1-by-1 to {}...",
+        "Rendering all {} Minecraft 1.8 entities 1-by-1 to {}...",
+        MOB_CATALOG.len(),
         output_dir.display()
     );
 
@@ -1345,7 +1379,8 @@ pub fn dump_all_mobs(args: &Args, output_dir: &std::path::Path) -> Result<(), Cl
     }
 
     println!(
-        "\nSuccessfully rendered all 35 entities 1-by-1 to {}!",
+        "\nSuccessfully rendered all {} entities 1-by-1 to {}!",
+        MOB_CATALOG.len(),
         output_dir.display()
     );
     Ok(())
@@ -1390,7 +1425,10 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 
     if let Some(mob_query) = args.mob.as_deref() {
         if mob_query.eq_ignore_ascii_case("list") {
-            println!("=== UMICRAFT M8 ENTITY CATALOG (35 ENTITIES) ===");
+            println!(
+                "=== UMICRAFT M8 ENTITY CATALOG ({} ENTITIES) ===",
+                MOB_CATALOG.len()
+            );
             for (idx, m) in MOB_CATALOG.iter().enumerate() {
                 println!(
                     "  {:2}. {:<16} [id: {:<14}] (kind: {:?})",
@@ -1405,13 +1443,16 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
 
         let mob = find_mob(mob_query).ok_or_else(|| {
             ClientError::Screenshot(format!(
-                "unknown mob {mob_query:?}; use '--mob list' to see all 35 available mobs"
+                "unknown mob {mob_query:?}; use '--mob list' to see all available mobs"
             ))
         })?;
 
         let pos = Vec3::new(0.0, 64.0 + mob.world_y_offset, 0.0);
         let mut snapshot = make_snapshot(1, mob.kind, pos, mob.uuid);
         face_the_camera(&mut snapshot, mob.yaw_deg);
+        if mob.kind == EntityKind::ArmorStand {
+            dress_armor_stand(&mut snapshot);
+        }
 
         let batches = mesh_entities(&[snapshot.clone()]);
         let total_vertices: usize = batches.values().map(|v| v.len()).sum();

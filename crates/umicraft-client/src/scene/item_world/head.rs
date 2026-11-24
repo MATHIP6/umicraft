@@ -89,7 +89,8 @@ fn biped_frame(entity: &EntityRenderSnapshot) -> Option<Mat4> {
         EntityKind::Player => (player_head(entity), 1.0),
         _ => {
             let mob = posed_humanoid_mob(entity)?;
-            // Skeletons, zombies, zombie villagers and pigmen only: the giant
+            // Skeletons, zombies, zombie villagers, pigmen and armour stands
+            // (`ArmorStandRenderer` adds `LayerCustomHead`): the giant
             // has no custom head layer.
             if entity.kind == EntityKind::Giant {
                 return None;

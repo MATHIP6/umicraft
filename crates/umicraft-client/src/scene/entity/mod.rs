@@ -19,6 +19,7 @@
 mod animals;
 mod appearance;
 mod armor;
+mod armor_stand;
 mod arrows;
 mod banner_cache;
 mod bolt;

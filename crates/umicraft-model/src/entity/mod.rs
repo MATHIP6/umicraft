@@ -7,6 +7,7 @@
 //! registry ([`TextureSlot`], [`MeshLayer`]) are defined here.
 
 mod armor;
+mod armor_stand;
 mod banner;
 mod bat;
 mod blaze;
@@ -42,6 +43,7 @@ mod wither;
 mod wolf;
 
 pub use armor::ArmorMaterial;
+pub use armor_stand::{ArmorStandModel, ArmorStandPose, ARMOR_LEG_PIVOT_Y};
 pub use banner::{banner_sway, BannerModel};
 pub use bat::BatModel;
 pub use blaze::BlazeModel;
@@ -769,6 +771,8 @@ pub enum TextureSlot {
     IronGolem,
     /// Snowman / Snow Golem texture.
     Snowman,
+    /// Armour stand texture (`armorstand/wood.png`).
+    ArmorStand,
     /// Wolf texture.
     Wolf,
     /// Mooshroom cow texture.
