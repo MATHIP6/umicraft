@@ -1721,8 +1721,12 @@ mod tests {
     }
 
     #[test]
-    fn mob_catalog_contains_35_entities_without_duplicates() {
-        assert_eq!(MOB_CATALOG.len(), 35);
+    fn mob_catalog_contains_36_entities_without_duplicates() {
+        assert_eq!(
+            MOB_CATALOG.len(),
+            36,
+            "35 mobs and players plus the armour stand"
+        );
         let mut ids = std::collections::HashSet::new();
         for mob in MOB_CATALOG {
             assert!(ids.insert(mob.id), "duplicate mob id: {}", mob.id);
