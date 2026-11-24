@@ -9,6 +9,7 @@ use winit::window::CursorGrabMode;
 use super::App;
 use crate::input::mouse_look::look_turn;
 use crate::input::{InputState, InputUpdate};
+use crate::mods::camera::without_movement;
 use crate::options::Action;
 use umicraft_game::input::set_angles;
 
@@ -97,11 +98,18 @@ impl App {
             self.options.mods = self.mods.config();
             self.save_options();
         }
+        // A camera layer has the movement keys and the look (API 1.3): the player
+        // stands as if no key were held and does not turn.
+        let captured = self.camera_capture;
+        if captured {
+            state = without_movement(state);
+        }
         // `EntityRenderer.updateCameraAndRender` turns the look by the whole
         // pixels of the frame (`Mouse.getDX()` is an integer).
         let pixels = self.input.mouse.whole();
         let zoom = self.zoom.look_factor(self.mods.zoom().as_ref());
         let turn = look_turn(pixels, &self.options.controls, zoom);
+        let player_turn = if captured { (0.0, 0.0) } else { turn };
         let changed = state != self.input.last
             || pixels != (0, 0)
             || self.presses.select_slot.is_some()
@@ -117,8 +125,8 @@ impl App {
         let update = InputUpdate {
             created_at: self.input.last_time,
             state,
-            look_yaw: turn.0,
-            look_pitch: turn.1,
+            look_yaw: player_turn.0,
+            look_pitch: player_turn.1,
             select_slot: self.presses.select_slot,
             hotbar_keys: self.presses.hotbar_keys,
             break_block: self.presses.break_block,
@@ -137,7 +145,9 @@ impl App {
                     // The view of the window is in radians; the game thread
                     // turns the authoritative look with `set_angles`.
                     let (yaw, pitch) = set_angles(0.0, 0.0, turn);
-                    world.apply_look_delta(yaw.to_radians(), pitch.to_radians());
+                    if !captured {
+                        world.apply_look_delta(yaw.to_radians(), pitch.to_radians());
+                    }
                     self.frame_look = (yaw, pitch);
                 }
             }

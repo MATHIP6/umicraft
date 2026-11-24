@@ -240,6 +240,9 @@ struct App {
     /// How far the mouse turned the view this frame, in Minecraft degrees (yaw,
     /// pitch), for the camera layers.
     frame_look: (f32, f32),
+    /// Whether a camera layer captured the input in the last placed frame (API 1.3):
+    /// the movement keys and the mouse look then turn the camera, not the player.
+    camera_capture: bool,
     /// The threads still dropping stopped sessions; joined at exit before the
     /// mods shut down, because their game threads may still dispatch.
     releasing: Vec<std::thread::JoinHandle<()>>,

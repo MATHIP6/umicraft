@@ -190,6 +190,7 @@ impl App {
     /// move.
     pub(super) fn place_mod_camera(&mut self, elapsed: f32, now: Instant) {
         self.refresh_entity_snapshot(now);
+        self.camera_capture = false;
         if self.world.is_none() {
             return;
         }
@@ -197,13 +198,14 @@ impl App {
         let Self {
             camera,
             camera_layers,
+            camera_capture,
             render_bus,
             entity_snapshot,
             ..
         } = self;
         with_entity_snapshot(entity_snapshot.snapshot(), || {
             if let Some(chain) = camera_layers {
-                place_camera(chain, camera, &input);
+                *camera_capture = place_camera(chain, camera, &input);
             }
             if render_bus.has_subscribers::<PreRender>() {
                 render_bus.dispatch(&mut PreRender::new(camera_of(camera)));

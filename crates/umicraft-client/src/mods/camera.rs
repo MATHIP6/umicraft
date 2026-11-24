@@ -52,14 +52,30 @@ pub fn camera_input(keys: &InputState, look: (f32, f32), frame_seconds: f32) -> 
 
 /// Lets the mods' layers move `camera` for this frame. Only the render camera
 /// changes: the player, its view and what the server is told stay as they are.
-pub fn place_camera(chain: &CameraChain, camera: &mut Camera, input: &UmiCameraInput) {
+///
+/// Returns whether a layer captured the input (API 1.3, ADR-0096): the next frame's
+/// movement keys and mouse look then go to the camera only ([`without_movement`]).
+pub fn place_camera(chain: &CameraChain, camera: &mut Camera, input: &UmiCameraInput) -> bool {
     if !chain.is_active() {
-        return;
+        return false;
     }
     let before = camera_of(camera);
     let mut placed = before;
-    chain.place(&mut placed, input);
+    let captured = chain.place(&mut placed, input);
     apply(camera, &before, &placed);
+    captured
+}
+
+/// What the player is given while a camera layer captures the input: `keys` with
+/// no movement key held, as if the player let go of them. Attack and use stay, so
+/// the player can still act where it looks.
+#[must_use]
+pub fn without_movement(keys: InputState) -> InputState {
+    InputState {
+        attack: keys.attack,
+        use_item: keys.use_item,
+        ..InputState::default()
+    }
 }
 
 /// Writes into `camera` the fields of `placed` that differ from `before`.
@@ -151,6 +167,28 @@ mod tests {
         assert_eq!(after.eye, [0.0, 100.0, 0.0]);
         assert!((after.yaw - 90.0).abs() < 1e-3 && (after.pitch + 45.0).abs() < 1e-3);
         assert!((after.fov_y - 50.0).abs() < 1e-3, "no sprint factor on top");
+    }
+
+    #[test]
+    fn a_captured_frame_gives_the_player_no_movement_but_keeps_its_actions() {
+        let keys = InputState {
+            forward: 1.0,
+            strafe: 1.0,
+            jump: true,
+            sneak: true,
+            sprint: true,
+            attack: true,
+            use_item: true,
+        };
+        let player = without_movement(keys);
+        assert_eq!(
+            player,
+            InputState {
+                attack: true,
+                use_item: true,
+                ..InputState::default()
+            }
+        );
     }
 
     #[test]
