@@ -86,6 +86,16 @@ Name tags are computed on the game thread (teams change at any time) and
 travel in the snapshot; the render thread only projects and draws them
 through the UI.
 
+### P5 finish additions (2026-11-24)
+
+`umicraft-model/src/entity/armor_stand.rs` (`ArmorStandModel`,
+`ArmorStandPose`) and `umicraft-client/src/scene/entity/armor_stand.rs`. The
+stand joins `posed_humanoid_mob` so that the held item, the block on the head
+and the skull reuse the biped layers unchanged; its armour goes through
+`armor::posed_armor_layers`, which takes the posing as a closure because the
+stand shell is posed from the metadata, not from the movement. A small stand
+sets `EntityMeta::baby`, which every biped layer already reads.
+
 ## Consequences
 
 P5a changes no behaviour (same tests, same vertex counts). `game.rs` only
