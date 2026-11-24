@@ -195,8 +195,8 @@ fn heading(velocity: Vec3) -> (f32, f32) {
 }
 
 /// Moves a point along its velocity and stops it at the first block on the
-/// way (the ray trace of `EntityArrow` and `EntityThrowable`); `true` when it
-/// hit one.
+/// way (the ray trace of `EntityArrow`, which sticks on the client too);
+/// `true` when it hit one.
 fn fly<S: BlockSource + ?Sized>(entity: &mut EntityRecord, world: &S) -> bool {
     let velocity = entity.velocity.as_dvec3();
     let distance = velocity.length();
@@ -265,32 +265,41 @@ fn arrow<S: BlockSource + ?Sized>(
     Fate::Stays
 }
 
+/// Moves `entity` by its velocity, through whatever is on the way.
+///
+/// A thrown object or a fireball that meets a block calls `onImpact`, whose
+/// effect is server-only (`!isRemote`: `setDead`, the explosion, the
+/// teleport), then moves on by its full motion anyway
+/// (`EntityThrowable.onUpdate`, `EntityFireball.onUpdate`); the client sees
+/// it stop only when the server destroys it.
+fn drift(entity: &mut EntityRecord) {
+    entity.position += entity.velocity.as_dvec3();
+    entity.target_position = entity.position;
+}
+
 /// `EntityThrowable.onUpdate`: it moves, slows by 1 percent (20 percent in
-/// water) and drops by the gravity of its class. The server tests the
-/// entities on its way (`!isRemote`), the client only the blocks.
+/// water) and drops by the gravity of its class. Hitting a block or an
+/// entity has no effect on the client (see [`drift`]).
 fn thrown<S: BlockSource + ?Sized>(entity: &mut EntityRecord, world: &S, gravity: f32) {
     if entity.velocity == Vec3::ZERO {
         return;
     }
     let wet = object_liquid::handle_water(entity, world, Scan::Shrunk);
-    if fly(entity, world) {
-        return;
-    }
+    drift(entity);
     entity.velocity *= if wet { 0.8 } else { 0.99 };
     entity.velocity.y -= gravity;
 }
 
 /// `EntityFireball.onUpdate`: it moves, speeds up along its direction by 0.1
-/// and slows by 5 percent (20 percent in water).
+/// and slows by 5 percent (20 percent in water). Like a thrown object, it
+/// goes on through a block until the server destroys it (see [`drift`]).
 fn fireball<S: BlockSource + ?Sized>(entity: &mut EntityRecord, world: &S) {
     if entity.velocity == Vec3::ZERO {
         return;
     }
     let wet = object_liquid::handle_water(entity, world, Scan::Shrunk);
     let direction = entity.velocity.normalize();
-    if fly(entity, world) {
-        return;
-    }
+    drift(entity);
     entity.velocity = (entity.velocity + direction * 0.1) * if wet { 0.8 } else { 0.95 };
 }
 
@@ -427,6 +436,21 @@ mod tests {
         assert!(ball.velocity.z > first);
         assert_eq!(ball.position.y, 80.0, "no gravity");
         assert!(ball.velocity.x == 0.0);
+    }
+
+    /// Regression: thrown objects and fireballs stopped at the first block,
+    /// while the 1.8 client moves them on until the server destroys them.
+    #[test]
+    fn thrown_objects_and_fireballs_go_on_through_blocks() {
+        for kind in [EntityKind::Snowball, EntityKind::SmallFireball] {
+            let mut ball = object(kind, DVec3::new(0.5, 64.5, 0.5), Vec3::new(0.0, -1.0, 0.0));
+            step(&mut ball, &Flat, &[]);
+            assert!(
+                ball.position.y < f64::from(FLOOR),
+                "{kind:?} entered the floor"
+            );
+            assert_ne!(ball.velocity, Vec3::ZERO, "{kind:?} keeps moving");
+        }
     }
 
     #[test]
