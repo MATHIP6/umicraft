@@ -32,9 +32,10 @@ pub fn attack_packets(entity: EntityId) -> [Outgoing; 2] {
 pub struct InteractTick<'a> {
     /// The game mode of the player.
     pub mode: GameMode,
-    /// The entity under the crosshair.
+    /// The entity under the crosshair, the dragon when the hit is one of its
+    /// parts.
     pub entity: &'a EntityRecord,
-    /// Where the ray entered it.
+    /// Where the ray entered it, and the id of the entity or part it met.
     pub hit: EntityHit,
     /// The held item.
     pub held: Option<&'a ItemStack>,
@@ -72,16 +73,19 @@ pub struct EntityClick {
 /// The packets of a right click on an entity and whether it was consumed.
 ///
 /// The interact-at packet is always sent. A spectator consumes nothing
-/// locally (`currentGameType != SPECTATOR`).
+/// locally (`currentGameType != SPECTATOR`). The packets name the hit, which
+/// is a part of `tick.entity` when the crosshair met one; a dragon part has
+/// neither `interactAt` nor `interactFirst` and no item acts on it, so its
+/// click is never consumed.
 #[must_use]
 pub fn interact_packets(tick: &InteractTick<'_>) -> EntityClick {
-    let id = tick.entity.id.0;
+    let id = tick.hit.id.0;
     let offset = tick.hit.offset();
     let mut packets = vec![Outgoing::InteractAt {
         entity: id,
         offset: [offset.x as f32, offset.y as f32, offset.z as f32],
     }];
-    let local = tick.mode != GameMode::Spectator;
+    let local = tick.mode != GameMode::Spectator && tick.hit.id == tick.entity.id;
     let consumed = if local && consumes_interact_at(tick.entity) {
         true
     } else {
@@ -348,6 +352,45 @@ mod tests {
 
     fn record(kind: EntityKind) -> EntityRecord {
         EntityRecord::new(EntityId(5), kind, DVec3::new(1.0, 64.0, 1.0), 0.0, 0.0)
+    }
+
+    #[test]
+    fn a_dragon_part_is_clicked_under_its_own_id_and_never_consumes() {
+        let dragon = EntityRecord::new(
+            EntityId(40),
+            EntityKind::Dragon,
+            DVec3::new(0.0, 64.0, 0.0),
+            0.0,
+            0.0,
+        );
+        let tag = ItemStack {
+            item_id: NAME_TAG,
+            stack_size: 1,
+            damage: 0,
+            nbt: None,
+        };
+        let click = interact_packets(&InteractTick {
+            mode: GameMode::Survival,
+            entity: &dragon,
+            hit: EntityHit {
+                id: EntityId(42),
+                point: DVec3::new(0.5, 65.0, 0.0),
+                origin: DVec3::new(0.0, 64.0, -0.5),
+            },
+            held: Some(&tag),
+            viewer: ClickViewer::default(),
+        });
+        assert_eq!(
+            click.packets,
+            [
+                Outgoing::InteractAt {
+                    entity: 42,
+                    offset: [0.5, 1.0, 0.5],
+                },
+                Outgoing::Interact { entity: 42 },
+            ]
+        );
+        assert!(!click.consumed);
     }
 
     fn click(entity: &EntityRecord, mode: GameMode) -> EntityClick {

@@ -10,9 +10,10 @@ use glam::DVec3;
 use umicraft_game::combat::sprint::KNOCKBACK;
 use umicraft_game::combat::{
     body_size, burst, local_stars, pick_target, sprint_reset, CriticalState, HitEmitter, HitStar,
-    Pointed, TargetQuery, SHARPNESS,
+    Pointed, Struck, TargetQuery, SHARPNESS,
 };
 use umicraft_game::digging::enchantment_level;
+use umicraft_game::entity::dragon_parts::owner_of_part;
 use umicraft_game::entity::{EntityId, EntityRecord};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::media::is_on_ladder;
@@ -60,8 +61,10 @@ fn is_spectator(game: &Game, entity: &EntityRecord) -> bool {
 /// reset of `EntityPlayer.attackTargetEntityWithCurrentItem`.
 pub(super) fn after_attack(game: &mut Game, target: EntityId) {
     game.combat_log.attacked(target.0, game.status_data.ticks);
-    let Some(kind) = game.entities.kind(target) else {
-        return;
+    let struck = match game.entities.kind(target) {
+        Some(kind) => Struck::Entity(kind),
+        None if owner_of_part(target, game.entities.entities()).is_some() => Struck::DragonPart,
+        None => return,
     };
     let knockback = game
         .windows
@@ -77,9 +80,13 @@ pub(super) fn after_attack(game: &mut Game, target: EntityId) {
     let Some(state) = game.state.as_mut() else {
         return;
     };
-    if let Some(reset) = sprint_reset(kind, state.player().sprinting, knockback) {
+    if let Some(reset) = sprint_reset(struck, state.player().sprinting, knockback) {
         state.reset_sprint(reset);
     }
+    // A part is no `EntityLivingBase`: neither critical nor magic stars.
+    let Struck::Entity(kind) = struck else {
+        return;
+    };
     let player = state.player();
     let critical = CriticalState {
         falling: player.fall_distance > 0.0,

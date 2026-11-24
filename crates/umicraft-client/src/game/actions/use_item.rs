@@ -6,6 +6,7 @@ use umicraft_game::collision::Aabb;
 use umicraft_game::combat::body_size;
 use umicraft_game::combat::ClickViewer;
 use umicraft_game::editors::book::{WRITABLE_BOOK, WRITTEN_BOOK};
+use umicraft_game::entity::dragon_parts::owner_of_part;
 use umicraft_game::entity::{EntityId, EntityKind, EntityRecord};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::interaction::Outgoing;
@@ -33,9 +34,14 @@ pub(in crate::game) fn run_use(game: &mut Game, queue: &mut CommandQueue) {
     }
     let pointed = combat::pointed(game);
     let target = pointed.block();
-    let entity = pointed
-        .entity()
-        .and_then(|hit| Some((game.entities.entities().get(&hit.id)?, hit)));
+    // A part of a dragon is clicked through its dragon, under its own id.
+    let entity = pointed.entity().and_then(|hit| {
+        let entities = game.entities.entities();
+        let record = entities
+            .get(&hit.id)
+            .or_else(|| owner_of_part(hit.id, entities))?;
+        Some((record, hit))
+    });
     let (Some(state), Some(world)) = (game.state.as_ref(), game.world.as_ref()) else {
         return;
     };

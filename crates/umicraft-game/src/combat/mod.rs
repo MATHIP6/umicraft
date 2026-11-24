@@ -26,5 +26,5 @@ pub use damage_view::{hurt_roll, HeartsFlash, HeartsLook};
 pub use effects::{burst, local_stars, CriticalState, HitEmitter, HitStar, HitStars, SHARPNESS};
 pub use hitbox::{body_size, hitbox};
 pub use interact::{attack_packets, interact_packets, ClickViewer, EntityClick, InteractTick};
-pub use sprint::{sprint_reset, SprintReset};
+pub use sprint::{sprint_reset, SprintReset, Struck};
 pub use target::{pick_target, EntityHit, Pointed, TargetQuery};

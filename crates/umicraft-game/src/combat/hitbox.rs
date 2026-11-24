@@ -6,14 +6,16 @@
 //! `Entity.getEntityBoundingBox()` grown by `getCollisionBorderSize()` (0.1),
 //! and only for entities whose `canBeCollidedWith()` is true: living
 //! entities, hanging entities, boats, minecarts, end crystals, fireballs and
-//! armour stands that are not markers. Dropped items, arrows, bobbers and
-//! the dragon body (its parts are not tracked) are never targeted.
+//! armour stands that are not markers. Dropped items, arrows and bobbers are
+//! never targeted; the dragon is only met through its parts
+//! ([`crate::entity::dragon_parts`]).
 
 use glam::DVec3;
 
+use crate::entity::dragon_parts::dragon_parts;
 use crate::entity::meta::{EntityMeta, Variant};
 use crate::entity::painting::ARTS;
-use crate::entity::{EntityKind, EntityRecord};
+use crate::entity::{EntityId, EntityKind, EntityRecord};
 use crate::shapes::Aabb;
 
 /// The growth of every targeted box (MCP `Entity.getCollisionBorderSize`).
@@ -44,6 +46,38 @@ const FRAME_HALF_FACE: f64 = 12.0 / 32.0;
 const FRAME_HALF_DEPTH: f64 = 1.0 / 32.0;
 /// How far the centre of a frame sits from the middle of its block.
 const FRAME_WALL_OFFSET: f64 = 0.46875;
+
+/// A box the ray tests: the id a hit on it names and the feet the hit
+/// offset is measured from.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TargetBox {
+    /// The entity, or the part of an entity, the box belongs to.
+    pub id: EntityId,
+    /// Its position (`posX`, `posY`, `posZ`).
+    pub feet: DVec3,
+    /// The box, with the collision border.
+    pub bounds: Aabb,
+}
+
+/// Every box the ray tests for `entity`: its own, then those of its parts
+/// (`Chunk.getEntitiesWithinAABBForEntity` adds them next to it).
+pub fn target_boxes(entity: &EntityRecord) -> impl Iterator<Item = TargetBox> {
+    let own = hitbox(entity).map(|bounds| TargetBox {
+        id: entity.id,
+        feet: entity.position,
+        bounds,
+    });
+    let border = DVec3::splat(COLLISION_BORDER);
+    let parts = dragon_parts(entity)
+        .into_iter()
+        .flatten()
+        .map(move |part| TargetBox {
+            id: part.id,
+            feet: part.feet,
+            bounds: Aabb::new(part.bounds.min - border, part.bounds.max + border),
+        });
+    own.into_iter().chain(parts)
+}
 
 /// The box the ray tests for `entity`, `None` when the ray ignores it.
 ///

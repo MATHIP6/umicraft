@@ -12,6 +12,7 @@ pub mod boat;
 pub mod body_yaw;
 pub mod boss;
 pub mod cape;
+pub mod dragon_parts;
 pub mod flags;
 pub mod flight;
 pub mod guardian_beam;

@@ -12,7 +12,7 @@
 
 use glam::DVec3;
 
-use super::hitbox::hitbox;
+use super::hitbox::{target_boxes, TargetBox};
 use crate::entity::{EntityId, EntityRecord};
 use crate::raycast::RayHit;
 use crate::shapes::Aabb;
@@ -114,23 +114,21 @@ pub fn pick_target<'a>(
     let block_distance = block.map_or(block_reach, |hit| hit.distance);
     let mut nearest = block_distance;
     let mut best: Option<EntityHit> = None;
-    for entity in entities {
-        let Some(bounds) = hitbox(entity) else {
-            continue;
-        };
+    for target in entities.into_iter().flat_map(target_boxes) {
+        let bounds = target.bounds;
         let hit = intercept(&bounds, eye, end);
         if contains(&bounds, eye) {
-            best = Some(entity_hit(entity, hit.unwrap_or(eye)));
+            best = Some(entity_hit(&target, hit.unwrap_or(eye)));
             nearest = 0.0;
         } else if let Some(point) = hit {
             let distance = eye.distance(point);
             if distance < nearest || nearest == 0.0 {
-                if Some(entity.id) == vehicle {
+                if Some(target.id) == vehicle {
                     if nearest == 0.0 {
-                        best = Some(entity_hit(entity, point));
+                        best = Some(entity_hit(&target, point));
                     }
                 } else {
-                    best = Some(entity_hit(entity, point));
+                    best = Some(entity_hit(&target, point));
                     nearest = distance;
                 }
             }
@@ -143,11 +141,11 @@ pub fn pick_target<'a>(
     }
 }
 
-fn entity_hit(entity: &EntityRecord, point: DVec3) -> EntityHit {
+fn entity_hit(target: &TargetBox, point: DVec3) -> EntityHit {
     EntityHit {
-        id: entity.id,
+        id: target.id,
         point,
-        origin: entity.position,
+        origin: target.feet,
     }
 }
 
@@ -223,6 +221,31 @@ mod tests {
             },
             entities,
         )
+    }
+
+    #[test]
+    fn the_crosshair_meets_a_dragon_through_its_body_part() {
+        let mut dragon = EntityRecord::new(
+            EntityId(40),
+            EntityKind::Dragon,
+            DVec3::new(0.0, 0.0, 4.0),
+            0.0,
+            0.0,
+        );
+        // Not ticked yet: no parts, and the dragon itself is not collidable.
+        assert_eq!(
+            pick(std::slice::from_ref(&dragon), None, false),
+            Pointed::Miss
+        );
+        let mut flight = crate::entity::flight::DragonFlight::default();
+        flight.tick(0.0, 0.0, glam::Vec3::ZERO, true);
+        dragon.flight = Some(flight);
+        // The body part (5 wide, 3 tall) sits half a block behind the feet:
+        // z 1 to 6, grown by the 0.1 border.
+        let hit = pick(&[dragon], None, false).entity().expect("the body");
+        assert_eq!(hit.id, EntityId(42));
+        assert!((hit.point.z - 0.9).abs() < 1e-9, "{}", hit.point.z);
+        assert!((hit.origin.z - 3.5).abs() < 1e-6);
     }
 
     #[test]

@@ -9,12 +9,15 @@
 //! for a primed TNT and for a falling block. The arrow then bounces: its
 //! motion is multiplied by -0.1 and `ticksInAir` restarts. Boats, minecarts,
 //! ender crystals and hanging entities answer `true`, so the arrow is
-//! destroyed (`setDead`) unless the target is an enderman. Snowballs, eggs,
+//! destroyed (`setDead`) unless the target is an enderman. The ender dragon
+//! is not collidable, but each of its parts is, and a part answers `true`
+//! (`EntityDragon.attackEntityFromPart`), so the arrow is destroyed. Snowballs, eggs,
 //! pearls and fireballs test entities on the server only (`!isRemote`) or do
 //! nothing with the hit on the client, so they fly through.
 
 use glam::DVec3;
 
+use super::dragon_parts::dragon_parts;
 use super::kind::{EntityId, EntityKind};
 use super::record::EntityRecord;
 use crate::collision::Aabb;
@@ -48,6 +51,7 @@ const fn reaction(kind: EntityKind) -> Option<Hit> {
     match kind {
         EntityKind::Boat | EntityKind::Minecart | EntityKind::EnderCrystal => Some(Hit::Absorb),
         EntityKind::PrimedTnt | EntityKind::FallingBlock => Some(Hit::Bounce),
+        EntityKind::Dragon => None,
         kind if kind.is_living() => Some(Hit::Bounce),
         _ => None,
     }
@@ -59,23 +63,32 @@ const fn reaction(kind: EntityKind) -> Option<Hit> {
 /// that margin (1 block) always exceeds the 0.3 of the test, so the filter
 /// would never exclude a hit and is left out.
 pub(super) fn targets<'a>(entities: impl Iterator<Item = &'a EntityRecord>) -> Vec<Target> {
+    let margin = DVec3::splat(HIT_MARGIN);
+    let grown = |bounds: Aabb| Aabb::new(bounds.min - margin, bounds.max + margin);
     entities
-        .filter_map(|entity| {
-            let hit = reaction(entity.kind)?;
-            let half = f64::from(entity.kind.width()) / 2.0;
-            let height = f64::from(entity.kind.height());
-            let feet = entity.position;
-            let bounds = Aabb::new(
-                DVec3::new(feet.x - half, feet.y, feet.z - half)
-                    - DVec3::new(HIT_MARGIN, HIT_MARGIN, HIT_MARGIN),
-                DVec3::new(feet.x + half, feet.y + height, feet.z + half)
-                    + DVec3::new(HIT_MARGIN, HIT_MARGIN, HIT_MARGIN),
-            );
-            Some(Target {
-                id: entity.id,
-                hit,
-                bounds,
-            })
+        .flat_map(|entity| {
+            let own = reaction(entity.kind).map(|hit| {
+                let half = f64::from(entity.kind.width()) / 2.0;
+                let height = f64::from(entity.kind.height());
+                let feet = entity.position;
+                Target {
+                    id: entity.id,
+                    hit,
+                    bounds: grown(Aabb::new(
+                        DVec3::new(feet.x - half, feet.y, feet.z - half),
+                        DVec3::new(feet.x + half, feet.y + height, feet.z + half),
+                    )),
+                }
+            });
+            let parts = dragon_parts(entity)
+                .into_iter()
+                .flatten()
+                .map(|part| Target {
+                    id: part.id,
+                    hit: Hit::Absorb,
+                    bounds: grown(part.bounds),
+                });
+            own.into_iter().chain(parts)
         })
         .collect()
 }
@@ -217,6 +230,31 @@ mod tests {
         let arrow = arrow_at(DVec3::new(0.0, 64.5, 0.0), 0);
         assert_eq!(
             hit(&arrow, DVec3::new(0.0, 64.5, 8.0), &[item, other]),
+            None
+        );
+    }
+
+    #[test]
+    fn an_arrow_is_destroyed_by_a_dragon_part_and_misses_its_feet() {
+        let mut dragon = entity(40, EntityKind::Dragon, DVec3::new(0.0, 70.0, 0.0));
+        let mut flight = super::super::flight::DragonFlight::default();
+        flight.tick(0.0, 70.0, glam::Vec3::ZERO, true);
+        dragon.flight = Some(flight);
+        // Through the body (x -2.5..2.5, y 70..73, z -3..2).
+        let into_body = arrow_at(DVec3::new(0.0, 71.0, 10.0), 0);
+        assert_eq!(
+            hit(
+                &into_body,
+                DVec3::new(0.0, 71.0, -10.0),
+                std::slice::from_ref(&dragon)
+            ),
+            Some(Hit::Absorb)
+        );
+        // A dragon without a flight yet has no parts, and its own box is not
+        // collidable.
+        dragon.flight = None;
+        assert_eq!(
+            hit(&into_body, DVec3::new(0.0, 71.0, -10.0), &[dragon]),
             None
         );
     }

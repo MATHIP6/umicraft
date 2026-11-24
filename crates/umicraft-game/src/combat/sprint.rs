@@ -8,10 +8,30 @@
 //! sprint). "Lands" is `target.attackEntityFrom(..)`: on the client world a
 //! mob answers false (`EntityLivingBase.attackEntityFrom` returns early when
 //! `isRemote`) while `EntityOtherPlayerMP.attackEntityFrom` answers true. The
-//! reset therefore happens on the client only against another player; against
-//! mobs the server resets the sprint it tracks and the client keeps its own.
+//! reset therefore happens on the client only against another player and
+//! against a part of the ender dragon (`EntityDragon.attackEntityFromPart`
+//! answers true on any side); against mobs the server resets the sprint it
+//! tracks and the client keeps its own.
 
 use crate::entity::EntityKind;
+
+/// What the local player's attack struck.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Struck {
+    /// A tracked entity of this kind.
+    Entity(EntityKind),
+    /// A part of an ender dragon
+    /// ([`crate::entity::dragon_parts`]).
+    DragonPart,
+}
+
+impl Struck {
+    /// Whether `attackEntityFrom` answers true on the client world.
+    #[must_use]
+    pub fn lands_locally(self) -> bool {
+        matches!(self, Self::Entity(EntityKind::Player) | Self::DragonPart)
+    }
+}
 
 /// The factor on the horizontal motion (MCP `motionX *= 0.6D`).
 pub const SPRINT_RESET_SCALE: f64 = 0.6;
@@ -30,10 +50,9 @@ pub struct SprintReset {
 ///
 /// `knockback` is the Knockback level of the held item.
 #[must_use]
-pub fn sprint_reset(target: EntityKind, sprinting: bool, knockback: u32) -> Option<SprintReset> {
-    let lands_locally = target == EntityKind::Player;
+pub fn sprint_reset(target: Struck, sprinting: bool, knockback: u32) -> Option<SprintReset> {
     let pushes = sprinting || knockback > 0;
-    (lands_locally && pushes).then_some(SprintReset {
+    (target.lands_locally() && pushes).then_some(SprintReset {
         scale: SPRINT_RESET_SCALE,
     })
 }
@@ -45,24 +64,35 @@ mod tests {
     #[test]
     fn a_sprinting_hit_on_a_player_resets_the_sprint() {
         assert_eq!(
-            sprint_reset(EntityKind::Player, true, 0),
+            sprint_reset(Struck::Entity(EntityKind::Player), true, 0),
             Some(SprintReset { scale: 0.6 })
         );
     }
 
     #[test]
     fn knockback_alone_resets_it_too() {
-        assert!(sprint_reset(EntityKind::Player, false, 1).is_some());
+        assert!(sprint_reset(Struck::Entity(EntityKind::Player), false, 1).is_some());
     }
 
     #[test]
     fn a_walking_hit_without_knockback_changes_nothing() {
-        assert_eq!(sprint_reset(EntityKind::Player, false, 0), None);
+        assert_eq!(
+            sprint_reset(Struck::Entity(EntityKind::Player), false, 0),
+            None
+        );
     }
 
     #[test]
     fn a_mob_does_not_reset_the_client_sprint() {
         // The client world answers false to `attackEntityFrom` for mobs.
-        assert_eq!(sprint_reset(EntityKind::Zombie, true, 2), None);
+        assert_eq!(
+            sprint_reset(Struck::Entity(EntityKind::Zombie), true, 2),
+            None
+        );
+    }
+
+    #[test]
+    fn a_dragon_part_resets_the_client_sprint() {
+        assert!(sprint_reset(Struck::DragonPart, true, 0).is_some());
     }
 }
