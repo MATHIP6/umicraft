@@ -48,8 +48,8 @@ fn layouts_are_stable_on_64_bit() {
         assert_eq!((size, align, header, tick), (24, 8, 0, 16));
     }
 
-    // 184 in 1.0; appended functions grow it (1.1: 224, 1.2: 272).
-    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (272, 8));
+    // 184 in 1.0; appended functions grow it (1.1: 224, 1.2: 272, 1.3: 280).
+    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (280, 8));
     assert_eq!(offset_of!(UmiHost, size), 0);
     assert_eq!(offset_of!(UmiHost, version), 8);
     assert_eq!(offset_of!(UmiHost, log), 16);
@@ -339,7 +339,6 @@ fn a_1_1_host_loads_1_0_mods_and_a_1_0_host_refuses_1_1_mods() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn api_1_2_layouts() {
-    assert_eq!(UMI_API_VERSION, UmiVersion { major: 1, minor: 2 });
     assert_eq!(UmiEventId::MODULE_TOGGLED, UmiEventId(14));
     assert_eq!(UmiEventId::BUTTON_PRESSED, UmiEventId(15));
 
@@ -373,5 +372,21 @@ fn a_1_2_host_loads_older_mods_and_a_1_1_host_refuses_1_2_mods() {
     assert!(UMI_API_VERSION.accepts(v(1, 1)));
     assert!(UMI_API_VERSION.accepts(v(1, 2)));
     assert!(!v(1, 1).accepts(v(1, 2)));
-    assert!(!UMI_API_VERSION.accepts(v(1, 3)));
+}
+
+/// API 1.3 (ADR-0096): one host function appended.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn api_1_3_layouts() {
+    assert_eq!(UMI_API_VERSION, UmiVersion { major: 1, minor: 3 });
+    assert_eq!(offset_of!(UmiHost, camera_capture), 272);
+}
+
+#[test]
+fn a_1_3_host_loads_older_mods_and_a_1_2_host_refuses_1_3_mods() {
+    let v = |major, minor| UmiVersion { major, minor };
+    assert!(UMI_API_VERSION.accepts(v(1, 2)));
+    assert!(UMI_API_VERSION.accepts(v(1, 3)));
+    assert!(!v(1, 2).accepts(v(1, 3)));
+    assert!(!UMI_API_VERSION.accepts(v(1, 4)));
 }

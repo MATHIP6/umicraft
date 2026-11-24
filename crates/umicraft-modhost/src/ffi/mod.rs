@@ -21,7 +21,7 @@ mod world;
 
 #[cfg(test)]
 pub(crate) use camera::testing as camera_testing;
-pub(crate) use camera::CAMERA_ACTIVE;
+pub(crate) use camera::{capturing, CAMERA_ACTIVE};
 #[cfg(test)]
 pub(crate) use event::testing;
 pub(crate) use hud::with_hud_cx;
@@ -185,6 +185,7 @@ pub fn host_table() -> UmiHost {
         register_button: menu::host_register_button,
         module_attach: menu::host_module_attach,
         module_enabled: menu::host_module_enabled,
+        camera_capture: camera::host_camera_capture,
     }
 }
 

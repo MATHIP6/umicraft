@@ -285,4 +285,11 @@ pub struct UmiHost {
     /// Stores the player's switch of `module` (1 on, 0 off) in `out`; callable
     /// from any thread at any time. Added in API 1.2.
     pub module_enabled: extern "C" fn(me: UmiModHandle, module: UmiStr, out: *mut u8) -> UmiStatus,
+    /// Called by a running `render_camera` layer: the player's movement keys and
+    /// mouse look go to the camera only, from the next frame on, instead of
+    /// moving and turning the player. The request lasts one frame, so a layer
+    /// calls it on every frame it wants the input; once no layer asks (or the
+    /// mod is switched off or fails), the player gets the input back. `DENIED`
+    /// for a `cx` that is not the running camera layer's. Added in API 1.3.
+    pub camera_capture: extern "C" fn(cx: *mut UmiCameraCx) -> UmiStatus,
 }

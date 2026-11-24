@@ -16,7 +16,7 @@ use std::thread::LocalKey;
 use umicraft_modapi_sys::{UmiCameraCx, UmiCameraFn, UmiCameraInput, UmiRenderCamera, UmiStatus};
 
 use crate::context::ModContext;
-use crate::ffi::CAMERA_ACTIVE;
+use crate::ffi::{capturing, CAMERA_ACTIVE};
 use crate::manifest::RENDER_CAMERA;
 use crate::service::{Service, ServiceChain, ServiceSlot};
 
@@ -83,10 +83,14 @@ impl CameraChain {
     /// non-finite number takes the built-in value back, the pitch is clamped to ±90
     /// and the field of view to 1..=170 degrees, and the read-only fields (`size`,
     /// `flags`, `aspect`) are restored.
-    pub fn place(&self, camera: &mut UmiRenderCamera, input: &UmiCameraInput) {
+    ///
+    /// Returns whether a layer called `camera_capture` (API 1.3, ADR-0096): then the
+    /// player's movement keys and mouse look of the next frame go to the camera only.
+    pub fn place(&self, camera: &mut UmiRenderCamera, input: &UmiCameraInput) -> bool {
         let builtin = *camera;
-        self.0.run(camera, input, &mut |_| {});
+        let captured = capturing(|| self.0.run(camera, input, &mut |_| {}));
         *camera = sanitized(*camera, &builtin);
+        captured
     }
 }
 

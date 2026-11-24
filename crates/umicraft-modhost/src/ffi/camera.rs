@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! The `register_camera` / `camera_next` host functions of the `render_camera`
-//! service (API 1.1, ADR-0094); the pointer checks they rely on are in
-//! `ffi::service`.
+//! service (API 1.1, ADR-0094) and `camera_capture` (API 1.3, ADR-0096); the pointer
+//! checks `camera_next` relies on are in `ffi::service`.
 
 use core::ffi::c_void;
 use std::cell::Cell;
@@ -16,6 +16,16 @@ use crate::camera::RenderCamera;
 thread_local! {
     /// The `LayerRun` of the `render_camera` layer running on this thread, or null.
     pub(crate) static CAMERA_ACTIVE: Cell<*mut c_void> = const { Cell::new(core::ptr::null_mut()) };
+    /// Whether a layer of the run in progress on this thread asked for the input.
+    static CAPTURE: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Runs `place` (one run of the camera chain) and returns whether one of its layers
+/// called `camera_capture`.
+pub(crate) fn capturing(place: impl FnOnce()) -> bool {
+    CAPTURE.with(|capture| capture.set(false));
+    place();
+    CAPTURE.with(Cell::take)
 }
 
 pub(super) extern "C" fn host_register_camera(
@@ -31,6 +41,18 @@ pub(super) extern "C" fn host_register_camera(
 
 pub(super) extern "C" fn host_camera_next(cx: *mut UmiCameraCx) -> UmiStatus {
     service_next::<RenderCamera>(cx.cast())
+}
+
+/// Only the running layer's own `cx` is accepted, as for `camera_next`: one kept
+/// from an earlier frame, or used from another thread, is refused. Nothing is read
+/// through the pointer, so no `unsafe` is needed.
+pub(super) extern "C" fn host_camera_capture(cx: *mut UmiCameraCx) -> UmiStatus {
+    let running = CAMERA_ACTIVE.with(Cell::get);
+    if cx.is_null() || cx.cast::<c_void>() != running {
+        return UmiStatus::DENIED;
+    }
+    CAPTURE.with(|capture| capture.set(true));
+    UmiStatus::OK
 }
 
 /// Raw-pointer helpers for the fake `extern "C"` layers of the tests, so those stay

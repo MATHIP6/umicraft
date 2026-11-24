@@ -1262,6 +1262,15 @@ typedef struct UmiHost {
    * from any thread at any time. Added in API 1.2.
    */
   UmiStatus (*module_enabled)(UmiModHandle me, struct UmiStr module, uint8_t *out);
+  /**
+   * Called by a running `render_camera` layer: the player's movement keys and
+   * mouse look go to the camera only, from the next frame on, instead of
+   * moving and turning the player. The request lasts one frame, so a layer
+   * calls it on every frame it wants the input; once no layer asks (or the
+   * mod is switched off or fails), the player gets the input back. `DENIED`
+   * for a `cx` that is not the running camera layer's. Added in API 1.3.
+   */
+  UmiStatus (*camera_capture)(struct UmiCameraCx *cx);
 } UmiHost;
 
 /**
@@ -1500,8 +1509,9 @@ typedef struct UmiScreen {
  * `render_camera` service, `PRE_RENDER`, the camera of `FRAME`, the entity
  * snapshot and metadata, writable flight and game mode, two HUD primitives and
  * the screen anchor (ADR-0094); 1.2 added categories, modules and buttons in the
- * mods menu (ADR-0095).
+ * mods menu (ADR-0095); 1.3 added `camera_capture`, for a free camera
+ * (ADR-0096).
  */
-#define UMI_API_VERSION (UmiVersion){ .major = 1, .minor = 2 }
+#define UMI_API_VERSION (UmiVersion){ .major = 1, .minor = 3 }
 
 #endif  /* UMICRAFT_H */

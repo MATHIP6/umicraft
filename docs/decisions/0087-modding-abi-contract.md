@@ -98,3 +98,5 @@ crates may use `unsafe`.
   `module_enabled`), events 14 (`MODULE_TOGGLED`) and 15 (`BUTTON_PRESSED`) and the
   new `UmiModuleDef`. A button has its own function rather than a new setting kind, so
   `UmiSettingDef` keeps its 1.0 size. Only the `UmiHost` size assertion changed.
+- **2026-11-24 — 1.3 (ADR-0096).** One host function appended after
+  `module_enabled`: `camera_capture`. Only the `UmiHost` size assertion changed.

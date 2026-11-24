@@ -195,3 +195,57 @@ fn a_camera_mod_is_not_held_by_server_compat() {
     cx.shared.set_server_compat(true);
     assert!(cx.is_enabled(), "the owner's decision of ADR-0094");
 }
+
+static KEPT_CX: Mutex<usize> = Mutex::new(0);
+
+/// Calls `next`, asks for the input, and keeps its `cx` for later misuse.
+extern "C" fn capturer(
+    cx: *mut UmiCameraCx,
+    _: *mut UmiRenderCamera,
+    _: *const UmiCameraInput,
+    _: *mut c_void,
+) -> UmiStatus {
+    *KEPT_CX.lock().unwrap() = cx as usize;
+    let status = (table().camera_next)(cx);
+    match (table().camera_capture)(cx) {
+        UmiStatus::OK => status,
+        refused => refused,
+    }
+}
+
+#[test]
+fn a_layer_captures_the_input_for_the_frame_it_asks() {
+    let cx = wrapper(capturer);
+    let chain = CameraChain::new([&cx]).unwrap();
+    let mut placed = camera();
+    assert!(chain.place(&mut placed, &input()));
+    assert!(!cx.is_failed());
+
+    // A layer that does not ask leaves the input to the player.
+    let plain = CameraChain::new([&wrapper(raiser)]).unwrap();
+    assert!(!plain.place(&mut camera(), &input()));
+
+    // Nor does a layer whose mod is switched off: the player gets the input back.
+    cx.set_wanted(false);
+    assert!(!chain.place(&mut camera(), &input()));
+}
+
+#[test]
+fn only_the_running_layers_cx_may_capture() {
+    let cx = wrapper(capturer);
+    let chain = CameraChain::new([&cx]).unwrap();
+    chain.place(&mut camera(), &input());
+    let kept = *KEPT_CX.lock().unwrap() as *mut UmiCameraCx;
+    assert_eq!(
+        (table().camera_capture)(kept),
+        UmiStatus::DENIED,
+        "a stale cx"
+    );
+    assert_eq!(
+        (table().camera_capture)(core::ptr::null_mut()),
+        UmiStatus::DENIED
+    );
+    // A refused call outside a run does not leak into the next one.
+    let plain = CameraChain::new([&wrapper(raiser)]).unwrap();
+    assert!(!plain.place(&mut camera(), &input()));
+}
