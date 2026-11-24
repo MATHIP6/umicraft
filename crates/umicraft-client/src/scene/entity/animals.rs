@@ -26,8 +26,8 @@ pub(crate) const WITCH_SCALE: f32 = 0.9375;
 /// Scale of a donkey and of a mule (MCP `RenderHorse.preRenderCallback`).
 const DONKEY_SCALE: f32 = 0.87;
 const MULE_SCALE: f32 = 0.92;
-/// Size of a foal as born (MCP `EntityHorse.getHorseSize`); the horse model
-/// shrinks its parts by it.
+/// Size of a foal (MCP `EntityHorse.getHorseSize`, a constant `0.5` in 1.8,
+/// not a function of the age); the horse model shrinks its parts by it.
 const FOAL_SIZE: f32 = 0.5;
 
 /// Animals, villagers and the other limb-swinging ground mobs.
@@ -406,7 +406,10 @@ fn horse_layers(ent: &EntityRenderSnapshot, pose: Pose) -> Vec<EntityLayer> {
         tail_swinging: state.tail_swinging,
         age: ent.age,
         adult: !ent.meta.baby,
-        // The age of a foal is not tracked: it is drawn as born.
+        // Exact, not an approximation: on a client `EntityAgeable.getGrowingAge`
+        // is the entry 12 byte, which `setGrowingAge` clamps to -1..1, so the
+        // server never sends how old a foal is; the reference itself only
+        // tests the sign (`isChild`) and draws `getHorseSize() = 0.5`.
         size: if ent.meta.baby { FOAL_SIZE } else { 1.0 },
         saddled: horse.saddled(),
         ridden: ent.ridden,
