@@ -22,10 +22,10 @@ mod ui;
 
 pub use camera::{UmiCameraCx, UmiCameraFn, UmiCameraInput, UmiRenderCamera};
 pub use events::{
-    UmiChatReceived, UmiChatSend, UmiConnected, UmiDisconnected, UmiEventHeader, UmiEventId,
-    UmiFrame, UmiKeyPressed, UmiPacket, UmiPostTick, UmiPreRender, UmiPreTick, UmiScreen,
-    UMI_CHAT_POSITION_ACTION_BAR, UMI_CHAT_POSITION_CHAT, UMI_CHAT_POSITION_SYSTEM,
-    UMI_EVENT_CANCELLABLE, UMI_EVENT_CANCELLED, UMI_EVENT_MUTABLE,
+    UmiButtonPressed, UmiChatReceived, UmiChatSend, UmiConnected, UmiDisconnected, UmiEventHeader,
+    UmiEventId, UmiFrame, UmiKeyPressed, UmiModuleToggled, UmiPacket, UmiPostTick, UmiPreRender,
+    UmiPreTick, UmiScreen, UMI_CHAT_POSITION_ACTION_BAR, UMI_CHAT_POSITION_CHAT,
+    UMI_CHAT_POSITION_SYSTEM, UMI_EVENT_CANCELLABLE, UMI_EVENT_CANCELLED, UMI_EVENT_MUTABLE,
 };
 pub use exports::{
     UmiModApiVersionFn, UmiModInitFn, UmiModShutdownFn, UMI_MOD_API_VERSION_SYMBOL,
@@ -44,6 +44,7 @@ pub use types::{
     UmiBytes, UmiModContext, UmiModHandle, UmiStatus, UmiStr, UmiVersion, UMI_API_VERSION,
 };
 pub use ui::{
-    UmiCommandFn, UmiHudCx, UmiHudDrawFn, UmiHudPlacement, UmiSettingDef, UmiSettingKind,
-    UmiSettingValue, UMI_HUD_ANCHOR_SCREEN,
+    UmiCommandFn, UmiHudCx, UmiHudDrawFn, UmiHudPlacement, UmiModuleDef, UmiSettingDef,
+    UmiSettingKind, UmiSettingValue, UMI_ATTACH_HUD_WIDGET, UMI_ATTACH_POST_PASS,
+    UMI_HUD_ANCHOR_SCREEN, UMI_MODULE_DEFAULT_ON,
 };

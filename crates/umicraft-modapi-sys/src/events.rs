@@ -53,6 +53,15 @@ impl UmiEventId {
     /// before the camera is handed to the GPU; payload [`UmiPreRender`], render
     /// thread. Not cancellable, not mutable. Added in API 1.1.
     pub const PRE_RENDER: Self = Self(13);
+    /// The player switched one of the mod's modules on or off in the mods
+    /// menu; payload [`UmiModuleToggled`], render thread. Delivered only to
+    /// the mod that declared the module. Not cancellable, not mutable. Added
+    /// in API 1.2.
+    pub const MODULE_TOGGLED: Self = Self(14);
+    /// The player clicked one of the mod's buttons in the mods menu; payload
+    /// [`UmiButtonPressed`], render thread. Delivered only to the mod that
+    /// declared the button. Not cancellable, not mutable. Added in API 1.2.
+    pub const BUTTON_PRESSED: Self = Self(15);
 }
 
 /// `UmiEventHeader::flags` bit: a handler may cancel the event.
@@ -239,4 +248,28 @@ pub struct UmiPreRender {
     pub header: UmiEventHeader,
     /// The final camera of the frame (a copy: changing it has no effect).
     pub camera: UmiRenderCamera,
+}
+
+/// Payload of [`UmiEventId::MODULE_TOGGLED`]. Added in API 1.2.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UmiModuleToggled {
+    /// Common header.
+    pub header: UmiEventHeader,
+    /// The key the mod gave to `register_module`.
+    pub module: UmiStr,
+    /// The new state of the player's switch: 1 on, 0 off.
+    pub enabled: u8,
+}
+
+/// Payload of [`UmiEventId::BUTTON_PRESSED`]. Added in API 1.2.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UmiButtonPressed {
+    /// Common header.
+    pub header: UmiEventHeader,
+    /// The module whose card holds the button, empty for the mod's own card.
+    pub module: UmiStr,
+    /// The key the mod gave to `register_button`.
+    pub key: UmiStr,
 }

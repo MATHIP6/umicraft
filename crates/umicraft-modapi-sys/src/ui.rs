@@ -112,3 +112,34 @@ pub type UmiHudDrawFn = extern "C" fn(hud: *mut UmiHudCx, user: *mut c_void) -> 
 /// Runs a client command: `args` is the text after `/<name> `, borrowed for
 /// the call. Called on the game thread, within a time budget.
 pub type UmiCommandFn = extern "C" fn(args: UmiStr, user: *mut c_void) -> UmiStatus;
+
+/// A module a mod declares with `UmiHost::register_module`: a card of its own in
+/// the mods menu, with a switch the player controls. Added in API 1.2.
+#[repr(C)]
+#[derive(Debug, Clone, Copy)]
+pub struct UmiModuleDef {
+    /// Size of this struct as the mod built it.
+    pub size: u32,
+    /// [`UMI_MODULE_DEFAULT_ON`] or 0.
+    pub flags: u32,
+    /// Stable key, unique within the mod (`^[a-z][a-z0-9_]{0,63}$`); the
+    /// player's switch is saved under it.
+    pub key: UmiStr,
+    /// Name of the card.
+    pub label: UmiStr,
+    /// One-line description of the card; may be empty.
+    pub description: UmiStr,
+    /// Key of one of the mod's categories (`register_category`), or empty for
+    /// the "External" tab.
+    pub category: UmiStr,
+}
+
+/// [`UmiModuleDef::flags`]: the module is on until the player switches it off.
+pub const UMI_MODULE_DEFAULT_ON: u32 = 1;
+
+/// `UmiHost::module_attach` kind: a HUD widget, drawn only while the module is
+/// on.
+pub const UMI_ATTACH_HUD_WIDGET: u32 = 1;
+/// `UmiHost::module_attach` kind: a post-process pass, applied only while the
+/// module is on.
+pub const UMI_ATTACH_POST_PASS: u32 = 2;

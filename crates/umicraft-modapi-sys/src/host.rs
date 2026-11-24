@@ -6,8 +6,8 @@ use core::ffi::c_void;
 
 use crate::{
     UmiBytes, UmiCameraCx, UmiCameraFn, UmiCommandFn, UmiEntity, UmiEntityVisitFn, UmiEventHeader,
-    UmiEventId, UmiHudCx, UmiHudDrawFn, UmiHudPlacement, UmiModHandle, UmiPhysicsCx, UmiPhysicsFn,
-    UmiServiceMode, UmiSettingDef, UmiSettingValue, UmiStatus, UmiStr, UmiVersion,
+    UmiEventId, UmiHudCx, UmiHudDrawFn, UmiHudPlacement, UmiModHandle, UmiModuleDef, UmiPhysicsCx,
+    UmiPhysicsFn, UmiServiceMode, UmiSettingDef, UmiSettingValue, UmiStatus, UmiStr, UmiVersion,
 };
 
 /// How a handler takes part in an event.
@@ -252,4 +252,37 @@ pub struct UmiHost {
         alpha: f32,
         thickness: f32,
     ) -> UmiStatus,
+    /// Declares the category `key` (during `umi_mod_init` only): a tab of the
+    /// mods menu named `label`, shown once a module uses it. Tabs of different
+    /// mods with the same label are merged. `DENIED` past 2 categories,
+    /// `CONFLICT` for a key already used. Added in API 1.2.
+    pub register_category: extern "C" fn(me: UmiModHandle, key: UmiStr, label: UmiStr) -> UmiStatus,
+    /// Declares a module (during `umi_mod_init` only): a card of its own with a
+    /// switch, in the tab of its category. `INVALID_ARGUMENT` for an unknown
+    /// category, `DENIED` past 16 modules, `CONFLICT` for a key already used.
+    /// Added in API 1.2.
+    pub register_module: extern "C" fn(me: UmiModHandle, def: *const UmiModuleDef) -> UmiStatus,
+    /// Like `register_setting`, on the card of `module` (empty: the mod's own
+    /// card). Keys stay unique across the whole mod. Added in API 1.2.
+    pub register_setting_in:
+        extern "C" fn(me: UmiModHandle, module: UmiStr, def: *const UmiSettingDef) -> UmiStatus,
+    /// Declares a button on the card of `module` (empty: the mod's own card),
+    /// during `umi_mod_init` only: `label` on the left, a button reading `text`
+    /// on the right. A click sends `BUTTON_PRESSED` to this mod. Its key shares
+    /// the namespace of the settings. Added in API 1.2.
+    pub register_button: extern "C" fn(
+        me: UmiModHandle,
+        module: UmiStr,
+        key: UmiStr,
+        label: UmiStr,
+        text: UmiStr,
+    ) -> UmiStatus,
+    /// Ties the widget or post-process pass `key` (`kind`: `UMI_ATTACH_*`) to
+    /// `module`, during `umi_mod_init` only: it is drawn only while the module
+    /// is on. `CONFLICT` for something already attached. Added in API 1.2.
+    pub module_attach:
+        extern "C" fn(me: UmiModHandle, module: UmiStr, kind: u32, key: UmiStr) -> UmiStatus,
+    /// Stores the player's switch of `module` (1 on, 0 off) in `out`; callable
+    /// from any thread at any time. Added in API 1.2.
+    pub module_enabled: extern "C" fn(me: UmiModHandle, module: UmiStr, out: *mut u8) -> UmiStatus,
 }

@@ -10,6 +10,57 @@ style = "both"
 
 [export]
 prefix = ""
+# The crate declares types only, no `extern "C"` function, so cbindgen would emit
+# nothing but constants: every ABI type is listed here.
+include = [
+    "UmiButtonPressed",
+    "UmiBytes",
+    "UmiCameraCx",
+    "UmiCameraFn",
+    "UmiCameraInput",
+    "UmiChatReceived",
+    "UmiChatSend",
+    "UmiCommandFn",
+    "UmiConnected",
+    "UmiDisconnected",
+    "UmiEntity",
+    "UmiEntityVisitFn",
+    "UmiEventHeader",
+    "UmiEventId",
+    "UmiFrame",
+    "UmiHandlerFn",
+    "UmiHost",
+    "UmiHudCx",
+    "UmiHudDrawFn",
+    "UmiHudPlacement",
+    "UmiKeyPressed",
+    "UmiLevel",
+    "UmiModApiVersionFn",
+    "UmiModContext",
+    "UmiMode",
+    "UmiModHandle",
+    "UmiModInitFn",
+    "UmiModShutdownFn",
+    "UmiModuleDef",
+    "UmiModuleToggled",
+    "UmiPacket",
+    "UmiPhysicsCx",
+    "UmiPhysicsFn",
+    "UmiPhysicsInput",
+    "UmiPlayerPhysics",
+    "UmiPostTick",
+    "UmiPreRender",
+    "UmiPreTick",
+    "UmiRenderCamera",
+    "UmiScreen",
+    "UmiServiceMode",
+    "UmiSettingDef",
+    "UmiSettingKind",
+    "UmiSettingValue",
+    "UmiStatus",
+    "UmiStr",
+    "UmiVersion",
+]
 
 [export.rename]
 

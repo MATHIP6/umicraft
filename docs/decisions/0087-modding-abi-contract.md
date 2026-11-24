@@ -93,3 +93,8 @@ crates may use `unsafe`.
   `post_set_param`, event 13 (`PRE_RENDER`), anchor value 9 (`UMI_HUD_ANCHOR_SCREEN`,
   refused by 1.0) and the `render_camera` service. Only the size assertions of the
   1.0 layout tests changed; every offset assertion stands.
+- **2026-11-23 — 1.2 (ADR-0095).** Appended again: six host functions after
+  `hud_segment` (categories, modules, settings and buttons on a module, attachments,
+  `module_enabled`), events 14 (`MODULE_TOGGLED`) and 15 (`BUTTON_PRESSED`) and the
+  new `UmiModuleDef`. A button has its own function rather than a new setting kind, so
+  `UmiSettingDef` keeps its 1.0 size. Only the `UmiHost` size assertion changed.

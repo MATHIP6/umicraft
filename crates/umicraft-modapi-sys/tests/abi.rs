@@ -48,8 +48,8 @@ fn layouts_are_stable_on_64_bit() {
         assert_eq!((size, align, header, tick), (24, 8, 0, 16));
     }
 
-    // 184 in 1.0; appended functions grow it (1.1: 224).
-    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (224, 8));
+    // 184 in 1.0; appended functions grow it (1.1: 224, 1.2: 272).
+    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (272, 8));
     assert_eq!(offset_of!(UmiHost, size), 0);
     assert_eq!(offset_of!(UmiHost, version), 8);
     assert_eq!(offset_of!(UmiHost, log), 16);
@@ -258,7 +258,6 @@ fn frame_payload_layout() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn api_1_1_layouts() {
-    assert_eq!(UMI_API_VERSION, UmiVersion { major: 1, minor: 1 });
     assert_eq!(UmiEventId::PRE_RENDER, UmiEventId(13));
 
     assert_eq!(offset_of!(UmiFrame, eye), 80);
@@ -334,5 +333,45 @@ fn a_1_1_host_loads_1_0_mods_and_a_1_0_host_refuses_1_1_mods() {
     assert!(UMI_API_VERSION.accepts(v(1, 0)));
     assert!(UMI_API_VERSION.accepts(v(1, 1)));
     assert!(!v(1, 0).accepts(v(1, 1)));
-    assert!(!UMI_API_VERSION.accepts(v(1, 2)));
+}
+
+/// API 1.2 (ADR-0095): the menu additions sit after the last 1.1 field.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn api_1_2_layouts() {
+    assert_eq!(UMI_API_VERSION, UmiVersion { major: 1, minor: 2 });
+    assert_eq!(UmiEventId::MODULE_TOGGLED, UmiEventId(14));
+    assert_eq!(UmiEventId::BUTTON_PRESSED, UmiEventId(15));
+
+    assert_eq!(offset_of!(UmiModuleToggled, module), 16);
+    assert_eq!(offset_of!(UmiModuleToggled, enabled), 32);
+    assert_eq!(size_of::<UmiModuleToggled>(), 40);
+    assert_eq!(offset_of!(UmiButtonPressed, module), 16);
+    assert_eq!(offset_of!(UmiButtonPressed, key), 32);
+    assert_eq!(size_of::<UmiButtonPressed>(), 48);
+
+    assert_eq!(offset_of!(UmiModuleDef, flags), 4);
+    assert_eq!(offset_of!(UmiModuleDef, key), 8);
+    assert_eq!(offset_of!(UmiModuleDef, label), 24);
+    assert_eq!(offset_of!(UmiModuleDef, description), 40);
+    assert_eq!(offset_of!(UmiModuleDef, category), 56);
+    assert_eq!(size_of::<UmiModuleDef>(), 72);
+    assert_eq!(UMI_MODULE_DEFAULT_ON, 1);
+    assert_eq!((UMI_ATTACH_HUD_WIDGET, UMI_ATTACH_POST_PASS), (1, 2));
+
+    assert_eq!(offset_of!(UmiHost, register_category), 224);
+    assert_eq!(offset_of!(UmiHost, register_module), 232);
+    assert_eq!(offset_of!(UmiHost, register_setting_in), 240);
+    assert_eq!(offset_of!(UmiHost, register_button), 248);
+    assert_eq!(offset_of!(UmiHost, module_attach), 256);
+    assert_eq!(offset_of!(UmiHost, module_enabled), 264);
+}
+
+#[test]
+fn a_1_2_host_loads_older_mods_and_a_1_1_host_refuses_1_2_mods() {
+    let v = |major, minor| UmiVersion { major, minor };
+    assert!(UMI_API_VERSION.accepts(v(1, 1)));
+    assert!(UMI_API_VERSION.accepts(v(1, 2)));
+    assert!(!v(1, 1).accepts(v(1, 2)));
+    assert!(!UMI_API_VERSION.accepts(v(1, 3)));
 }
