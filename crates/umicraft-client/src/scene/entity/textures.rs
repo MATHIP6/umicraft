@@ -456,10 +456,7 @@ impl EntityTextures {
                 progress,
             )
         });
-        let block_entities = self.block_entities.take();
-        for (slot, vertices) in block_entities.solid {
-            meshed.solid.entry(slot).or_default().extend(vertices);
-        }
+        merge_block_entities(&mut meshed, self.block_entities.take());
         self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();
         let mut solid = bound_batches(&meshed.solid, &textures);
@@ -599,6 +596,18 @@ pub type HandSkin = (TextureSlot, bool, u8);
 /// Every skin layer on, as before the local profile is known.
 const ALL_SKIN_PARTS: u8 = 0x7F;
 
+/// Adds the tile entities of the frame to the entity meshes: the lit ones
+/// (chests, signs, skulls, ...) to the solid pass, the beacon beam and the end
+/// portal surface to the additive pass.
+fn merge_block_entities(meshed: &mut super::MeshedEntities, block_entities: BlockEntityMeshes) {
+    for (slot, vertices) in block_entities.solid {
+        meshed.solid.entry(slot).or_default().extend(vertices);
+    }
+    for (slot, vertices) in block_entities.additive {
+        meshed.additive.entry(slot).or_default().extend(vertices);
+    }
+}
+
 impl SkinLookup for EntityTextures {
     fn skin(&self, url: &str) -> Option<u32> {
         self.skins.borrow_mut().lookup(url, SkinKind::Skin)
@@ -637,5 +646,28 @@ mod tests {
         assert!(!needs_sign_font(Some(&first), &Arc::clone(&first)));
         // A swapped UI font is a new atlas, even with the same content.
         assert!(needs_sign_font(Some(&first), &same_pixels));
+    }
+
+    #[test]
+    fn the_end_portal_and_beacon_beam_reach_the_additive_pass() {
+        // Regression: the additive batches of the tile entities were dropped,
+        // so the end portal surface and the beacon beam were never drawn.
+        let vertex = EntityVertex {
+            position: [0.0; 3],
+            normal: [0.0, 1.0, 0.0],
+            uv: [0.0; 2],
+            light: 0,
+        };
+        let mut block_entities = BlockEntityMeshes::default();
+        block_entities
+            .additive
+            .insert(TextureSlot::EndPortal, vec![vertex; 4]);
+        block_entities
+            .solid
+            .insert(TextureSlot::EndPortal, vec![vertex; 2]);
+        let mut meshed = super::super::MeshedEntities::default();
+        merge_block_entities(&mut meshed, block_entities);
+        assert_eq!(meshed.additive[&TextureSlot::EndPortal].len(), 4);
+        assert_eq!(meshed.solid[&TextureSlot::EndPortal].len(), 2);
     }
 }
