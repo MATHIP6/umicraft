@@ -1110,6 +1110,40 @@ mod glint_render_tests {
         }
     }
 
+    /// The item a mob, a player or an armour stand holds in third person
+    /// glints when it is enchanted (`LayerHeldItem` draws it through
+    /// `RenderItem`, which adds the glint), and only then.
+    #[test]
+    #[ignore = "requires the official 1.8.8 client jar"]
+    fn enchanted_items_held_in_third_person_glint() {
+        let resources = ModelResources::load().expect("official resources");
+        let items = resources.items();
+        let holding = |kind, nbt| {
+            let mut entity = dropped(1, 0.0, 276, 0, None);
+            entity.kind = kind;
+            entity.item = None;
+            entity.held = Some(EntityItem {
+                item_id: 276,
+                damage: 0,
+                count: 1,
+                nbt,
+            });
+            entity
+        };
+        for kind in [
+            EntityKind::Zombie,
+            EntityKind::Player,
+            EntityKind::ArmorStand,
+        ] {
+            let mut world = WorldItems::default();
+            let enchanted = world.build(&[holding(kind, Some(enchanted_nbt()))], &items);
+            assert!(!enchanted.items.is_empty(), "{kind:?} holds the sword");
+            assert!(!enchanted.glint.is_empty(), "{kind:?}: enchanted glints");
+            let plain = world.build(&[holding(kind, None)], &items);
+            assert!(plain.glint.is_empty(), "{kind:?}: a plain sword does not");
+        }
+    }
+
     /// Renders enchanted and plain items with the glint; set
     /// `UMICRAFT_GLINT_DUMP` to a path to keep the PNG.
     #[test]
