@@ -335,6 +335,10 @@ pub(super) fn apply_entity_metadata(game: &mut Game, packet: &EntityMetadata) {
             game.hud_dirty = true;
         }
         game.overlays.apply_metadata(&packet.metadata);
+        // The data watcher of `EntityPlayerSP` gets every entry, such as the
+        // arrows in the body (`LayerArrow`) drawn in the third person and the
+        // inventory portrait; the store has no record of the local player.
+        game.body.meta.apply(EntityKind::Player, &packet.metadata);
     }
     let id = EntityId(packet.entity_id);
     game.entities.apply_metadata(id, &packet.metadata);

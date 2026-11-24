@@ -474,3 +474,40 @@ fn the_local_body_burns_when_the_server_sets_its_fire_flag() {
     follow_body(&mut game);
     assert!(!game.body.frame_data().flags.on_fire());
 }
+
+/// Regression: the arrows in the body of the local player were never drawn in
+/// the third person nor in the inventory, as its own metadata only reached
+/// the entity store, which has no record of the local player.
+#[test]
+fn the_local_body_carries_the_arrows_of_its_own_metadata_until_respawn() {
+    use umicraft_protocol::packets::play::clientbound::{EntityMetadata, Respawn};
+    use umicraft_protocol::packets::play::metadata::WatchedObject;
+
+    let mut game = game_on_floor_with(BlockState::AIR);
+    let mut queue = CommandQueue::default();
+    let (frames, _received) = mpsc::sync_channel(8);
+    game.entity_id = 1;
+    let arrows = PlayEvent::EntityMetadata(EntityMetadata {
+        entity_id: 1,
+        metadata: Metadata {
+            objects: vec![WatchedObject {
+                type_id: 0,
+                index: 9,
+                value: vec![3],
+            }],
+        },
+    });
+    handle_net(&mut game, arrows, &mut queue, &frames);
+    follow_body(&mut game);
+    assert_eq!(game.body.frame_data().meta.living.arrows, 3);
+
+    let respawn = PlayEvent::Respawn(Respawn {
+        dimension: 0,
+        difficulty: 0,
+        game_mode: 0,
+        world_type: "default".to_string(),
+    });
+    handle_net(&mut game, respawn, &mut queue, &frames);
+    follow_body(&mut game);
+    assert_eq!(game.body.frame_data().meta.living.arrows, 0);
+}

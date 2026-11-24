@@ -6,6 +6,7 @@
 use std::sync::mpsc::SyncSender;
 
 use glam::DVec3;
+use umicraft_game::entity::meta::EntityMeta;
 use umicraft_game::gamemode::{GameMode, GAMEMODE_REASON};
 use umicraft_game::hud::boss_bar::BossBar;
 use umicraft_game::interaction::{Interaction, Outgoing, PositionAck};
@@ -205,6 +206,7 @@ pub(super) fn join_game(game: &mut Game, info: &JoinGameInfo, frames: &SyncSende
     game.dirty.clear();
     game.entities.clear();
     game.body.bobber = None;
+    game.body.meta = EntityMeta::default();
     game.entity_id = info.entity_id;
     game.vitals.hardcore = info.gamemode & 8 != 0;
     game.vitals.absorption = 0.0;
@@ -301,8 +303,10 @@ pub(super) fn respawn(game: &mut Game, packet: &Respawn, frames: &SyncSender<Ren
         .as_ref()
         .is_none_or(|world| world.dimension() != dimension);
     game.server.on_respawn(changed);
-    // `handleRespawn` makes a new player, without a bobber.
+    // `handleRespawn` makes a new player, without a bobber and with a new
+    // data watcher (no arrows in the body).
     game.body.bobber = None;
+    game.body.meta = EntityMeta::default();
     if changed {
         // `handleRespawn` builds the new world with the type of the
         // packet; a same-dimension respawn keeps the old one.
