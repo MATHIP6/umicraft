@@ -58,6 +58,8 @@ fn built_libraries() -> &'static Path {
                 "umicraft-example-camera-orbit",
                 "-p",
                 "umicraft-example-suite",
+                "-p",
+                "umicraft-example-free-cam",
                 "--offline",
             ])
             .status()
@@ -748,6 +750,88 @@ fn suite_lists_its_modules_and_answers_buttons_and_switches() {
         "a slider is no button"
     );
     assert_eq!(host.mods().next().map(|m| m.failed), Some(false));
+}
+
+/// The real `free_cam` (API 1.3): once its key is pressed it flies the camera with
+/// the movement intent and captures the input on every frame; pressed again, it
+/// lets go and the camera is the player's again.
+#[test]
+fn free_cam_flies_the_camera_and_captures_the_input_while_on() {
+    let tmp = TempDir::new();
+    install(&tmp.0, "free_cam");
+    let candidates = discover(&tmp.0).into_iter().map(|d| Candidate {
+        manifest: d.manifest.unwrap(),
+        enabled: true,
+    });
+    let resolution = resolve(candidates, host_version());
+    let (mut host, failures) =
+        ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
+    assert!(failures.is_empty(), "{failures:?}");
+    let chain = host.camera().expect("one camera layer");
+    let built_in = UmiRenderCamera {
+        size: size_of::<UmiRenderCamera>() as u32,
+        flags: 0,
+        eye: [0.5, 65.62, 0.5],
+        yaw: 0.0,
+        pitch: 0.0,
+        fov_y: 70.0,
+        aspect: 16.0 / 9.0,
+        view_bob: [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    };
+    let forward = UmiCameraInput {
+        size: size_of::<UmiCameraInput>() as u32,
+        flags: 0,
+        look_dx: 0.0,
+        look_dy: 0.0,
+        forward: 1.0,
+        strafe: 0.0,
+        up: 0.0,
+        frame_seconds: 0.1,
+    };
+    // Off: the player keeps the input and the camera is untouched.
+    let mut camera = built_in;
+    assert!(!chain.place(&mut camera, &forward));
+    assert_eq!(camera, built_in);
+
+    let mut render = EventBus::default();
+    host.install(&mut render, EventThread::Render);
+    render.dispatch(&mut KeyPressed::new(id("free_cam"), "toggle"));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let mut camera = built_in;
+        if chain.place(&mut camera, &forward) {
+            // Default speed 10 blocks/s for 0.1 s, looking south (+Z).
+            assert!(camera.eye[2] > built_in.eye[2], "{:?}", camera.eye);
+            assert_eq!(camera.eye[1], built_in.eye[1]);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the key never arrived"
+        );
+        std::thread::yield_now();
+    }
+    render.dispatch(&mut KeyPressed::new(id("free_cam"), "toggle"));
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let mut camera = built_in;
+        if !chain.place(&mut camera, &forward) {
+            assert_eq!(camera, built_in, "back with the player");
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the key never arrived"
+        );
+        std::thread::yield_now();
+    }
+    assert_eq!(host.mods().next().map(|m| m.failed), Some(false));
+    host.shutdown_all();
 }
 
 /// The API this client implements. That a 1.0 manifest still resolves on a 1.1

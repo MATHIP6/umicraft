@@ -783,6 +783,7 @@ fn host() -> UmiHost {
         post_set_param: fake_post_set_param,
         register_camera: fake_register_camera,
         camera_next: fake_camera_next,
+        camera_capture: fake_camera_next,
         world_entities_snapshot: fake_world_entities_snapshot,
         hud_outline: fake_hud_outline,
         hud_segment: fake_hud_segment,

@@ -64,13 +64,31 @@ and `camera_next(cx)` to run what is inside.
   - the jump and sneak flags;
   - `frame_seconds`.
 
-  There is no raw key state. The mouse still turns the player: a camera layer cannot
-  capture the look in 1.1.
+  There is no raw key state. The mouse still turns the player and the keys still move
+  it, unless the layer captures the input (below).
 - **The player does not move.** The camera feeds nothing back into the game. The
   player's position, yaw and pitch, the packets and the built-in mods are untouched.
   `FRAME.position`, `yaw` and `pitch` also come from the player, not the camera
   (since 1.1 this is true in the third person too). To move the player, wrap
   `player_physics` as well (`movement = true`).
+
+## Capturing the input (API 1.3)
+
+`Camera::capture_input()` (C: `camera_capture(cx)`, its own `cx` only, else `DENIED`)
+gives the movement keys and the mouse look to the camera, for a free camera
+(ADR-0096). While a layer asks for it:
+
+- the player gets no movement key (forward, strafe, jump, sneak, sprint are
+  released) and the mouse does not turn it; attack, use and every other key still
+  act;
+- `CameraInput` still reports the keys and the look, so the layer moves the camera
+  with them.
+
+The request lasts one frame and applies to the next frame's input: call it on every
+frame the camera wants the input. When the layer stops asking, or the mod is switched
+off or fails, the player gets the input back. The world only exists where the server
+sent chunks, around the player. The example `mods/examples/free_cam` flies the camera
+this way.
 
 ## `PRE_RENDER`
 

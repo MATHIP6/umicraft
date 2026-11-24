@@ -387,10 +387,7 @@ mod tests {
         assert_eq!(raw.flags, 0);
         assert_eq!((raw.key.len, raw.category.len), (5, 3));
         assert_eq!(raw.description.len, "Players around".len());
-        assert_eq!(
-            ModuleSpec::new("a", "A").raw().flags,
-            UMI_MODULE_DEFAULT_ON
-        );
+        assert_eq!(ModuleSpec::new("a", "A").raw().flags, UMI_MODULE_DEFAULT_ON);
         assert_eq!(ModuleSpec::new("a", "A").raw().category.len, 0);
     }
 

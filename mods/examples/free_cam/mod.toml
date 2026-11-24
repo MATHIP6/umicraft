@@ -1,0 +1,15 @@
+[mod]
+id = "free_cam"
+name = "Free camera"
+version = "0.1.0"
+authors = ["Umicraft contributors"]
+api_version = "1.3"
+license = "MIT"
+description = "Teaching example: press the bound key to fly the camera with the movement keys and the mouse while the player stands still."
+library = "free_cam"
+
+[load]
+wraps = ["render_camera"]
+
+[permissions]
+camera = true

@@ -188,6 +188,21 @@ impl<'a> Camera<'a> {
     pub fn next(&mut self) -> Result<(), ModError> {
         host::call(|host, _| (host.camera_next)(self.cx)).and_then(ModError::check)
     }
+
+    /// Takes the player's movement keys and mouse look for the camera, from the
+    /// next frame on (API 1.3): [`input`](Self::input) still reports them, but the
+    /// player stands as if no movement key were held and does not turn. Attack,
+    /// use and every other key still act. For a free camera.
+    ///
+    /// The capture lasts one frame: call it on every frame the camera wants the
+    /// input. When the layer stops asking, or its mod is switched off or fails,
+    /// the player gets the input back.
+    ///
+    /// # Errors
+    /// [`ModError::HostRefused`] with `DENIED` outside this layer's own call.
+    pub fn capture_input(&mut self) -> Result<(), ModError> {
+        host::call(|host, _| (host.camera_capture)(self.cx)).and_then(ModError::check)
+    }
 }
 
 /// The boxed closure type behind a camera layer's `user` pointer.

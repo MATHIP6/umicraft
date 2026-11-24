@@ -1,14 +1,16 @@
 # Writing mods for Umicraft
 
 Guide and index of the modding API (ADR-0086, ADR-0087, spec §8). The API is
-version **1.2** (1.0 frozen in F3.9, 1.1 appended in ADR-0094, 1.2 in ADR-0095): a
+version **1.3** (1.0 frozen in F3.9, 1.1 appended in ADR-0094, 1.2 in ADR-0095, 1.3 in
+ADR-0096): a
 mod built for 1.y loads on every client offering 1.x with x ≥ y, and nothing a 1.0
 mod uses is ever removed or moved within major 1. API 1.1 added the camera of `FRAME`
 and `world_to_screen`, screen widgets with outlines and segments, entity facts and the
 render-thread snapshot, scene depth in post passes, flight and game mode from a
 physics layer, and the `render_camera` service with `PRE_RENDER`. API 1.2 added tabs
 of a mod's own, modules (one card and switch per feature) and buttons in the mods
-menu.
+menu. API 1.3 lets a camera layer capture the movement keys and the mouse look, for a
+free camera.
 
 ## What a mod is
 
@@ -48,7 +50,7 @@ Unknown keys are errors, so a typo is reported instead of ignored.
 | `name` | string | required | Display name, not empty. |
 | `version` | string | required | The mod's own semantic version. |
 | `authors` | array of strings | required | Author names (may be empty). |
-| `api_version` | string | required | `major.minor`, e.g. `"1.2"`: the same major as the client and a minor no higher than the client's. (Before 1.0 the minor had to match exactly.) |
+| `api_version` | string | required | `major.minor`, e.g. `"1.3"`: the same major as the client and a minor no higher than the client's. (Before 1.0 the minor had to match exactly.) |
 | `license` | string | none | SPDX expression. |
 | `description` | string | none | One line for the mods menu. |
 | `library` | string | the id | Library file stem under `bin/<os>-<arch>/`; letters, digits, `_`, `-`. |
@@ -130,7 +132,8 @@ dropped and counted, never waited for. Counters feed the F3 profiler.
 - [packets.md](packets.md): raw packet events and injection (needs `network_packets`).
 - [world.md](world.md): block and entity queries, the `player_physics` layer.
 - [post.md](post.md): WGSL post-process passes over the picture of the world.
-- [camera.md](camera.md): the `render_camera` service and `PRE_RENDER` (API 1.1).
+- [camera.md](camera.md): the `render_camera` service and `PRE_RENDER` (API 1.1), and
+  the input capture of a free camera (API 1.3).
 
 ## Safety and fair play
 

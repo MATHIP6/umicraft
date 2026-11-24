@@ -4396,6 +4396,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-example-free-cam"
+version = "0.1.0"
+dependencies = [
+ "umicraft-modapi",
+]
+
+[[package]]
 name = "umicraft-example-hello"
 version = "0.1.0"
 dependencies = [
