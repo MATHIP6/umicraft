@@ -25,7 +25,7 @@ impl ModContext {
     /// [`DeclareError::Late`] after init, [`DeclareError::Duplicate`] for a key
     /// already declared, and the spec's own validation errors.
     pub fn register_setting(&self, spec: SettingSpec) -> Result<(), DeclareError> {
-        self.ui.register(|declared| declared.add_setting(spec))
+        self.ui.register(|declared| declared.add_setting(spec, ""))
     }
 
     /// Declares a HUD widget drawn by `draw` with `user`.

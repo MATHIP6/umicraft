@@ -120,10 +120,28 @@ fn table_matches_the_documented_threads_and_flags() {
 }
 
 #[test]
-fn known_ids_are_one_to_thirteen() {
-    // 13 is `PRE_RENDER`, added in API 1.1.
-    assert!((1..=13).all(|id| is_known(UmiEventId(id))));
-    assert!(!is_known(UmiEventId(0)) && !is_known(UmiEventId(14)));
+fn known_ids_are_one_to_fifteen() {
+    // 13 is `PRE_RENDER` (API 1.1), 14 and 15 the menu events (API 1.2).
+    assert!((1..=15).all(|id| is_known(UmiEventId(id))));
+    assert!(!is_known(UmiEventId(0)) && !is_known(UmiEventId(16)));
+}
+
+#[test]
+fn menu_events_are_targeted_render_events_whose_clone_repoints() {
+    let target: crate::manifest::ModId = "suite".to_owned().try_into().unwrap();
+    let toggled = ModuleToggled::new(target.clone(), "radar", true);
+    let copy = toggled.clone();
+    assert_eq!((copy.module(), copy.enabled()), ("radar", true));
+    assert_ne!(copy.raw.module.ptr, toggled.raw.module.ptr);
+    assert_eq!(copy.target(), Some(&target));
+    assert_eq!(ModuleToggled::THREAD, EventThread::Render);
+
+    let pressed = ButtonPressed::new(target.clone(), "", "reset");
+    let copy = pressed.clone();
+    assert_eq!((copy.module(), copy.key()), ("", "reset"));
+    assert_eq!(copy.raw.key.len, 5);
+    assert_eq!(copy.target(), Some(&target));
+    assert_eq!(ButtonPressed::THREAD, EventThread::Render);
 }
 
 #[test]

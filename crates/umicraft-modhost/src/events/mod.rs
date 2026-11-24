@@ -15,6 +15,7 @@
 mod chat;
 mod frame;
 mod key;
+mod menu;
 mod packet;
 mod render;
 mod screen;
@@ -30,6 +31,7 @@ use crate::manifest::ModId;
 pub use chat::{ChatReceived, ChatSend};
 pub use frame::{Frame, FrameCamera, FrameFacts};
 pub use key::KeyPressed;
+pub use menu::{ButtonPressed, ModuleToggled};
 pub use packet::{PacketReceived, PacketSend};
 pub use render::PreRender;
 pub use screen::{ScreenClosed, ScreenOpened};
@@ -108,6 +110,8 @@ pub(crate) fn is_known(id: UmiEventId) -> bool {
             | UmiEventId::PACKET_SEND
             | UmiEventId::FRAME
             | UmiEventId::PRE_RENDER
+            | UmiEventId::MODULE_TOGGLED
+            | UmiEventId::BUTTON_PRESSED
     )
 }
 

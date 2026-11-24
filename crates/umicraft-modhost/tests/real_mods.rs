@@ -56,6 +56,8 @@ fn built_libraries() -> &'static Path {
                 "umicraft-example-entity-list",
                 "-p",
                 "umicraft-example-camera-orbit",
+                "-p",
+                "umicraft-example-suite",
                 "--offline",
             ])
             .status()
@@ -658,6 +660,94 @@ fn camera_orbit_wraps_the_render_camera_without_the_compat_mode_holding_it() {
     }
     assert_eq!(host.mods().next().map(|m| m.failed), Some(false));
     host.shutdown_all();
+}
+
+/// The real `suite` (API 1.2): its own tab, two modules, a widget tied to a module,
+/// buttons and the module switch, end to end.
+#[test]
+fn suite_lists_its_modules_and_answers_buttons_and_switches() {
+    let tmp = TempDir::new();
+    install(&tmp.0, "suite");
+    let candidates = discover(&tmp.0).into_iter().map(|d| Candidate {
+        manifest: d.manifest.unwrap(),
+        enabled: true,
+    });
+    let resolution = resolve(candidates, host_version());
+    let (host, failures) =
+        ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
+    assert!(failures.is_empty(), "{failures:?}");
+    let suite = id("suite");
+
+    let view = host.mods().next().unwrap();
+    let own: Vec<_> = view.settings().map(|s| s.spec.key.clone()).collect();
+    assert_eq!(own, ["about"], "only the About button is on the mod's card");
+    let modules: Vec<_> = view
+        .modules()
+        .map(|m| (m.key, m.category, m.enabled))
+        .collect();
+    assert_eq!(
+        modules,
+        [("counter", Some("Suite"), true), ("greeter", None, false)]
+    );
+    let counter_card: Vec<_> = view
+        .modules()
+        .next()
+        .unwrap()
+        .settings()
+        .map(|s| (s.spec.key.clone(), s.spec.is_button()))
+        .collect();
+    assert_eq!(
+        counter_card,
+        [("every".to_owned(), false), ("reset".to_owned(), true)]
+    );
+
+    // The widget follows its module.
+    let drawn = |host: &ModHost| {
+        host.draw_widgets();
+        let mut lines = Vec::new();
+        host.visit_widgets(|w| lines.extend(w.content.lines().iter().map(|l| l.text.clone())));
+        lines
+    };
+    let mut game = EventBus::default();
+    host.install(&mut game, EventThread::Game);
+    for tick in 0..3 {
+        game.dispatch(&mut PostTick::new(tick));
+    }
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while drawn(&host) != ["ticks: 3"] {
+        assert!(std::time::Instant::now() < deadline, "{:?}", drawn(&host));
+        std::thread::yield_now();
+    }
+    assert!(host.set_module(&suite, "counter", false).unwrap().is_some());
+    assert!(drawn(&host).is_empty(), "hidden while its module is off");
+    assert_eq!(
+        host.config(&suite).unwrap().modules.get("counter"),
+        Some(&false)
+    );
+    host.set_module(&suite, "counter", true).unwrap();
+
+    // Switches and buttons reach the mod on the render thread.
+    let mut render = EventBus::default();
+    host.install(&mut render, EventThread::Render);
+    let mut on = host.set_module(&suite, "greeter", true).unwrap().unwrap();
+    assert!(host.set_module(&suite, "greeter", true).unwrap().is_none());
+    render.dispatch(&mut on);
+    let outbox = host.chat_outbox();
+    let line = outbox.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(line, "Hello! The greeter is on.");
+    render.dispatch(&mut host.press_button(&suite, "wave").unwrap());
+    assert_eq!(outbox.recv_timeout(Duration::from_secs(5)).unwrap(), "o/");
+    render.dispatch(&mut host.press_button(&suite, "reset").unwrap());
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while drawn(&host) != ["ticks: 0"] {
+        assert!(std::time::Instant::now() < deadline, "{:?}", drawn(&host));
+        std::thread::yield_now();
+    }
+    assert!(
+        host.press_button(&suite, "every").is_err(),
+        "a slider is no button"
+    );
+    assert_eq!(host.mods().next().map(|m| m.failed), Some(false));
 }
 
 /// The API this client implements. That a 1.0 manifest still resolves on a 1.1

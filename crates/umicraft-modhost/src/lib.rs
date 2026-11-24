@@ -67,9 +67,9 @@ pub use error::{
     LoadFailure, ManifestError, TrustError,
 };
 pub use events::{
-    ChatReceived, ChatSend, Connected, Disconnected, EventThread, Frame, FrameCamera, FrameFacts,
-    HostEvent, KeyPressed, PacketReceived, PacketSend, PostTick, PreRender, PreTick, ScreenClosed,
-    ScreenOpened,
+    ButtonPressed, ChatReceived, ChatSend, Connected, Disconnected, EventThread, Frame,
+    FrameCamera, FrameFacts, HostEvent, KeyPressed, ModuleToggled, PacketReceived, PacketSend,
+    PostTick, PreRender, PreTick, ScreenClosed, ScreenOpened,
 };
 pub use ffi::{host_table, UserPtr};
 pub use host::ModHost;
@@ -89,8 +89,9 @@ pub use trust::{sha256_file, TrustList};
 pub use ui::commands::{CommandOutcome, CommandTable};
 pub use ui::config::ExternalModConfig;
 pub use ui::hud::DrawnWidget;
+pub use ui::menu::ModuleDef;
 pub use ui::settings::{SettingSpec, SettingSpecKind};
 pub use ui::shared::HostShared;
-pub use ui::view::{KeyBinding, ModView, SettingView, WidgetView};
+pub use ui::view::{KeyBinding, ModView, ModuleView, SettingView, WidgetView};
 pub use worker::QUEUE_CAPACITY;
 pub use world::{with_world, EntityView, WorldQuery};

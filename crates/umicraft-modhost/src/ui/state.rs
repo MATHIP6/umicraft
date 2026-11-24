@@ -83,8 +83,19 @@ impl UiState {
     /// `umi_mod_init` it reads the draft, so a mod may read what it just declared.
     pub(crate) fn setting_value(&self, key: &str) -> Option<UmiSettingValue> {
         match self.sealed.get() {
-            Some(declared) => declared.setting(key).map(SettingSlot::abi_value),
-            None => lock(&self.draft).setting(key).map(SettingSlot::abi_value),
+            Some(declared) => declared.setting(key).and_then(SettingSlot::abi_value),
+            None => lock(&self.draft)
+                .setting(key)
+                .and_then(SettingSlot::abi_value),
+        }
+    }
+
+    /// The player's switch of module `key`; like
+    /// [`setting_value`](Self::setting_value), lock-free once sealed.
+    pub(crate) fn module_on(&self, key: &str) -> Option<bool> {
+        match self.sealed.get() {
+            Some(declared) => declared.module(key).map(|(_, m)| m.is_on()),
+            None => lock(&self.draft).module(key).map(|(_, m)| m.is_on()),
         }
     }
 

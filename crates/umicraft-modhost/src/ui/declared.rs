@@ -4,13 +4,15 @@
 
 use super::hud::WidgetSlot;
 use super::keys::KeySlot;
+use super::menu::{Attach, CategorySlot, ModuleDef, ModuleSlot};
 use super::settings::{SettingSlot, SettingSpec};
 use super::validate::check_room;
-use super::{MAX_COMMANDS, MAX_KEYS, MAX_SETTINGS, MAX_WIDGETS};
+use super::{MAX_CATEGORIES, MAX_COMMANDS, MAX_KEYS, MAX_MODULES, MAX_SETTINGS, MAX_WIDGETS};
 use crate::error::DeclareError;
 use crate::post_pass::{PostPassSlot, MAX_POST_PASSES};
 
-/// Everything a mod declared: settings, widgets, key bindings and command names.
+/// Everything a mod declared: settings, widgets, key bindings, command names,
+/// post-process passes, and its categories and modules (API 1.2).
 ///
 /// Built while `umi_mod_init` runs, then frozen: after that only the atomics and
 /// mutexes inside the slots change, never the lists themselves.
@@ -21,6 +23,15 @@ pub(crate) struct Declared {
     keys: Vec<KeySlot>,
     commands: Vec<String>,
     post_passes: Vec<PostPassSlot>,
+    categories: Vec<CategorySlot>,
+    modules: Vec<ModuleSlot>,
+}
+
+fn unknown(what: &'static str) -> DeclareError {
+    DeclareError::Invalid {
+        what,
+        why: "it was not declared",
+    }
 }
 
 fn duplicate(what: &'static str, key: &str) -> DeclareError {
@@ -39,18 +50,122 @@ impl Declared {
             keys: Vec::new(),
             commands: Vec::new(),
             post_passes: Vec::new(),
+            categories: Vec::new(),
+            modules: Vec::new(),
         }
     }
 
-    /// Adds a validated setting.
-    pub(crate) fn add_setting(&mut self, spec: SettingSpec) -> Result<(), DeclareError> {
+    /// Adds a validated setting (or button) on the card of `module`, or on the mod's
+    /// own card when `module` is empty.
+    pub(crate) fn add_setting(
+        &mut self,
+        spec: SettingSpec,
+        module: &str,
+    ) -> Result<(), DeclareError> {
         spec.validate()?;
+        let module = self.module_index(module)?;
         check_room("settings", self.settings.len(), MAX_SETTINGS)?;
         if self.setting(&spec.key).is_some() {
             return Err(duplicate("setting key", &spec.key));
         }
-        self.settings.push(SettingSlot::new(spec));
+        self.settings.push(SettingSlot::new(spec, module));
         Ok(())
+    }
+
+    /// Adds a category.
+    pub(crate) fn add_category(&mut self, category: CategorySlot) -> Result<(), DeclareError> {
+        check_room("categories", self.categories.len(), MAX_CATEGORIES)?;
+        if self.categories.iter().any(|c| c.key() == category.key()) {
+            return Err(duplicate("category key", category.key()));
+        }
+        self.categories.push(category);
+        Ok(())
+    }
+
+    /// Adds a module in one of the categories declared before it.
+    pub(crate) fn add_module(&mut self, def: &ModuleDef<'_>) -> Result<(), DeclareError> {
+        let category = if def.category.is_empty() {
+            None
+        } else {
+            let index = self.categories.iter().position(|c| c.key() == def.category);
+            Some(index.ok_or(DeclareError::Invalid {
+                what: "module",
+                why: "its category was not declared",
+            })?)
+        };
+        let module = ModuleSlot::new(def, category)?;
+        check_room("modules", self.modules.len(), MAX_MODULES)?;
+        if self.module(module.key()).is_some() {
+            return Err(duplicate("module key", module.key()));
+        }
+        self.modules.push(module);
+        Ok(())
+    }
+
+    /// Ties widget or pass `key` to `module`.
+    pub(crate) fn attach(
+        &mut self,
+        module: &str,
+        kind: Attach,
+        key: &str,
+    ) -> Result<(), DeclareError> {
+        let Some((index, _)) = self.module(module) else {
+            return Err(unknown("module"));
+        };
+        let attached = match kind {
+            Attach::Widget => self
+                .widgets
+                .iter_mut()
+                .find(|w| w.key() == key)
+                .ok_or_else(|| unknown("widget"))?
+                .attach(index),
+            Attach::PostPass => self
+                .post_passes
+                .iter_mut()
+                .find(|p| p.key() == key)
+                .ok_or_else(|| unknown("post pass"))?
+                .attach(index),
+        };
+        if attached {
+            Ok(())
+        } else {
+            Err(duplicate("module attachment", key))
+        }
+    }
+
+    /// The index of module `key`, `None` for an empty key (the mod's own card).
+    fn module_index(&self, key: &str) -> Result<Option<usize>, DeclareError> {
+        if key.is_empty() {
+            return Ok(None);
+        }
+        match self.module(key) {
+            Some((index, _)) => Ok(Some(index)),
+            None => Err(unknown("module")),
+        }
+    }
+
+    /// Whether something on module `module` (`None`: on no module) is shown: the
+    /// module is on. Lock-free.
+    pub(crate) fn shows(&self, module: Option<usize>) -> bool {
+        module
+            .and_then(|index| self.modules.get(index))
+            .is_none_or(ModuleSlot::is_on)
+    }
+
+    pub(crate) fn categories(&self) -> &[CategorySlot] {
+        &self.categories
+    }
+
+    pub(crate) fn modules(&self) -> &[ModuleSlot] {
+        &self.modules
+    }
+
+    /// Module `key` and its index.
+    pub(crate) fn module(&self, key: &str) -> Option<(usize, &ModuleSlot)> {
+        self.modules
+            .iter()
+            .enumerate()
+            .find(|(_, m)| m.key() == key)
     }
 
     /// Adds a widget.

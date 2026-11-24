@@ -13,7 +13,7 @@ use umicraft_builtin_mods::{format_hex_color, parse_hex_color, snap_slider, Sett
 use umicraft_modapi_sys::{UmiSettingKind, UmiSettingValue};
 
 use super::validate::{check_key, check_text};
-use super::{MAX_CHOICES, MAX_LABEL_BYTES, MAX_OPTION_BYTES};
+use super::{MAX_BUTTON_TEXT_BYTES, MAX_CHOICES, MAX_LABEL_BYTES, MAX_OPTION_BYTES};
 use crate::error::DeclareError;
 
 /// The shape of a declared setting and its default.
@@ -46,6 +46,12 @@ pub enum SettingSpecKind {
     Color {
         /// Initial colour.
         default: u32,
+    },
+    /// A button that tells the mod it was clicked (API 1.2). It has no value: it is
+    /// never saved and `setting_get` does not know it.
+    Button {
+        /// The text on the button.
+        text: String,
     },
 }
 
@@ -83,7 +89,15 @@ impl SettingSpec {
             SettingSpecKind::Color { default } => {
                 invalid(*default > 0x00ff_ffff, "colour default must be 0xRRGGBB")
             }
+            SettingSpecKind::Button { text } => {
+                check_text("button text", text, MAX_BUTTON_TEXT_BYTES)
+            }
         }
+    }
+
+    /// Whether this is a button, which holds no value.
+    pub fn is_button(&self) -> bool {
+        matches!(self.kind, SettingSpecKind::Button { .. })
     }
 
     /// The value of a player who never touched the setting.
@@ -104,6 +118,7 @@ impl SettingSpec {
             SettingSpecKind::Slider { default, .. } => default.to_bits(),
             SettingSpecKind::Choice { default, .. } => *default as u32,
             SettingSpecKind::Color { default } => *default,
+            SettingSpecKind::Button { .. } => 0,
         }
     }
 
@@ -135,11 +150,13 @@ impl SettingSpec {
                 SettingValue::Text(options.get(bits as usize).cloned().unwrap_or_default())
             }
             SettingSpecKind::Color { .. } => SettingValue::Text(format_hex_color(bits)),
+            SettingSpecKind::Button { .. } => SettingValue::Bool(false),
         }
     }
 
-    /// The ABI value for `bits`: only the field matching the kind is set.
-    fn abi_value(&self, bits: u32) -> UmiSettingValue {
+    /// The ABI value for `bits`: only the field matching the kind is set. `None` for
+    /// a button, which has no value.
+    fn abi_value(&self, bits: u32) -> Option<UmiSettingValue> {
         let mut out = UmiSettingValue {
             kind: UmiSettingKind::TOGGLE,
             toggle: 0,
@@ -161,8 +178,9 @@ impl SettingSpec {
                 out.kind = UmiSettingKind::COLOR;
                 out.color = bits;
             }
+            SettingSpecKind::Button { .. } => return None,
         }
-        out
+        Some(out)
     }
 }
 
@@ -204,17 +222,25 @@ fn validate_choice(options: &[String], default: usize) -> Result<(), DeclareErro
 pub(crate) struct SettingSlot {
     spec: SettingSpec,
     bits: AtomicU32,
+    /// Index of the module whose card shows it (API 1.2); `None` for the mod's card.
+    module: Option<usize>,
 }
 
 impl SettingSlot {
-    /// A slot holding the spec's default.
-    pub(crate) fn new(spec: SettingSpec) -> Self {
+    /// A slot holding the spec's default, on the card of `module` (`None`: the
+    /// mod's own card).
+    pub(crate) fn new(spec: SettingSpec, module: Option<usize>) -> Self {
         let bits = AtomicU32::new(spec.default_bits());
-        Self { spec, bits }
+        Self { spec, bits, module }
     }
 
     pub(crate) fn spec(&self) -> &SettingSpec {
         &self.spec
+    }
+
+    /// The module whose card shows this setting, if any.
+    pub(crate) fn module(&self) -> Option<usize> {
+        self.module
     }
 
     /// The current value, for the menu and the config file.
@@ -222,8 +248,9 @@ impl SettingSlot {
         self.spec.decode(self.bits.load(Ordering::Relaxed))
     }
 
-    /// The current value as the ABI struct, for `setting_get`. Lock-free.
-    pub(crate) fn abi_value(&self) -> UmiSettingValue {
+    /// The current value as the ABI struct, for `setting_get`. Lock-free. `None` for
+    /// a button.
+    pub(crate) fn abi_value(&self) -> Option<UmiSettingValue> {
         self.spec.abi_value(self.bits.load(Ordering::Relaxed))
     }
 

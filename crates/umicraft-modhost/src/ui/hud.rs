@@ -105,6 +105,8 @@ pub(crate) struct WidgetSlot {
     draw: UmiHudDrawFn,
     user: UserPtr,
     content: Mutex<HudContent>,
+    /// The module it is attached to (API 1.2): drawn only while that module is on.
+    module: Option<usize>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -136,6 +138,7 @@ impl WidgetSlot {
             draw,
             user,
             content: Mutex::new(HudContent::default()),
+            module: None,
         })
     }
 
@@ -152,6 +155,16 @@ impl WidgetSlot {
             screen: true,
             ..Self::new(key, label, placement, draw, user)?
         })
+    }
+
+    /// Attaches the widget to module `index`; `false` if it already is attached.
+    pub(crate) fn attach(&mut self, index: usize) -> bool {
+        self.module.replace(index).is_none()
+    }
+
+    /// The module it is attached to, if any.
+    pub(crate) fn module(&self) -> Option<usize> {
+        self.module
     }
 
     pub(crate) fn is_on_screen(&self) -> bool {
@@ -211,25 +224,33 @@ impl WidgetSlot {
 }
 
 impl ModContext {
-    /// Draws every widget of this mod, unless it is not enabled; stops at the first
-    /// failure, since a failed mod is skipped from then on.
+    /// Draws every widget of this mod, unless it is not enabled, but a widget whose
+    /// module is off; stops at the first failure, since a failed mod is skipped from
+    /// then on.
     pub fn draw_widgets(&self) {
-        for widget in self.ui.declared().widgets() {
+        let declared = self.ui.declared();
+        for widget in declared.widgets() {
             if !self.is_enabled() {
                 return;
             }
-            widget.draw(self);
+            if declared.shows(widget.module()) {
+                widget.draw(self);
+            }
         }
     }
 
     /// Lends each widget of this mod, as last drawn, to `visit`; nothing for a mod
-    /// that is not enabled, whose content may be stale or half written.
+    /// that is not enabled, whose content may be stale or half written, nor for a
+    /// widget whose module is off.
     pub fn visit_widgets(&self, mut visit: impl FnMut(DrawnWidget<'_>)) {
         if !self.is_enabled() {
             return;
         }
-        for widget in self.ui.declared().widgets() {
-            widget.visit(self.id(), &mut visit);
+        let declared = self.ui.declared();
+        for widget in declared.widgets() {
+            if declared.shows(widget.module()) {
+                widget.visit(self.id(), &mut visit);
+            }
         }
     }
 }

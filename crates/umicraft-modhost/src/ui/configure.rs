@@ -33,17 +33,19 @@ fn route<V: Clone>(
 }
 
 impl ModContext {
-    /// The mod's current choices: the player's switch, every declared setting,
-    /// widget placement and key binding, plus the entries of an earlier config that
-    /// no declaration claims.
+    /// The mod's current choices: the player's switch, every declared setting (but
+    /// buttons, which hold nothing), widget placement, key binding and module switch,
+    /// plus the entries of an earlier config that no declaration claims.
     pub fn config(&self) -> ExternalModConfig {
         let declared = self.ui.declared();
         let mut config = self.ui.retained().clone();
         config.enabled = Some(self.is_wanted());
         for slot in declared.settings() {
-            config
-                .settings
-                .insert(slot.spec().key.clone(), slot.value());
+            if !slot.spec().is_button() {
+                config
+                    .settings
+                    .insert(slot.spec().key.clone(), slot.value());
+            }
         }
         for widget in declared.widgets() {
             config
@@ -52,6 +54,11 @@ impl ModContext {
         }
         for key in declared.keys() {
             config.keys.insert(key.key().to_owned(), key.current());
+        }
+        for module in declared.modules() {
+            config
+                .modules
+                .insert(module.key().to_owned(), module.is_on());
         }
         config
     }
@@ -78,6 +85,9 @@ impl ModContext {
         );
         route(&config.keys, &mut retained.keys, |key, value| {
             declared.key(key).map(|slot| slot.set(value)).is_some()
+        });
+        route(&config.modules, &mut retained.modules, |key, on| {
+            declared.module(key).map(|(_, m)| m.set_on(*on)).is_some()
         });
         if let Some(enabled) = config.enabled {
             // A failed mod stays off; there is nothing to report to a config loader.

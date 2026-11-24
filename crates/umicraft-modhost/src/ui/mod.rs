@@ -14,6 +14,7 @@
 //! - [`declared`]: the per-mod lists and the checks that guard them.
 //! - [`hud`]: widgets, their draw call and the visitor that exposes them.
 //! - [`commands`] and [`shared`]: the host-wide command table and chat outbox.
+//! - [`menu`]: categories and modules (API 1.2), the mod's own tabs and cards.
 //! - [`config`] and [`view`]: persistence and read access for the mods menu.
 
 pub mod commands;
@@ -24,6 +25,7 @@ pub(crate) mod declared;
 pub(crate) mod draw;
 pub mod hud;
 pub(crate) mod keys;
+pub mod menu;
 pub mod settings;
 pub mod shared;
 pub(crate) mod state;
@@ -40,6 +42,16 @@ pub const MAX_USAGE_BYTES: usize = 256;
 pub const MAX_OPTION_BYTES: usize = 64;
 /// Longest key name (`KeyG`, `Mouse4`, ...) a mod or a config may give, in bytes.
 pub const MAX_BINDING_BYTES: usize = 32;
+/// Longest text on a button (API 1.2), in bytes.
+pub const MAX_BUTTON_TEXT_BYTES: usize = 32;
+/// Longest label of a category (a tab of the mods menu, API 1.2), in bytes.
+pub const MAX_CATEGORY_BYTES: usize = 32;
+/// Longest description of a module (API 1.2), in bytes.
+pub const MAX_DESCRIPTION_BYTES: usize = 256;
+/// Most categories one mod may declare (API 1.2).
+pub const MAX_CATEGORIES: usize = 2;
+/// Most modules one mod may declare (API 1.2).
+pub const MAX_MODULES: usize = 16;
 /// Most options a choice setting may have.
 pub const MAX_CHOICES: usize = 32;
 /// Most settings one mod may declare.

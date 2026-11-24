@@ -11,6 +11,7 @@
 mod camera;
 mod event;
 mod hud;
+mod menu;
 mod packet;
 mod physics;
 mod post;
@@ -178,6 +179,12 @@ pub fn host_table() -> UmiHost {
         world_entities_snapshot: world::host_world_entities_snapshot,
         hud_outline: hud::host_hud_outline,
         hud_segment: hud::host_hud_segment,
+        register_category: menu::host_register_category,
+        register_module: menu::host_register_module,
+        register_setting_in: menu::host_register_setting_in,
+        register_button: menu::host_register_button,
+        module_attach: menu::host_module_attach,
+        module_enabled: menu::host_module_enabled,
     }
 }
 

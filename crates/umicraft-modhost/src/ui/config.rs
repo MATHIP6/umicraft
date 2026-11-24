@@ -32,6 +32,8 @@ pub struct ExternalModConfig {
     pub placements: BTreeMap<String, HudPlacement>,
     /// Key-binding id to key name.
     pub keys: BTreeMap<String, String>,
+    /// Module key to the player's switch (API 1.2).
+    pub modules: BTreeMap<String, bool>,
 }
 
 impl ExternalModConfig {
@@ -90,6 +92,7 @@ mod tests {
                 HudPlacement::at(Anchor::BottomRight, -4.0, 8.0),
             )]),
             keys: BTreeMap::from([("toggle".to_owned(), "KeyG".to_owned())]),
+            modules: BTreeMap::from([("radar".to_owned(), false)]),
         }
     }
 

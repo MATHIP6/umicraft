@@ -11,8 +11,8 @@ use umicraft_modapi_sys::{UmiEventHeader, UmiEventId, UmiStatus, UmiStr, UMI_EVE
 
 use super::bytes_of;
 use crate::events::{
-    ChatReceived, ChatSend, Connected, Disconnected, KeyPressed, PacketReceived, PacketSend,
-    ScreenClosed, ScreenOpened,
+    ButtonPressed, ChatReceived, ChatSend, Connected, Disconnected, KeyPressed, ModuleToggled,
+    PacketReceived, PacketSend, ScreenClosed, ScreenOpened,
 };
 
 /// Declares host events `Send`: the raw pointers in their payload target the `String`
@@ -33,6 +33,8 @@ send_events!(
     Connected,
     Disconnected,
     KeyPressed,
+    ModuleToggled,
+    ButtonPressed,
     ScreenOpened,
     ScreenClosed
 );

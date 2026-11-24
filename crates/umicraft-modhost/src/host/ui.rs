@@ -8,6 +8,7 @@ use umicraft_builtin_mods::{HudPlacement, SettingValue};
 
 use super::ModHost;
 use crate::error::ConfigureError;
+use crate::events::{ButtonPressed, ModuleToggled};
 use crate::manifest::ModId;
 use crate::packets::PacketOutbox;
 use crate::ui::commands::CommandTable;
@@ -147,14 +148,45 @@ impl ModHost {
         self.configure(id, |context| context.set_key(key, binding))
     }
 
+    /// Switches module `module` of mod `id` on or off (API 1.2). Returns the
+    /// [`ModuleToggled`] event to dispatch on the render bus when the switch changed,
+    /// `None` when it already was in that state.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigureError`] for an unknown mod or module.
+    pub fn set_module(
+        &self,
+        id: &ModId,
+        module: &str,
+        on: bool,
+    ) -> Result<Option<ModuleToggled>, ConfigureError> {
+        let context = self.known(id)?;
+        let changed = context.set_module(module, on)?;
+        Ok(changed.then(|| ModuleToggled::new(id.clone(), module, on)))
+    }
+
+    /// The [`ButtonPressed`] event for a click on button `key` of mod `id` (API 1.2),
+    /// to dispatch on the render bus.
+    ///
+    /// # Errors
+    ///
+    /// [`ConfigureError`] for an unknown mod, or a key that is not a button.
+    pub fn press_button(&self, id: &ModId, key: &str) -> Result<ButtonPressed, ConfigureError> {
+        let module = self.known(id)?.button_module(key)?;
+        Ok(ButtonPressed::new(id.clone(), &module, key))
+    }
+
+    fn known(&self, id: &ModId) -> Result<&crate::ModContext, ConfigureError> {
+        self.context(id)
+            .ok_or_else(|| ConfigureError::UnknownMod(id.clone()))
+    }
+
     fn configure(
         &self,
         id: &ModId,
         change: impl FnOnce(&crate::ModContext) -> Result<(), ConfigureError>,
     ) -> Result<(), ConfigureError> {
-        let context = self
-            .context(id)
-            .ok_or_else(|| ConfigureError::UnknownMod(id.clone()))?;
-        change(context)
+        change(self.known(id)?)
     }
 }

@@ -36,6 +36,8 @@ pub(crate) struct PostPassSlot {
     wgsl: String,
     params: [AtomicU32; PARAM_VECS * 4],
     refused: AtomicBool,
+    /// The module it is attached to (API 1.2): applied only while that module is on.
+    module: Option<usize>,
 }
 
 impl PostPassSlot {
@@ -53,11 +55,17 @@ impl PostPassSlot {
             wgsl,
             params: std::array::from_fn(|_| AtomicU32::new(0)),
             refused: AtomicBool::new(false),
+            module: None,
         })
     }
 
     pub(crate) fn key(&self) -> &str {
         &self.key
+    }
+
+    /// Attaches the pass to module `index`; `false` if it already is attached.
+    pub(crate) fn attach(&mut self, index: usize) -> bool {
+        self.module.replace(index).is_none()
     }
 
     fn set(&self, index: usize, value: [f32; 4]) {
@@ -86,7 +94,8 @@ pub struct PostPassView<'a> {
     pub label: &'a str,
     /// The composed WGSL (prelude plus the mod's source).
     pub wgsl: &'a str,
-    /// Whether the pass should run: its mod is enabled and the GPU did not refuse it.
+    /// Whether the pass should run: its mod is enabled, its module (if any) is on and
+    /// the GPU did not refuse it.
     pub enabled: bool,
     slot: &'a PostPassSlot,
 }
@@ -133,18 +142,17 @@ impl ModContext {
     /// The mod's passes in registration order.
     pub(crate) fn post_passes(&self) -> impl Iterator<Item = PostPassView<'_>> {
         let enabled = self.is_enabled();
-        self.ui
-            .declared()
-            .post_passes()
-            .iter()
-            .map(move |slot| PostPassView {
-                mod_id: self.id(),
-                key: &slot.key,
-                label: &slot.label,
-                wgsl: &slot.wgsl,
-                enabled: enabled && !slot.refused.load(Ordering::Relaxed),
-                slot,
-            })
+        let declared = self.ui.declared();
+        declared.post_passes().iter().map(move |slot| PostPassView {
+            mod_id: self.id(),
+            key: &slot.key,
+            label: &slot.label,
+            wgsl: &slot.wgsl,
+            enabled: enabled
+                && declared.shows(slot.module)
+                && !slot.refused.load(Ordering::Relaxed),
+            slot,
+        })
     }
 
     /// Marks pass `key` refused for good; `false` for an unknown key. Logs once.

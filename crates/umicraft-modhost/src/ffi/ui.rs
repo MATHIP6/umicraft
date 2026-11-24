@@ -69,7 +69,7 @@ fn kind_of(def: &UmiSettingDef) -> Result<SettingSpecKind, DeclareError> {
     }
 }
 
-fn spec_of(def: &UmiSettingDef) -> Result<SettingSpec, DeclareError> {
+pub(super) fn spec_of(def: &UmiSettingDef) -> Result<SettingSpec, DeclareError> {
     if def.size < size_of::<UmiSettingDef>() as u32 {
         return Err(invalid("setting", "`size` is smaller than the struct"));
     }

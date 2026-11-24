@@ -5,6 +5,7 @@
 use semver::Version;
 use umicraft_builtin_mods::{HudPlacement, SettingValue};
 
+use super::declared::Declared;
 use super::settings::SettingSpec;
 use crate::context::ModContext;
 use crate::manifest::{Manifest, ModId, Permissions};
@@ -31,6 +32,49 @@ pub struct WidgetView<'a> {
     pub default_placement: HudPlacement,
     /// Anchored to the screen (API 1.1): not for the HUD editor.
     pub screen: bool,
+    /// Whether it is shown: it is attached to no module, or its module is on (API
+    /// 1.2). A hidden widget is not drawn nor offered by the HUD editor.
+    pub shown: bool,
+}
+
+/// A module of a mod (API 1.2): a card of its own in the mods menu.
+#[derive(Debug, Clone)]
+pub struct ModuleView<'a> {
+    /// The module's key, unique within its mod.
+    pub key: &'a str,
+    /// Name of the card (literal text).
+    pub label: &'a str,
+    /// One line under the name; may be empty.
+    pub description: &'a str,
+    /// Label of the mod's category whose tab lists the card, `None` for the
+    /// "External" tab.
+    pub category: Option<&'a str>,
+    /// The player's switch of the module.
+    pub enabled: bool,
+    index: usize,
+    declared: &'a Declared,
+}
+
+impl<'a> ModuleView<'a> {
+    /// The settings and buttons on the card, in declaration order.
+    pub fn settings(&self) -> impl Iterator<Item = SettingView<'a>> {
+        settings_on(self.declared, Some(self.index))
+    }
+}
+
+/// The settings of `declared` on the card of `module` (`None`: the mod's card).
+fn settings_on(
+    declared: &Declared,
+    module: Option<usize>,
+) -> impl Iterator<Item = SettingView<'_>> {
+    declared
+        .settings()
+        .iter()
+        .filter(move |slot| slot.module() == module)
+        .map(|slot| SettingView {
+            spec: slot.spec(),
+            value: slot.value(),
+        })
 }
 
 /// A declared key binding, listed on the controls page under its mod's name.
@@ -99,13 +143,31 @@ impl<'a> ModView<'a> {
         }
     }
 
-    /// The declared settings with their current values, in declaration order.
+    /// The settings and buttons on the mod's own card with their current values, in
+    /// declaration order; those on a module's card are in [`modules`](Self::modules).
     pub fn settings(&self) -> impl Iterator<Item = SettingView<'a>> {
+        settings_on(self.context.ui.declared(), None)
+    }
+
+    /// The declared modules (API 1.2), in declaration order.
+    pub fn modules(&self) -> impl Iterator<Item = ModuleView<'a>> {
         let declared = self.context.ui.declared();
-        declared.settings().iter().map(|slot| SettingView {
-            spec: slot.spec(),
-            value: slot.value(),
-        })
+        declared
+            .modules()
+            .iter()
+            .enumerate()
+            .map(move |(index, module)| ModuleView {
+                key: module.key(),
+                label: module.label(),
+                description: module.description(),
+                category: module
+                    .category()
+                    .and_then(|category| declared.categories().get(category))
+                    .map(|category| category.label()),
+                enabled: module.is_on(),
+                index,
+                declared,
+            })
     }
 
     /// The declared HUD widgets with their placements.
@@ -117,6 +179,7 @@ impl<'a> ModView<'a> {
             placement: widget.placement(),
             default_placement: widget.default_placement(),
             screen: widget.is_on_screen(),
+            shown: declared.shows(widget.module()),
         })
     }
 
