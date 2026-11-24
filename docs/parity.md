@@ -113,14 +113,15 @@ session is [`parity-harness.md`](parity-harness.md).
 
 | Area | Feature | State | Owner milestone | Evidence | Deviation / notes |
 |---|---|---|---|---|---|
-| Entities | spawn/move/destroy/interpolation | Partial | P5 | — | Teleport snaps instead of interpolating over 3 ticks. |
-| Entities | mob models | Partial — not verified against vanilla | P5 | — | Not verified visually. |
-| Entities | animations (walk, body yaw, swing, hurt, death, sneak, item use) | Partial | P5 | — | Partly missing. |
-| Entities | typed metadata and variants | Missing | P5 | — |  |
-| Entities | player skins, capes, layers | Missing | P5 | — | `fetch_mojang_skin` implemented but unused. |
-| Entities | armour, held items, name tags, shadows, fire | Missing | P5 | — |  |
-| Entities | objects (projectiles, vehicles, orbs, paintings, frames, stands) | Partial | P5 | Unit tests (`item_world::objects`, `entity::vehicles`, `tnt_flash`), offscreen renders | Boats and minecarts: models, shake, rail snapping, the block of each cart type, the custom display tile, the burning furnace and its smoke, the lit TNT cart (swell, flash, smoke), the spinning pig of a spawner cart and the smoke and flames of active spawners (blocks and carts). The carts roll with `minecart.base` and, for the ridden one, `minecart.inside` (ADR-0092). Not yet: boat splash particles. |
-| Entities | entity lighting | Missing | P5 | — | Fullbright today. |
+| Entities | spawn/move/destroy/interpolation | Partial — not verified against vanilla | P5 | `entity::motion` tests | 3-tick interpolation of moves and teleports, head look at once. |
+| Entities | mob models | Partial — not verified against vanilla | P5 | Model unit tests, `--entity-demo` renders | Every 1.8 mob and the armour stand. Non-humanoid poses not compared after the model mirror. |
+| Entities | animations (walk, body yaw, swing, hurt, death, sneak, item use) | Partial — not verified against vanilla | P5 | `entity::{limbs,body_yaw,anim}` tests | Vanilla limb swing and both body-yaw algorithms; the local body lag in F5 not compared. |
+| Entities | typed metadata and variants | Partial — not verified against vanilla | P5 | `entity::meta` tests | Every class of 1.8, silent flag included. A foal is always 0.5, as in 1.8 (only the age sign is sent). |
+| Entities | player skins, capes, layers | Partial — not verified against vanilla | P5 | `profile_textures`, `skins` tests | Downloads tested offline only. |
+| Entities | armour, held items, name tags, shadows, fire | Partial — not verified against vanilla | P5 | Unit tests (`armor`, `held`, `nametag`, `shadow`, `fire`) | Glint on armour and held items; name tags depth-tested (ADR-0094). Shadows ignore rain and the non-full blocks. |
+| Entities | objects (projectiles, vehicles, orbs, paintings, frames, stands) | Partial | P5 | Unit tests (`item_world::objects`, `entity::vehicles`, `tnt_flash`), offscreen renders | Boats and minecarts: models, shake, rail snapping, the block of each cart type, the custom display tile, the burning furnace and its smoke, the lit TNT cart (swell, flash, smoke), the spinning pig of a spawner cart and the smoke and flames of active spawners (blocks and carts). The carts roll with `minecart.base` and, for the ridden one, `minecart.inside` (ADR-0092). Thrown items, fireballs, crystals, orbs, paintings, frames, knots, bobbers, leashes, lightning and armour stands are drawn; objects move client-side with water, lava and arrow hits on entities, and thrown objects and fireballs go through blocks until the server removes them (as the 1.8 client). Not yet: boat splash and impact particles (P8). |
+| Entities | entity lighting | Partial — not verified against vanilla | P5 | `entity_render::world_light_bits` tests | Block and sky light of the cell; rain and thunder do not darken it. |
+| Entities | sounds (collect pop, dragon wings) | Partial — not verified by ear | P5 | `sound::entity_sounds`, `flight` tests | `random.pop` / `random.orb` on `Collect Item`, `mob.enderdragon.wings` on the wing beat. |
 
 ## World render
 

@@ -46,7 +46,8 @@ phases (P-series) are still being completed.
 - [x] Official asset setup with SHA-1 verification, plus resource pack layering
       and hot reloading
 - [x] Player simulation, block breaking and placing, and chat
-- [x] Player skins and first entity models (partial, being reworked in P5)
+- [x] Entities: every 1.8 mob, object and vehicle with its layers, skins,
+      capes and name tags (P5, awaiting comparison with vanilla)
 - [x] A custom UI layer with a title screen and a server list
 
 **Still to come**

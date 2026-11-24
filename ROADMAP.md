@@ -52,7 +52,7 @@ First assessed on `main` at `27838a4` (details in `docs/roadmap-review.md`
 | M5 Model system & atlas | Partial — neighbour-dependent states and block entities done in P7 (not all checked in game); animated textures to verify (P7h) | P7 |
 | M6 Lighting, sky, fog, transparency | Partial — vanilla sky, clouds, weather, fog and border done in P7 (not all checked in game); frame time measured by the F2 benchmark scene (`docs/perf-log.md`), the P7 screenshot set is open (P7h) | P7 |
 | M7 First-run assets & resource packs | **Done** (confirmed by the owner); language files used since P9/P10, animated textures to verify (P7h) | P7 |
-| M8 Entities | P5a–P5e done, most of P5f onwards done (armour, layers, light, shadows, objects, vehicles, local body); not verified against vanilla | P5 |
+| M8 Entities | P5 code complete (2026-11-24); owner comparison with vanilla open | P5 |
 | M9 Inventory & containers | **Done** in P3 and P4 (validated by the owner on 2026-11-22) | — |
 | M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings, keybinds and every options page done in P10 (code complete, owner validation open; Smooth Camera, Super Secret Settings, Force Unicode Font and pack icons are out) | P9, P10 |
 | M11 Audio | Partial — code complete (index, engine, cues, packets, GUI clicks, volumes, music, non-blocking measured); owner validation by ear open | P11 |
@@ -393,14 +393,14 @@ the creative inventory (tabs, scrolling, search, `Creative Inventory Action`).
 
 ### P5 — Entities (finishes M8)
 
-**Status:** P5a (module split), P5b (limb swing, body yaw, 3-tick teleport) and
-P5c (hurt, death, arm swing, sleeping, crouch, sword and bow poses) P5d
-(typed metadata, babies, coats, wool, creeper swell) and P5e (profiles,
-skins, capes, name tags) are done. P5f onwards (armour and layers, lighting
-and shadows, objects and vehicles, the local body) is mostly done; left on
-2026-11-22: the held-item glint in third person, arrows in the body, the
-`Collect Item` pop sound and the dragon wing sound. Nothing is verified against
-vanilla yet. The detail is in `docs/tasks/p5/README.md`. Eating has no third-person pose in 1.8 beyond the held item.
+**Status:** code complete (2026-11-24). P5a to P5i are done: animation maths,
+hurt, death and poses, typed metadata, profiles, skins, capes and name tags
+(depth-tested, ADR-0094), armour and every layer, world light and shadows,
+every object and vehicle with its client-side motion (water, lava, arrows
+against entities), the armour stand, the local body, and the collect and
+dragon wing sounds. Nothing is verified against vanilla yet: the owner's
+comparison is what is left. The detail is in `docs/tasks/p5/README.md`.
+Eating has no third-person pose in 1.8 beyond the held item.
 
 **Features**
 - Animation maths: limb swing (vanilla smoothing), body yaw
