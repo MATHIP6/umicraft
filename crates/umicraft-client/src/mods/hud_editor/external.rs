@@ -57,7 +57,8 @@ pub(crate) fn extend(
                     id: widget_id(mod_view.id, widget.key),
                     card: card_id(mod_view.id),
                     name: widget.label.to_owned(),
-                    enabled,
+                    // A widget whose module is off (API 1.2) is off like its mod.
+                    enabled: enabled && widget.shown,
                     locked: false,
                 }),
         );

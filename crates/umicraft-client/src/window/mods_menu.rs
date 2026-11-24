@@ -293,8 +293,9 @@ impl App {
         }
     }
 
-    /// Carries out a change of the menu for an external mod and saves that mod's
-    /// choices. A refused change (a failed mod's switch, an unknown key) is logged.
+    /// Carries out a change of the menu for an external mod, saves that mod's choices
+    /// and tells the mod of a module switched or a button clicked (API 1.2). A
+    /// refused change (a failed mod's switch, an unknown key) is logged.
     fn apply_external_change(&mut self, request: external_menu::Request<'_>) {
         if let external_menu::Request::Trust { mod_id } = request {
             if let Some(mods) = &mut self.external_mods {
@@ -313,7 +314,18 @@ impl App {
             _ => None,
         };
         match external_menu::apply(host, request) {
-            Ok(changed) => changed.iter().for_each(|id| mods.save_config(id)),
+            Ok(applied) => {
+                applied.changed.iter().for_each(|id| mods.save_config(id));
+                match applied.event {
+                    Some(external_menu::MenuEvent::Module(mut event)) => {
+                        self.render_bus.dispatch(&mut event);
+                    }
+                    Some(external_menu::MenuEvent::Button(mut event)) => {
+                        self.render_bus.dispatch(&mut event);
+                    }
+                    None => {}
+                }
+            }
             Err(error) => tracing::warn!(%error, "ignored a change of the mods menu"),
         }
         if let Some(enabled) = compat {

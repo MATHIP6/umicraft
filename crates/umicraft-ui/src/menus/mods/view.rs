@@ -44,6 +44,9 @@ pub enum SettingControl {
     },
     /// A `#rrggbb` color.
     Color(String),
+    /// A button reading this text, which reports a click and holds no value (the
+    /// buttons of external mods, API 1.2).
+    Button(String),
 }
 
 /// One setting of a mod.
@@ -109,4 +112,11 @@ pub enum ModsOutcome {
     },
     /// A HUD widget was placed or reset.
     Hud(HudEditorOutcome),
+    /// A button of a mod's settings was clicked.
+    Press {
+        /// The mod.
+        id: String,
+        /// The button.
+        key: String,
+    },
 }

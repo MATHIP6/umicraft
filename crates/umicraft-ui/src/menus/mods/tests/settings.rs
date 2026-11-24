@@ -181,3 +181,26 @@ fn a_short_settings_page_does_not_scroll() {
     show(&mut screen, wheel_over(page_area(), 10.0));
     assert_eq!(screen.settings_scroll, 0.0);
 }
+
+#[test]
+fn a_button_row_shows_its_text_and_reports_a_press() {
+    let mut with_button = view();
+    with_button.cards[0].settings =
+        vec![setting("reset", SettingControl::Button("Reset now".into()))];
+    let mut screen = on_settings_page();
+    let page = texts(&mut screen, &with_button);
+    assert!(has_text(&page, "Label reset") && has_text(&page, "Reset now"));
+    let scale = mods_layout(VIEWPORT).scale;
+    let outcome = show_view(
+        &mut screen,
+        &with_button,
+        click_at(choice_button(row(0), scale)),
+    );
+    assert_eq!(
+        outcome,
+        Some(ModsOutcome::Press {
+            id: "fps".into(),
+            key: "reset".into()
+        })
+    );
+}

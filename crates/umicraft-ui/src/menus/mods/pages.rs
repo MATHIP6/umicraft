@@ -20,7 +20,7 @@ use super::layout::{mods_layout, ModsLayout};
 use super::list::{list, wheel_scrolled};
 use super::scrollbar::{draw_scroll_bar, scroll_input, BarGrab};
 use super::search::visible;
-use super::settings_panel::{content_height, settings_panel};
+use super::settings_panel::{content_height, settings_panel, RowEdit};
 use super::style::{hover_level, Paint, NAME_SIZE, PANEL, PANEL_RIM};
 use super::view::{ModCardView, ModsOutcome, ModsView};
 use super::{card, ModsScreen, Page, BLINK_TICKS};
@@ -267,10 +267,11 @@ impl ModsScreen {
             self.go_back();
             return None;
         }
-        edit.map(|(key, value)| ModsOutcome::Set {
-            id: card.id.clone(),
-            key,
-            value,
+        let (key, edit) = edit?;
+        let id = card.id.clone();
+        Some(match edit {
+            RowEdit::Set(value) => ModsOutcome::Set { id, key, value },
+            RowEdit::Press => ModsOutcome::Press { id, key },
         })
     }
 }

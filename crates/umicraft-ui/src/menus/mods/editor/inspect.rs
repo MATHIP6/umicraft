@@ -417,6 +417,9 @@ impl ModsScreen {
         let paint = rows.paint;
         let scale = paint.scale;
         match &setting.control {
+            // Only external mods have buttons, and their widgets have no options in
+            // the dock.
+            SettingControl::Button(_) => None,
             SettingControl::Toggle(on) => {
                 let key = format!("editor/set/{mod_id}/{}", setting.key);
                 let look = self.motion.level(&key, *on);

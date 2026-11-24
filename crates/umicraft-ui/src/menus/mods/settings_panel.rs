@@ -98,8 +98,17 @@ pub(super) fn swatch_rect(row: Rect, scale: f32, index: usize) -> Rect {
     at_right(row, scale, (SWATCH, SWATCH), from_end)
 }
 
+/// What the player did on one row.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) enum RowEdit {
+    /// A new value for the setting.
+    Set(ModValue),
+    /// A click on a button.
+    Press,
+}
+
 /// Draws the rows of `settings` in `area`, scrolled by `offset` GUI units, and
-/// reports the first control the player changed, as `(setting key, new value)`.
+/// reports the first row the player used, as `(setting key, what was done)`.
 pub(super) fn settings_panel(
     ui: &mut Ui,
     paint: Paint<'_>,
@@ -107,7 +116,7 @@ pub(super) fn settings_panel(
     settings: &[SettingView],
     (drag, offset): (&mut SliderDrag, f32),
     scope: (&str, &mut Motion),
-) -> Option<(String, ModValue)> {
+) -> Option<(String, RowEdit)> {
     let (mod_id, motion) = scope;
     let mut changed = None;
     let top = Rect {
@@ -146,7 +155,7 @@ fn control(
     row: Rect,
     setting: &SettingView,
     (drag, (motion_key, motion)): (&mut SliderDrag, (&str, &mut Motion)),
-) -> Option<ModValue> {
+) -> Option<RowEdit> {
     let scale = paint.scale;
     let left = row.x + PAD * scale;
     let middle = row.y + row.height * 0.5;
@@ -158,7 +167,8 @@ fn control(
             let track = toggle_track(row, scale);
             let hover = hover_level(ui, track);
             let (progress, speed) = motion.level(motion_key, *on);
-            toggle(ui, id, track, *on, (hover, progress, speed)).map(ModValue::Bool)
+            toggle(ui, id, track, *on, (hover, progress, speed))
+                .map(|on| RowEdit::Set(ModValue::Bool(on)))
         }
         SettingControl::Slider {
             min,
@@ -177,7 +187,8 @@ fn control(
                 step: *step,
             };
             let track = slider_track(row, scale);
-            modern_slider(ui, id, track, range, *value, drag).map(ModValue::Number)
+            modern_slider(ui, id, track, range, *value, drag)
+                .map(|value| RowEdit::Set(ModValue::Number(value)))
         }
         SettingControl::Choice { options, selected } => {
             paint.text(ui, &setting.label, (left, middle), label);
@@ -188,13 +199,22 @@ fn control(
                 .show(ui, paint.brand, scale, fade)
                 .clicked;
             let next = options.get((*selected + 1) % options.len().max(1))?;
-            clicked.then(|| ModValue::Text(next.0.clone()))
+            clicked.then(|| RowEdit::Set(ModValue::Text(next.0.clone())))
         }
         SettingControl::Color(hex) => {
             paint.text(ui, &setting.label, (left, middle - 3.5 * scale), label);
             let small = (theme::TEXT_SIZE_SMALL, theme::TEXT_MUTED, Align::Left);
             paint.text(ui, hex, (left, middle + 5.5 * scale), small);
-            swatches(ui, paint, row, hex)
+            swatches(ui, paint, row, hex).map(RowEdit::Set)
+        }
+        SettingControl::Button(text) => {
+            paint.text(ui, &setting.label, (left, middle), label);
+            let button = choice_button(row, scale);
+            let fade = hover_level(ui, button);
+            let clicked = ModernButton::new(id, button, text)
+                .show(ui, paint.brand, scale, fade)
+                .clicked;
+            clicked.then_some(RowEdit::Press)
         }
     }
 }

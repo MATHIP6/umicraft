@@ -4,7 +4,10 @@
 //!
 //! The menu is generic over card ids, so an external mod is listed next to the
 //! built-in ones under an id prefixed `ext:` (`ext:<mod>` for its card,
-//! `ext:<mod>:<widget>` for a HUD widget). [`route`] is the one place that decides
+//! `ext:<mod>:<widget>` for a HUD widget). A module of a mod (API 1.2, ADR-0095)
+//! has a card of its own, `ext-module:<mod>:<module>`, under "External" or in a
+//! tab its mod created; such tabs come after the built-in ones and are merged by
+//! label, never with a built-in tab. [`route`] is the one place that decides
 //! whether an outcome of the menu belongs to the built-in registry or to the
 //! [`ModHost`]; [`apply`] carries the external ones out. Texts of external mods are
 //! literal (they ship no language file), apart from the few hints the client adds.
@@ -13,8 +16,8 @@ use thiserror::Error;
 use umicraft_builtin_mods::{HudPlacement, SettingValue};
 use umicraft_core::lang::Lang;
 use umicraft_modhost::{
-    ConfigureError, EnableError, IdError, ModHost, ModId, ModView, Permissions, SettingSpecKind,
-    SettingView as ExternalSetting,
+    ButtonPressed, ConfigureError, EnableError, IdError, ModHost, ModId, ModView, ModuleToggled,
+    ModuleView, Permissions, SettingSpecKind, SettingView as ExternalSetting,
 };
 use umicraft_ui::menus::{
     HudEditorOutcome, ModCardView, ModsOutcome, ModsView, SettingControl, SettingView,
@@ -35,6 +38,10 @@ const COMPAT_CARD: &str = "ext:server-compat";
 /// `ext:`, so [`route`] and [`parse`] never mistake it for a loaded mod's card.
 const UNTRUSTED_PREFIX: &str = "ext-untrusted:";
 
+/// What the id of the card of a module starts with: `ext-module:<mod>:<module>`. It
+/// does not start with `ext:`, so [`parse`] never mistakes it for a mod's card.
+const MODULE_PREFIX: &str = "ext-module:";
+
 /// How many hex digits of a hash the cards show; the full hash is in the description
 /// of an untrusted mod's card.
 const SHORT_HASH: usize = 12;
@@ -47,6 +54,23 @@ pub(crate) fn card_id(mod_id: &ModId) -> String {
 /// The id of the HUD widget `widget` of mod `mod_id`.
 pub(crate) fn widget_id(mod_id: &ModId, widget: &str) -> String {
     format!("{PREFIX}{mod_id}:{widget}")
+}
+
+/// The id of the card of module `module` of mod `mod_id`.
+pub(crate) fn module_card_id(mod_id: &ModId, module: &str) -> String {
+    format!("{MODULE_PREFIX}{mod_id}:{module}")
+}
+
+/// Splits `ext-module:<mod>:<module>`; `None` for any other id.
+fn parse_module(id: &str) -> Option<(&str, &str)> {
+    id.strip_prefix(MODULE_PREFIX)?.split_once(':')
+}
+
+/// The mod a card of an external mod or of one of its modules belongs to.
+fn owner(id: &str) -> Option<&str> {
+    parse(id)
+        .map(|(mod_id, _)| mod_id)
+        .or_else(|| parse_module(id).map(|(mod_id, _)| mod_id))
 }
 
 /// The id of the card of the untrusted mod `mod_id`.
@@ -69,6 +93,14 @@ fn parse(id: &str) -> Option<(&str, Option<&str>)> {
 pub(crate) enum Request<'a> {
     /// The switch of the card.
     Enable { mod_id: &'a str, enabled: bool },
+    /// The switch of the card of a module (API 1.2).
+    Module {
+        mod_id: &'a str,
+        module: &'a str,
+        enabled: bool,
+    },
+    /// A button on the card of a mod or of one of its modules (API 1.2).
+    Press { mod_id: &'a str, key: &'a str },
     /// A setting control.
     Setting {
         mod_id: &'a str,
@@ -134,13 +166,26 @@ pub(crate) fn route(change: &ModsOutcome) -> Route<'_> {
                 enabled: *enabled,
             })))
         }
+        ModsOutcome::Toggle { id, enabled } if id.starts_with(MODULE_PREFIX) => {
+            Some(Route::external(parse_module(id).map(|(mod_id, module)| {
+                Request::Module {
+                    mod_id,
+                    module,
+                    enabled: *enabled,
+                }
+            })))
+        }
         ModsOutcome::Toggle { id, enabled } => parse(id).map(|(mod_id, _)| {
             Route::external(Some(Request::Enable {
                 mod_id,
                 enabled: *enabled,
             }))
         }),
-        ModsOutcome::Set { id, key, value } => parse(id).map(|(mod_id, _)| {
+        ModsOutcome::Press { id, key } => {
+            owner(id).map(|mod_id| Route::external(Some(Request::Press { mod_id, key })))
+        }
+        // Setting keys are unique across a mod, so a module's card needs no more.
+        ModsOutcome::Set { id, key, value } => owner(id).map(|mod_id| {
             Route::external(Some(Request::Setting {
                 mod_id,
                 key,
@@ -189,28 +234,78 @@ pub(crate) enum ChangeError {
     /// The mod is unknown, or failed and so refuses its switch.
     #[error(transparent)]
     Enable(#[from] EnableError),
-    /// The mod is unknown, or declares no such setting or widget.
+    /// The mod is unknown, or declares no such setting, widget, module or button.
     #[error(transparent)]
     Configure(#[from] ConfigureError),
 }
 
-/// Carries out `request` and returns the mods whose saved choices changed, so the
-/// caller writes their files.
+/// An event a change of the menu raises for the mod it concerns (API 1.2), for the
+/// caller to dispatch on the render bus.
+#[derive(Debug)]
+pub(crate) enum MenuEvent {
+    /// A module was switched.
+    Module(ModuleToggled),
+    /// A button was clicked.
+    Button(ButtonPressed),
+}
+
+/// What a request of the menu did.
+#[derive(Debug, Default)]
+pub(crate) struct Applied {
+    /// The mods whose saved choices changed, for the caller to write their files.
+    pub(crate) changed: Vec<ModId>,
+    /// The event to tell the mod, if any.
+    pub(crate) event: Option<MenuEvent>,
+}
+
+impl Applied {
+    fn saved(id: ModId) -> Self {
+        Self {
+            changed: vec![id],
+            event: None,
+        }
+    }
+}
+
+/// Carries out `request`: returns the mods whose saved choices changed, so the
+/// caller writes their files, and the event to tell the mod.
 ///
 /// # Errors
 ///
-/// [`ChangeError`] for an unknown mod, setting or widget, or a mod that failed.
-pub(crate) fn apply(host: &ModHost, request: Request<'_>) -> Result<Vec<ModId>, ChangeError> {
+/// [`ChangeError`] for an unknown mod, setting, widget, module or button, or a mod
+/// that failed.
+pub(crate) fn apply(host: &ModHost, request: Request<'_>) -> Result<Applied, ChangeError> {
     match request {
+        Request::Module {
+            mod_id,
+            module,
+            enabled,
+        } => {
+            let id: ModId = mod_id.parse()?;
+            let event = host.set_module(&id, module, enabled)?;
+            Ok(Applied {
+                changed: vec![id],
+                event: event.map(MenuEvent::Module),
+            })
+        }
+        // A click changes nothing that is saved.
+        Request::Press { mod_id, key } => {
+            let id: ModId = mod_id.parse()?;
+            let event = host.press_button(&id, key)?;
+            Ok(Applied {
+                changed: Vec::new(),
+                event: Some(MenuEvent::Button(event)),
+            })
+        }
         Request::Enable { mod_id, enabled } => {
             let id: ModId = mod_id.parse()?;
             host.set_enabled(&id, enabled)?;
-            Ok(vec![id])
+            Ok(Applied::saved(id))
         }
         Request::Setting { mod_id, key, value } => {
             let id: ModId = mod_id.parse()?;
             host.set_setting(&id, key, &value)?;
-            Ok(vec![id])
+            Ok(Applied::saved(id))
         }
         Request::Place {
             mod_id,
@@ -219,21 +314,24 @@ pub(crate) fn apply(host: &ModHost, request: Request<'_>) -> Result<Vec<ModId>, 
         } => {
             let id: ModId = mod_id.parse()?;
             host.set_placement(&id, widget, placement)?;
-            Ok(vec![id])
+            Ok(Applied::saved(id))
         }
         Request::ResetWidget { mod_id, widget } => {
             let id: ModId = mod_id.parse()?;
             reset_widget(host, &id, widget)?;
-            Ok(vec![id])
+            Ok(Applied::saved(id))
         }
-        Request::ResetAll => reset_all(host),
+        Request::ResetAll => Ok(Applied {
+            changed: reset_all(host)?,
+            event: None,
+        }),
         // No mod's file changes: the mode is a client option, saved by the caller.
         Request::ServerCompat { enabled } => {
             host.set_server_compat(enabled);
-            Ok(Vec::new())
+            Ok(Applied::default())
         }
         // Not a loaded mod: the caller hands it to `ExternalMods::trust`.
-        Request::Trust { .. } => Ok(Vec::new()),
+        Request::Trust { .. } => Ok(Applied::default()),
     }
 }
 
@@ -270,27 +368,70 @@ fn reset_all(host: &ModHost) -> Result<Vec<ModId>, ChangeError> {
     Ok(changed)
 }
 
-/// Adds the extra category of the external mods, one card per loaded mod and one per
-/// untrusted mod, to `view`. Nothing is added when there are neither, so the menu
-/// shows no empty tab. The switch of the server-compatible mode comes first when a
-/// mod alters packets or movement, the only mods it affects.
+/// Adds the external mods to `view`: the "External" tab with one card per loaded
+/// mod, per module without a category and per untrusted mod, then the tabs the mods
+/// created with the cards of their modules (API 1.2). A tab is only added when it has
+/// a card, so the menu shows no empty tab; tabs of the same label are one. The switch
+/// of the server-compatible mode comes first when a mod alters packets or movement,
+/// the only mods it affects.
 pub(crate) fn extend(view: &mut ModsView, host: &ModHost, untrusted: &[UntrustedMod], lang: &Lang) {
-    let mut cards: Vec<ModCardView> = host.mods().map(|mod_view| card(&mod_view, lang)).collect();
+    let mut external: Vec<ModCardView> = Vec::new();
+    // `(tab label, its cards)`, in the order the tabs first appear.
+    let mut tabs: Vec<(String, Vec<ModCardView>)> = Vec::new();
+    for mod_view in host.mods() {
+        external.push(card(&mod_view, lang));
+        for module in mod_view.modules() {
+            let card = module_card(&mod_view, &module, lang);
+            match module.category {
+                None => external.push(card),
+                Some(label) => match tabs.iter_mut().find(|(tab, _)| tab == label) {
+                    Some((_, cards)) => cards.push(card),
+                    None => tabs.push((label.to_owned(), vec![card])),
+                },
+            }
+        }
+    }
     if host.mods().any(|mod_view| mod_view.alters_game) {
-        cards.insert(0, compat_card(host, lang));
+        external.insert(0, compat_card(host, lang));
     }
-    cards.extend(untrusted.iter().map(|entry| untrusted_card(entry, lang)));
-    if cards.is_empty() {
-        return;
+    external.extend(untrusted.iter().map(|entry| untrusted_card(entry, lang)));
+    let external = (!external.is_empty()).then(|| {
+        let label = lang.tr("umicraft.mods.category.external").to_owned();
+        (label, external)
+    });
+    for (label, cards) in external.into_iter().chain(tabs) {
+        let category = view.categories.len();
+        view.categories.push(label);
+        view.cards.extend(
+            cards
+                .into_iter()
+                .map(|card| ModCardView { category, ..card }),
+        );
     }
-    let category = view.categories.len();
-    view.categories
-        .push(lang.tr("umicraft.mods.category.external").to_owned());
-    view.cards.extend(
-        cards
-            .into_iter()
-            .map(|card| ModCardView { category, ..card }),
-    );
+}
+
+/// The card of a module: its switch and its settings. While its mod does not run
+/// (switched off, failed, held by the server-compatible mode) the description says
+/// so first, and the switch keeps the player's choice for when it runs again.
+fn module_card(owner: &ModView<'_>, module: &ModuleView<'_>, lang: &Lang) -> ModCardView {
+    let running = owner.enabled && !owner.failed && !owner.held_by_compat;
+    let mut description = module.description.to_owned();
+    if !running {
+        let off = lang.tr_args("umicraft.mods.external.module_off", &[owner.name]);
+        description = if description.is_empty() {
+            off
+        } else {
+            format!("{off} | {description}")
+        };
+    }
+    ModCardView {
+        id: module_card_id(owner.id, module.key),
+        name: module.label.to_owned(),
+        description,
+        category: 0,
+        enabled: module.enabled,
+        settings: module.settings().map(|s| setting_view(&s)).collect(),
+    }
 }
 
 /// The card whose switch is the server-compatible mode.
@@ -458,6 +599,7 @@ fn control(kind: &SettingSpecKind, value: &SettingValue) -> SettingControl {
                 .unwrap_or(0),
         },
         SettingSpecKind::Color { .. } => SettingControl::Color(text().to_owned()),
+        SettingSpecKind::Button { text } => SettingControl::Button(text.clone()),
     }
 }
 

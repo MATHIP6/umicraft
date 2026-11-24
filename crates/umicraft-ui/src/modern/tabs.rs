@@ -6,7 +6,7 @@ use crate::context::Ui;
 use crate::geom::Rect;
 use crate::text::FontAtlas;
 
-use super::text::{draw_text, measure_text, Align};
+use super::text::{draw_text, fit_text, measure_text, Align};
 use super::theme::{mix, with_opacity, TEXT, TEXT_MUTED, TEXT_SIZE_SMALL};
 
 /// Space on each side of a label, in GUI units.
@@ -29,6 +29,32 @@ pub fn tab_rects(area: Rect, widths: &[f32], gap: f32) -> Vec<Rect> {
         .collect()
 }
 
+/// The widths of tabs of natural `widths` once they fit in `available` with `gap`
+/// between them: when they do not, the widest are cut down to one common width, so
+/// short names stay whole and only long ones are shortened.
+#[must_use]
+pub fn fit_widths(widths: &[f32], available: f32, gap: f32) -> Vec<f32> {
+    let room = available - gap * widths.len().saturating_sub(1) as f32;
+    if widths.iter().sum::<f32>() <= room {
+        return widths.to_vec();
+    }
+    let mut sorted = widths.to_vec();
+    sorted.sort_by(f32::total_cmp);
+    // Raise the cap tab by tab: every tab narrower than the cap keeps its width,
+    // the others share what is left.
+    let mut used = 0.0;
+    let mut cap = 0.0;
+    for (index, width) in sorted.iter().enumerate() {
+        let share = (room - used) / (sorted.len() - index) as f32;
+        cap = share.max(0.0);
+        if *width > share {
+            break;
+        }
+        used += width;
+    }
+    widths.iter().map(|width| width.min(cap)).collect()
+}
+
 /// The index of the tab under `point`, if any.
 #[must_use]
 pub fn tab_at(rects: &[Rect], point: [f32; 2]) -> Option<usize> {
@@ -46,10 +72,11 @@ pub fn tabs(
     scale: f32,
 ) -> Option<usize> {
     let size = TEXT_SIZE_SMALL * scale;
-    let widths: Vec<f32> = labels
+    let natural: Vec<f32> = labels
         .iter()
         .map(|label| measure_text(brand, label, size) + 2.0 * PADDING * scale)
         .collect();
+    let widths = fit_widths(&natural, area.width, GAP * scale);
     let rects = tab_rects(area, &widths, GAP * scale);
     ui.push_id("tabs");
     let mut clicked = None;
@@ -63,7 +90,8 @@ pub fn tabs(
             mix(with_opacity(TEXT_MUTED, 0.85), TEXT, hover)
         };
         let middle = (rect.x + rect.width * 0.5, rect.y + rect.height * 0.5);
-        draw_text(ui, brand, label, middle, (size, color, Align::Center));
+        let shown = fit_text(brand, label, size, rect.width - 2.0 * PADDING * scale);
+        draw_text(ui, brand, &shown, middle, (size, color, Align::Center));
         if response.clicked {
             ui.note_button_press();
             clicked = Some(index);
@@ -87,4 +115,29 @@ pub fn tabs(
         ui.draw().rect(line, with_opacity(TEXT, 0.85));
     }
     clicked
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tabs_that_fit_keep_their_width() {
+        assert_eq!(fit_widths(&[10.0, 20.0], 40.0, 5.0), [10.0, 20.0]);
+    }
+
+    #[test]
+    fn only_the_widest_tabs_are_cut_to_fit() {
+        let widths = fit_widths(&[10.0, 40.0, 60.0], 70.0, 5.0);
+        assert_eq!(widths, [10.0, 25.0, 25.0]);
+        let total: f32 = widths.iter().sum::<f32>() + 10.0;
+        assert!(total <= 70.0 + f32::EPSILON);
+    }
+
+    #[test]
+    fn no_room_at_all_gives_empty_tabs_not_negative_ones() {
+        assert!(fit_widths(&[10.0, 10.0], 2.0, 5.0)
+            .iter()
+            .all(|w| *w == 0.0));
+    }
 }

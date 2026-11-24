@@ -92,6 +92,7 @@ umicraft.mods.external.compat=Server-compatible mode
 umicraft.mods.external.compat.description=Keeps the mods that alter packets or movement off, for servers with an anti-cheat.
 umicraft.mods.external.held=Off in server-compatible mode.
 umicraft.mods.external.alters=[Alters packets/movement]
+umicraft.mods.external.module_off=Off with %s
 umicraft.mods.fps.name=FPS
 umicraft.mods.fps.desc=Shows the frames per second.
 umicraft.mods.fps.frame_time=Show frame time

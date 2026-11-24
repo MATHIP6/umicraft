@@ -175,11 +175,91 @@ fn applying_the_compatible_mode_switches_the_host_and_changes_no_mod_file() {
         &mut umicraft_modhost::TrustList::default(),
         |_, _| false,
     );
-    assert_eq!(
-        apply(&host, Request::ServerCompat { enabled: true }).ok(),
-        Some(Vec::new())
-    );
+    let applied = apply(&host, Request::ServerCompat { enabled: true }).unwrap();
+    assert!(applied.changed.is_empty() && applied.event.is_none());
     assert!(host.server_compat());
+    // A press or a module switch for a mod that is not loaded is refused.
+    let press = Request::Press {
+        mod_id: "hello",
+        key: "reset",
+    };
+    assert!(apply(&host, press).is_err());
+    let module = Request::Module {
+        mod_id: "hello",
+        module: "radar",
+        enabled: false,
+    };
+    assert!(apply(&host, module).is_err());
+}
+
+#[test]
+fn a_module_card_routes_its_switch_and_settings_to_its_mod() {
+    let id: ModId = "hello".parse().expect("valid id");
+    let card = module_card_id(&id, "radar");
+    assert_eq!(card, "ext-module:hello:radar");
+    assert_eq!(parse(&card), None, "never read as a mod's card");
+    let switch = ModsOutcome::Toggle {
+        id: card.clone(),
+        enabled: false,
+    };
+    let routed = route(&switch);
+    assert!(!routed.builtin);
+    assert_eq!(
+        routed.external,
+        Some(Request::Module {
+            mod_id: "hello",
+            module: "radar",
+            enabled: false
+        })
+    );
+    let set = ModsOutcome::Set {
+        id: card.clone(),
+        key: "range".into(),
+        value: ModValue::Bool(true),
+    };
+    assert_eq!(
+        route(&set).external,
+        Some(Request::Setting {
+            mod_id: "hello",
+            key: "range",
+            value: SettingValue::Bool(true)
+        })
+    );
+}
+
+#[test]
+fn a_press_goes_to_the_mod_of_the_card_and_never_to_the_builtin_registry() {
+    for id in ["ext:hello", "ext-module:hello:radar"] {
+        let press = ModsOutcome::Press {
+            id: id.into(),
+            key: "reset".into(),
+        };
+        let routed = route(&press);
+        assert!(!routed.builtin);
+        assert_eq!(
+            routed.external,
+            Some(Request::Press {
+                mod_id: "hello",
+                key: "reset"
+            })
+        );
+    }
+    let builtin = ModsOutcome::Press {
+        id: "fps".into(),
+        key: "reset".into(),
+    };
+    assert_eq!(route(&builtin), Route::BUILTIN);
+}
+
+#[test]
+fn a_button_setting_becomes_a_button_control() {
+    let kind = SettingSpecKind::Button {
+        text: "Reset".into(),
+    };
+    assert_eq!(
+        control(&kind, &SettingValue::Bool(false)),
+        SettingControl::Button("Reset".into())
+    );
 }
 
 /// The shipped English texts, so the tests read what the player reads.

@@ -105,7 +105,8 @@ pub fn apply(registry: &mut ModRegistry, outcome: &ModsOutcome) -> Result<bool, 
             registry.set_setting(id, key, &setting_value(value))?;
         }
         ModsOutcome::Hud(change) => return hud_editor::apply(registry, change),
-        ModsOutcome::Close => return Ok(false),
+        // The built-in mods have no buttons; a press is for an external mod.
+        ModsOutcome::Close | ModsOutcome::Press { .. } => return Ok(false),
     }
     Ok(true)
 }

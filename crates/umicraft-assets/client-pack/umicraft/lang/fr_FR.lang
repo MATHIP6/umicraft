@@ -92,6 +92,7 @@ umicraft.mods.external.compat=Mode compatible serveur
 umicraft.mods.external.compat.description=Garde éteints les mods qui modifient les paquets ou le mouvement, pour les serveurs avec un anti-cheat.
 umicraft.mods.external.held=Éteint en mode compatible serveur.
 umicraft.mods.external.alters=[Modifie paquets/mouvement]
+umicraft.mods.external.module_off=Éteint avec %s
 umicraft.mods.fps.name=FPS
 umicraft.mods.fps.desc=Affiche le nombre d'images par seconde.
 umicraft.mods.fps.frame_time=Afficher le temps par image
