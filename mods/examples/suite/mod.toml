@@ -1,0 +1,9 @@
+[mod]
+id = "suite"
+name = "Suite"
+version = "0.1.0"
+authors = ["Umicraft contributors"]
+api_version = "1.2"
+license = "MIT"
+description = "Teaching example: a tab of its own with a tick counter module, a greeter module under External, and buttons."
+library = "suite"

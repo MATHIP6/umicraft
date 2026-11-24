@@ -18,6 +18,7 @@
 //! | [`KeyPressed`] | render | no | no |
 //! | [`PacketReceived`], [`PacketSend`] | network | yes | no |
 //! | [`Frame`] | render | no | no |
+//! | [`ModuleToggled`], [`ButtonPressed`] | render | no | no |
 //!
 //! The packet events and [`InitCx::packets`] need `network_packets = true` in
 //! the mod's `mod.toml`; without it the host answers `DENIED`.
@@ -30,6 +31,12 @@
 //! [`Placement`]; [`InitCx::key`] adds a key binding that arrives as
 //! [`KeyPressed`]; [`InitCx::command`] adds a `/command`; [`InitCx::chat`]
 //! gives a [`Chat`] to print local lines.
+//!
+//! # Tabs, modules and buttons (API 1.2)
+//!
+//! [`InitCx::category`] creates a tab of the mods menu, [`InitCx::module`] a
+//! card with its own switch, and [`InitCx::card`] declares settings and
+//! buttons on that card or ties widgets and passes to it; see [`Card`].
 //!
 //! # Physics and world queries
 //!
@@ -72,7 +79,9 @@ mod ffi;
 mod host;
 mod hud;
 mod init;
+mod key;
 mod logger;
+mod menu;
 mod packets;
 mod physics;
 mod post;
@@ -86,13 +95,14 @@ pub use camera::{Camera, CameraInput, CameraState};
 pub use chat::Chat;
 pub use error::ModError;
 pub use event::{
-    ChatPosition, ChatReceived, ChatSend, Connected, Control, Disconnected, Event, Frame,
-    KeyPressed, PacketReceived, PacketSend, PostTick, PreRender, PreTick, ScreenClosed,
-    ScreenOpened,
+    ButtonPressed, ChatPosition, ChatReceived, ChatSend, Connected, Control, Disconnected, Event,
+    Frame, KeyPressed, ModuleToggled, PacketReceived, PacketSend, PostTick, PreRender, PreTick,
+    ScreenClosed, ScreenOpened,
 };
 pub use hud::{Anchor, Hud, Placement};
 pub use init::{InitCx, Mod};
 pub use logger::Logger;
+pub use menu::{Card, Category, Module, ModuleSpec};
 pub use packets::Packets;
 pub use physics::{GameMode, Input, Physics, PlayerState};
 pub use post::PostPass;

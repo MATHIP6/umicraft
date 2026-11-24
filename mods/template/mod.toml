@@ -13,7 +13,7 @@ authors = ["Your name"]
 # The mod API this library was built for. A client of the same major and an
 # equal or newer minor loads it: "1.0" loads on a 1.0, 1.1 or 1.2 client, not on
 # a 2.0 client or on a 1.0 client when you wrote "1.1".
-api_version = "1.1"
+api_version = "1.2"
 # Optional: an SPDX license expression.
 license = "MIT"
 # Optional: one line shown in the mods menu.
@@ -31,7 +31,8 @@ library = "my_mod"
 # Lower loads earlier, among mods with no dependency between them. Default 0.
 priority = 0
 # Services this mod replaces entirely; at most one mod may replace each.
-# Default: none. The only service is "player_physics" (needs `movement`).
+# Default: none. The services are "player_physics" (needs `movement`) and
+# "render_camera" (needs `camera`).
 replaces = []
 # Services this mod wraps; any number of mods may. Default: none.
 wraps = []
@@ -43,6 +44,8 @@ wraps = []
 network_packets = false
 # Wrap or replace the player's movement (`player_physics`).
 movement = false
+# Wrap or replace the render camera (`render_camera`). Changes only what is drawn.
+camera = false
 # Shown to the player as "uses files". Not enforced: native code can open files anyway.
 filesystem = false
 # Shown to the player as "uses http". Not enforced.

@@ -4432,6 +4432,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-example-suite"
+version = "0.1.0"
+dependencies = [
+ "umicraft-modapi",
+]
+
+[[package]]
 name = "umicraft-example-world-marker"
 version = "0.1.0"
 dependencies = [

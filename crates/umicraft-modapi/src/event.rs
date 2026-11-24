@@ -3,9 +3,10 @@
 //! Typed views over the event payloads of the C ABI.
 
 use umicraft_modapi_sys::{
-    UmiChatReceived, UmiChatSend, UmiConnected, UmiDisconnected, UmiEventHeader, UmiEventId,
-    UmiFrame, UmiKeyPressed, UmiPacket, UmiPostTick, UmiPreRender, UmiPreTick, UmiScreen,
-    UMI_CHAT_POSITION_ACTION_BAR, UMI_CHAT_POSITION_CHAT, UMI_CHAT_POSITION_SYSTEM,
+    UmiButtonPressed, UmiChatReceived, UmiChatSend, UmiConnected, UmiDisconnected, UmiEventHeader,
+    UmiEventId, UmiFrame, UmiKeyPressed, UmiModuleToggled, UmiPacket, UmiPostTick, UmiPreRender,
+    UmiPreTick, UmiScreen, UMI_CHAT_POSITION_ACTION_BAR, UMI_CHAT_POSITION_CHAT,
+    UMI_CHAT_POSITION_SYSTEM,
 };
 
 use crate::ffi::{bytes_of, str_of};
@@ -102,6 +103,20 @@ view!(
     KeyPressed,
     UmiKeyPressed,
     UmiEventId::KEY_PRESSED
+);
+view!(
+    /// The player switched one of this mod's modules on or off in the mods menu
+    /// (API 1.2). Render thread; delivered to the declaring mod only.
+    ModuleToggled,
+    UmiModuleToggled,
+    UmiEventId::MODULE_TOGGLED
+);
+view!(
+    /// The player clicked one of this mod's buttons in the mods menu (API 1.2).
+    /// Render thread; delivered to the declaring mod only.
+    ButtonPressed,
+    UmiButtonPressed,
+    UmiEventId::BUTTON_PRESSED
 );
 view!(
     /// The client joined a server.
@@ -392,6 +407,30 @@ impl ChatSend {
 
 impl KeyPressed {
     /// The id the mod gave the binding in [`InitCx::key`](crate::InitCx::key).
+    pub fn key(&self) -> &str {
+        str_of(&self.0.key)
+    }
+}
+
+impl ModuleToggled {
+    /// The key of the module, as [`Module::key`](crate::Module::key) gives it.
+    pub fn module(&self) -> &str {
+        str_of(&self.0.module)
+    }
+
+    /// The new state of the switch.
+    pub fn enabled(&self) -> bool {
+        self.0.enabled != 0
+    }
+}
+
+impl ButtonPressed {
+    /// The module whose card holds the button, empty for the mod's own card.
+    pub fn module(&self) -> &str {
+        str_of(&self.0.module)
+    }
+
+    /// The key the mod gave the button.
     pub fn key(&self) -> &str {
         str_of(&self.0.key)
     }

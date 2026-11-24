@@ -13,9 +13,10 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use umicraft_modapi::{
-    umicraft_mod, Anchor, Block, Chat, ChatReceived, ChatSend, Connected, Disconnected, Frame,
-    GameMode, InitCx, KeyPressed, Mod, ModError, PacketReceived, PacketSend, Packets, Physics,
-    Placement, PostPass, PostTick, PreTick, ScreenClosed, ScreenOpened, Setting, World,
+    umicraft_mod, Anchor, Block, ButtonPressed, Chat, ChatReceived, ChatSend, Connected,
+    Disconnected, Frame, GameMode, InitCx, KeyPressed, Mod, ModError, Module, ModuleSpec,
+    ModuleToggled, PacketReceived, PacketSend, Packets, Physics, Placement, PostPass, PostTick,
+    PreTick, ScreenClosed, ScreenOpened, Setting, World,
 };
 use umicraft_modapi_sys::*;
 
@@ -67,6 +68,10 @@ static POST_PARAMS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static POST_REFUSALS: Mutex<Vec<Result<PostPass, ModError>>> = Mutex::new(Vec::new());
 /// What the mod registered, for the tests to read through.
 static UI: Mutex<Option<Ui>> = Mutex::new(None);
+/// Every menu registration (API 1.2) the fake host received, as text.
+static MENU: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// The module the mod declared, for the tests to read through.
+static RADAR: Mutex<Option<Module>> = Mutex::new(None);
 
 #[derive(Clone, Copy)]
 struct Ui {
@@ -211,6 +216,30 @@ fn register_ui(cx: &mut InitCx<'_>) -> Result<(), ModError> {
     })
 }
 
+/// A tab, a module with a setting, a button and an attached widget, and a button
+/// on the mod's own card (API 1.2).
+fn register_menu(cx: &mut InitCx<'_>) -> Result<(), ModError> {
+    let pvp = cx.category("pvp", "PvP")?;
+    let radar = cx.module(
+        ModuleSpec::new("radar", "Radar")
+            .description("Players around")
+            .category(pvp),
+    )?;
+    let mut card = cx.card(radar);
+    card.toggle("names", "Names", true)?;
+    card.button("clear", "Marks", "Clear")?;
+    card.attach_widget("clock")?;
+    let post = UI.lock().unwrap().map(|ui| ui.post);
+    if let Some(post) = post {
+        card.attach_post_pass(&post)?;
+    }
+    cx.button("reload", "List", "Reload")?;
+    cx.observe::<ModuleToggled>(0, |e| see(format!("module={}:{}", e.module(), e.enabled())))?;
+    cx.observe::<ButtonPressed>(0, |e| see(format!("button={}:{}", e.module(), e.key())))?;
+    *RADAR.lock().unwrap() = Some(radar);
+    Ok(())
+}
+
 /// Reports the flight facts, then starts flying and predicts creative.
 fn flight_layer(physics: &mut Physics<'_>) -> Result<(), ModError> {
     let state = physics.state_mut();
@@ -284,6 +313,7 @@ impl Mod for TestMod {
         })?;
         register_view_handlers(cx)?;
         register_ui(cx)?;
+        register_menu(cx)?;
         if REPLACE_PHYSICS.load(SeqCst) {
             cx.replace_physics(physics_layer)?;
         } else {
@@ -654,6 +684,78 @@ extern "C" fn fake_post_set_param(
     UmiStatus::OK
 }
 
+fn menu(line: String) -> UmiStatus {
+    MENU.lock().unwrap().push(line);
+    UmiStatus::OK
+}
+
+extern "C" fn fake_register_category(_me: UmiModHandle, key: UmiStr, label: UmiStr) -> UmiStatus {
+    menu(format!("category:{}:{}", text_of(key), text_of(label)))
+}
+
+extern "C" fn fake_register_module(_me: UmiModHandle, def: *const UmiModuleDef) -> UmiStatus {
+    // SAFETY: the module under test passes a definition that lives for the call.
+    let def = unsafe { *def };
+    assert_eq!(def.size as usize, size_of::<UmiModuleDef>());
+    menu(format!(
+        "module:{}:{}:{}:{}:{}",
+        text_of(def.key),
+        text_of(def.label),
+        text_of(def.description),
+        text_of(def.category),
+        def.flags
+    ))
+}
+
+extern "C" fn fake_register_setting_in(
+    _me: UmiModHandle,
+    module: UmiStr,
+    def: *const UmiSettingDef,
+) -> UmiStatus {
+    // SAFETY: the module under test passes a definition that lives for the call.
+    let def = unsafe { *def };
+    menu(format!("setting:{}:{}", text_of(module), text_of(def.key)))
+}
+
+extern "C" fn fake_register_button(
+    _me: UmiModHandle,
+    module: UmiStr,
+    key: UmiStr,
+    label: UmiStr,
+    text: UmiStr,
+) -> UmiStatus {
+    menu(format!(
+        "button:{}:{}:{}:{}",
+        text_of(module),
+        text_of(key),
+        text_of(label),
+        text_of(text)
+    ))
+}
+
+extern "C" fn fake_module_attach(
+    _me: UmiModHandle,
+    module: UmiStr,
+    kind: u32,
+    key: UmiStr,
+) -> UmiStatus {
+    menu(format!(
+        "attach:{}:{kind}:{}",
+        text_of(module),
+        text_of(key)
+    ))
+}
+
+/// Every module is off, so a mod reading it sees the host and not its default.
+extern "C" fn fake_module_enabled(_me: UmiModHandle, module: UmiStr, out: *mut u8) -> UmiStatus {
+    if text_of(module) != "radar" {
+        return UmiStatus::INVALID_ARGUMENT;
+    }
+    // SAFETY: the module under test passes a writable byte.
+    unsafe { *out = 0 };
+    UmiStatus::OK
+}
+
 fn host() -> UmiHost {
     UmiHost {
         size: size_of::<UmiHost>(),
@@ -684,6 +786,12 @@ fn host() -> UmiHost {
         world_entities_snapshot: fake_world_entities_snapshot,
         hud_outline: fake_hud_outline,
         hud_segment: fake_hud_segment,
+        register_category: fake_register_category,
+        register_module: fake_register_module,
+        register_setting_in: fake_register_setting_in,
+        register_button: fake_register_button,
+        module_attach: fake_module_attach,
+        module_enabled: fake_module_enabled,
     }
 }
 
@@ -798,7 +906,7 @@ fn fresh() -> MutexGuard<'static, ()> {
     LOGS.lock().unwrap().clear();
     SUBS.lock().unwrap().clear();
     TICKS.lock().unwrap().clear();
-    for list in [&SEEN, &SET_CALLS, &DEFS, &HUD_CALLS, &KEYS, &CHAT] {
+    for list in [&SEEN, &SET_CALLS, &DEFS, &HUD_CALLS, &KEYS, &CHAT, &MENU] {
         list.lock().unwrap().clear();
     }
     WIDGETS.lock().unwrap().clear();
@@ -814,6 +922,7 @@ fn fresh() -> MutexGuard<'static, ()> {
     *SNAPSHOT_STATUS.lock().unwrap() = UmiStatus::OK;
     *VALUES.lock().unwrap() = Some(HashMap::new());
     *UI.lock().unwrap() = None;
+    *RADAR.lock().unwrap() = None;
     SET_RESULTS.lock().unwrap().clear();
     for counter in [&DROPS, &SHUTDOWNS] {
         counter.store(0, SeqCst);
@@ -918,7 +1027,7 @@ fn init_registers_the_subscriptions_and_logs() {
     let _guard = fresh();
     init_ok();
     let subs = SUBS.lock().unwrap();
-    assert_eq!(subs.len(), 13);
+    assert_eq!(subs.len(), 15);
     assert_eq!(
         (subs[0].event, subs[0].mode, subs[0].priority),
         (UmiEventId::PRE_TICK, UmiMode::OBSERVE, 5)
@@ -1928,4 +2037,50 @@ fn a_visitor_may_read_the_snapshot_again() {
         })
         .unwrap();
     assert_eq!(inner, 3);
+}
+
+#[test]
+fn tabs_modules_and_buttons_reach_the_host_in_order() {
+    let _guard = fresh();
+    init_ok();
+    assert_eq!(
+        *MENU.lock().unwrap(),
+        [
+            "category:pvp:PvP",
+            "module:radar:Radar:Players around:pvp:1",
+            "setting:radar:names",
+            "button:radar:clear:Marks:Clear",
+            "attach:radar:1:clock",
+            "attach:radar:2:tint",
+            "button::reload:List:Reload",
+        ]
+    );
+    let radar = RADAR.lock().unwrap().expect("declared");
+    assert_eq!(radar.key(), "radar");
+    assert!(!radar.is_enabled(), "the host's answer, not the default");
+}
+
+#[test]
+fn module_and_button_events_are_viewed() {
+    let _guard = fresh();
+    init_ok();
+    let mut toggled = UmiModuleToggled {
+        header: header(UmiEventId::MODULE_TOGGLED, size_of::<UmiModuleToggled>(), 0),
+        module: text("radar"),
+        enabled: 1,
+    };
+    assert_eq!(
+        call(sub_for(UmiEventId::MODULE_TOGGLED), &mut toggled),
+        UmiStatus::OK
+    );
+    let mut pressed = UmiButtonPressed {
+        header: header(UmiEventId::BUTTON_PRESSED, size_of::<UmiButtonPressed>(), 0),
+        module: text(""),
+        key: text("reload"),
+    };
+    assert_eq!(
+        call(sub_for(UmiEventId::BUTTON_PRESSED), &mut pressed),
+        UmiStatus::OK
+    );
+    assert_eq!(seen(), ["module=radar:true", "button=:reload"]);
 }

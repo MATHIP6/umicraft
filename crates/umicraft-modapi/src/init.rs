@@ -4,9 +4,7 @@
 
 use core::ffi::c_void;
 
-use umicraft_modapi_sys::{
-    UmiHost, UmiModHandle, UmiMode, UmiServiceMode, UmiSettingDef, UmiSettingKind, UmiStatus,
-};
+use umicraft_modapi_sys::{UmiHost, UmiModHandle, UmiMode, UmiServiceMode, UmiStatus};
 
 use crate::camera::CameraHandler;
 use crate::event::{Control, Event};
@@ -15,8 +13,8 @@ use crate::ffi::{
     CommandHandler, DrawHandler, Handler, OwnedUser, PhysicsHandler,
 };
 use crate::host::utf8;
+use crate::menu::Card;
 use crate::post::key_too_long;
-use crate::setting::{definition, utf8_all};
 use crate::{
     Camera, Chat, Hud, Logger, ModError, Packets, Physics, Placement, PostPass, Setting, World,
 };
@@ -34,8 +32,8 @@ pub trait Mod: Send + Sized + 'static {
 
 /// What a mod may do during [`Mod::init`]; it is only valid for that call.
 ///
-/// Settings, widgets, key bindings and commands can only be declared here:
-/// the host refuses them afterwards. Keys follow `^[a-z][a-z0-9_]{0,63}$`,
+/// Settings, widgets, key bindings, commands, tabs and modules can only be
+/// declared here: the host refuses them afterwards. Keys follow `^[a-z][a-z0-9_]{0,63}$`,
 /// command names `^[a-z][a-z0-9_-]{0,31}$`.
 #[derive(Debug)]
 pub struct InitCx<'a> {
@@ -55,6 +53,14 @@ impl<'a> InitCx<'a> {
 
     pub(crate) fn into_owned(self) -> Vec<OwnedUser> {
         self.owned
+    }
+
+    pub(crate) fn host(&self) -> &'a UmiHost {
+        self.host
+    }
+
+    pub(crate) fn me(&self) -> UmiModHandle {
+        self.me
     }
 
     /// A logger that stays valid after `init` returns.
@@ -131,7 +137,7 @@ impl<'a> InitCx<'a> {
         self.subscribe::<E>(UmiMode::INTERCEPT, priority, Box::new(handler))
     }
 
-    /// Declares an on/off setting shown in the mods menu.
+    /// Declares an on/off setting on the mod's own card in the mods menu.
     ///
     /// # Errors
     /// [`ModError::HostRefused`] for an invalid or duplicate `key`.
@@ -141,12 +147,7 @@ impl<'a> InitCx<'a> {
         label: &str,
         default: bool,
     ) -> Result<Setting<bool>, ModError> {
-        let def = UmiSettingDef {
-            toggle_default: u8::from(default),
-            ..definition(UmiSettingKind::TOGGLE, key, label)
-        };
-        self.register_setting(&def)?;
-        Ok(Setting::new(key, def.kind, |v| v.toggle != 0, default))
+        Card::new(self, None).toggle(key, label, default)
     }
 
     /// Declares a number in `[min, max]` moved by `step`.
@@ -163,15 +164,7 @@ impl<'a> InitCx<'a> {
         step: f32,
         default: f32,
     ) -> Result<Setting<f32>, ModError> {
-        let def = UmiSettingDef {
-            slider_min: min,
-            slider_max: max,
-            slider_step: step,
-            slider_default: default,
-            ..definition(UmiSettingKind::SLIDER, key, label)
-        };
-        self.register_setting(&def)?;
-        Ok(Setting::new(key, def.kind, |v| v.slider, default))
+        Card::new(self, None).slider(key, label, min, max, step, default)
     }
 
     /// Declares a choice among `options`; the value is the selected index.
@@ -186,15 +179,7 @@ impl<'a> InitCx<'a> {
         options: &[&str],
         default_index: u32,
     ) -> Result<Setting<u32>, ModError> {
-        let labels = utf8_all(options);
-        let def = UmiSettingDef {
-            choices: labels.as_ptr(),
-            choices_len: labels.len(),
-            choice_default: default_index,
-            ..definition(UmiSettingKind::CHOICE, key, label)
-        };
-        self.register_setting(&def)?;
-        Ok(Setting::new(key, def.kind, |v| v.choice, default_index))
+        Card::new(self, None).choice(key, label, options, default_index)
     }
 
     /// Declares a colour, `0xRRGGBB`.
@@ -207,12 +192,7 @@ impl<'a> InitCx<'a> {
         label: &str,
         default: u32,
     ) -> Result<Setting<u32>, ModError> {
-        let def = UmiSettingDef {
-            color_default: default,
-            ..definition(UmiSettingKind::COLOR, key, label)
-        };
-        self.register_setting(&def)?;
-        Ok(Setting::new(key, def.kind, |v| v.color, default))
+        Card::new(self, None).color(key, label, default)
     }
 
     /// Declares a HUD widget the player can move and scale; `draw` runs on
@@ -378,10 +358,6 @@ impl<'a> InitCx<'a> {
         self.keep(layer, |user| {
             (host.register_camera)(me, mode, Some(camera_trampoline), user)
         })
-    }
-
-    fn register_setting(&self, def: &UmiSettingDef) -> Result<(), ModError> {
-        ModError::check((self.host.register_setting)(self.me, def))
     }
 
     fn subscribe<E: Event>(

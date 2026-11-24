@@ -4,10 +4,8 @@
 
 use umicraft_modapi_sys::UmiStatus;
 
+use crate::key::InlineKey;
 use crate::{host, ModError};
-
-/// The longest pass key the host accepts (`^[a-z][a-z0-9_]{0,63}$`).
-const MAX_KEY_LEN: usize = 64;
 
 /// A post-process pass registered with [`InitCx::post_pass`](crate::InitCx::post_pass).
 ///
@@ -16,35 +14,25 @@ const MAX_KEY_LEN: usize = 64;
 /// `umi.params[0..4]`, four `vec4<f32>` that read zero until set.
 ///
 /// `Copy + Send + Sync` so a closure can own one and any thread can call
-/// [`set_param`](Self::set_param). It stores its key inline, in a fixed array,
-/// rather than borrowing or leaking a string: a runtime key has no `'static`
-/// lifetime, a leak would grow on every mod reload, and the host needs the key
-/// again on each call anyway.
+/// [`set_param`](Self::set_param). It stores its key inline, since the host needs
+/// the key again on each call.
 ///
 /// The shader contract (entry point `fs_main`, the prelude names `umi_scene`,
 /// `umi_sampler`, `umi.params` and `UmiVertexOut`, the limits) is in
 /// `docs/modding/post.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PostPass {
-    key: [u8; MAX_KEY_LEN],
-    len: usize,
+    key: InlineKey,
 }
 
 impl PostPass {
     /// Remembers `key`, or `None` when it is too long to be a valid key.
     pub(crate) fn new(key: &str) -> Option<Self> {
-        let bytes = key.as_bytes();
-        let mut stored = [0; MAX_KEY_LEN];
-        stored.get_mut(..bytes.len())?.copy_from_slice(bytes);
-        Some(Self {
-            key: stored,
-            len: bytes.len(),
-        })
+        InlineKey::new(key).map(|key| Self { key })
     }
 
-    fn key(&self) -> &str {
-        // The bytes were copied from a `&str` in `new`, whole.
-        std::str::from_utf8(&self.key[..self.len]).unwrap_or_default()
+    pub(crate) fn key(&self) -> &str {
+        self.key.as_str()
     }
 
     /// Sets `umi.params[index]` to `value`; the next frame uses it.
@@ -77,9 +65,7 @@ mod tests {
             PostPass::new("sepia").map(|p| p.key().to_owned()),
             Some("sepia".to_owned())
         );
-        let longest = "a".repeat(MAX_KEY_LEN);
-        assert!(PostPass::new(&longest).is_some());
-        assert!(PostPass::new(&longest.repeat(2)).is_none());
+        assert!(PostPass::new(&"a".repeat(65)).is_none());
     }
 
     /// This test binary never runs `init`, so there is no host.
