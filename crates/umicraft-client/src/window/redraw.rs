@@ -179,12 +179,6 @@ impl App {
             .map(|world| world.environment(now, self.options.video.render_distance))
             .unwrap_or_default();
         environment.gamma = self.options.video.gamma;
-        // The camera is where it stays for this frame: the entities are made once.
-        if let Some(world) = self.world.as_ref() {
-            world.entities_into(now, self.camera.render_origin(), &mut self.frame.entities);
-        } else {
-            self.frame.entities.clear();
-        }
         self.update_server_pack();
         self.update_music(now);
         self.process_completions();
@@ -204,6 +198,14 @@ impl App {
             .map_or((self.args.width, self.args.height), Renderer::size);
         // The mods' camera layers move what is drawn, never the player.
         self.place_mod_camera(elapsed, now);
+        // The camera is where it stays for this frame: the entities are made once,
+        // relative to its render origin. After the camera layers, which may move the
+        // origin: built before, every entity would shift with the camera.
+        if let Some(world) = self.world.as_ref() {
+            world.entities_into(now, self.camera.render_origin(), &mut self.frame.entities);
+        } else {
+            self.frame.entities.clear();
+        }
         // The camera is final: the external mods see it in `Frame` and draw
         // their widgets with it, before the HUD is built.
         self.publish_frame((width, height));
