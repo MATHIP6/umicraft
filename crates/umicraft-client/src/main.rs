@@ -37,6 +37,10 @@ fn main() -> ExitCode {
         }
     };
 
+    // Ticks wait for their time with a sleep; a 1 ms timer period keeps them
+    // on time on Windows (timer_resolution.rs).
+    let _timer = umicraft_client::timer_resolution::TimerResolution::raise();
+
     if args.profile {
         umicraft_core::profiling::set_enabled(true);
     }

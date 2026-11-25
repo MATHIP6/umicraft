@@ -34,7 +34,11 @@ pub fn spawn(
 ) -> Result<JoinHandle<()>, ClientError> {
     let handle = std::thread::Builder::new()
         .name("umicraft-net".to_string())
-        .spawn(move || run_thread(config, events, commands, &counters))
+        .spawn(move || {
+            // Packets, Keep Alive included, are read as soon as they arrive.
+            crate::thread_priority::set_current(crate::thread_priority::Priority::AboveNormal);
+            run_thread(config, events, commands, &counters);
+        })
         .map_err(|error| ClientError::Network(format!("spawn network thread: {error}")))?;
     Ok(handle)
 }
