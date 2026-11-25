@@ -20,7 +20,7 @@ use super::creative_events::apply_creative_event;
 use super::inventory_events::{apply_inventory_action, report_inventory_opened};
 use super::messages::{GameEvent, RenderEvent};
 use super::net::handle_net;
-use super::publish::{publish_inventory, publish_look, publish_status};
+use super::publish::{publish_chunks, publish_inventory, publish_look, publish_status};
 use super::session::GameChannels;
 use super::state::Game;
 use super::tick::tick;
@@ -116,6 +116,10 @@ pub(super) fn run(
             break;
         }
         queue.flush();
+        // Chunks that arrived go to the renderer now, not at the next tick.
+        if events_processed > 0 {
+            publish_chunks(&mut game, &chunks);
+        }
 
         game.metrics.net_queue_len = events.len();
 
