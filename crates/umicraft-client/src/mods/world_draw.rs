@@ -22,6 +22,11 @@ pub(crate) struct ModWorldFrame {
 }
 
 impl ModWorldFrame {
+    /// The entities the layers marked this frame, in mod load order.
+    pub(crate) fn highlights(&self) -> &[umicraft_modhost::Highlight] {
+        &self.draw.highlights
+    }
+
     /// Hands the geometry to `renderer`, relative to `origin`, with widths scaled
     /// by `gui_scale` screen pixels per GUI pixel.
     pub(crate) fn upload(&mut self, origin: DVec3, gui_scale: f32, renderer: &mut Renderer) {

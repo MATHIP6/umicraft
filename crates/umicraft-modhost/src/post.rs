@@ -8,7 +8,8 @@
 //! renderer compiles the same composed text, which is why the checks are strict: the
 //! module must offer exactly the two entry points the renderer binds and no resource
 //! the renderer does not provide. A shader written for API 1.0 never mentions the
-//! depth binding added by 1.1 and validates unchanged.
+//! depth binding added by 1.1 nor the entity mask added by 1.4 (ADR-0097) and
+//! validates unchanged.
 
 use naga::valid::{Capabilities, ValidationFlags, Validator};
 use naga::ShaderStage;
@@ -26,11 +27,13 @@ pub const PRELUDE: &str = r"struct UmiPost {
     frame: u32,
     params: array<vec4<f32>, 4>,
     depth: vec4<f32>,
+    mask: vec4<f32>,
 };
 @group(0) @binding(0) var umi_scene: texture_2d<f32>;
 @group(0) @binding(1) var umi_sampler: sampler;
 @group(0) @binding(2) var<uniform> umi: UmiPost;
 @group(0) @binding(3) var umi_depth: texture_depth_2d;
+@group(0) @binding(4) var umi_entity_mask: texture_2d<f32>;
 
 struct UmiVertexOut {
     @builtin(position) position: vec4<f32>,
@@ -60,7 +63,7 @@ fn umi_linear_depth(uv: vec2<f32>) -> f32 {
 const VERTEX_ENTRY: &str = "umi_vs";
 const FRAGMENT_ENTRY: &str = "fs_main";
 /// The bindings of the prelude, all in group 0.
-const PRELUDE_BINDINGS: [(u32, u32); 4] = [(0, 0), (0, 1), (0, 2), (0, 3)];
+const PRELUDE_BINDINGS: [(u32, u32); 5] = [(0, 0), (0, 1), (0, 2), (0, 3), (0, 4)];
 
 /// Why a post-process shader was refused.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -86,7 +89,7 @@ pub enum PostShaderError {
         found: Vec<String>,
     },
     /// The shader declares a resource the pass is not given.
-    #[error("resource @group({group}) @binding({binding}) is not provided; only the prelude's four exist")]
+    #[error("resource @group({group}) @binding({binding}) is not provided; only the prelude's five exist")]
     ExtraResource {
         /// Bind group of the extra resource.
         group: u32,
@@ -159,12 +162,20 @@ fn check_entry_points(module: &naga::Module) -> Result<(), PostShaderError> {
     })
 }
 
+/// Every bound global must be one of the prelude's: a binding outside the prelude,
+/// or a second global on a prelude binding, is an extra resource.
 fn check_resources(module: &naga::Module) -> Result<(), PostShaderError> {
+    let mut seen = Vec::with_capacity(PRELUDE_BINDINGS.len());
     let extra = module
         .global_variables
         .iter()
         .filter_map(|(_, global)| global.binding)
-        .find(|binding| !PRELUDE_BINDINGS.contains(&(binding.group, binding.binding)));
+        .find(|binding| {
+            let key = (binding.group, binding.binding);
+            let known = PRELUDE_BINDINGS.contains(&key) && !seen.contains(&key);
+            seen.push(key);
+            !known
+        });
     match extra {
         Some(binding) => Err(PostShaderError::ExtraResource {
             group: binding.group,
@@ -246,12 +257,12 @@ fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {
 
     #[test]
     fn a_storage_buffer_is_refused() {
-        let storage = format!("@group(0) @binding(4) var<storage, read> data: array<f32>;\n{GREY}");
+        let storage = format!("@group(0) @binding(5) var<storage, read> data: array<f32>;\n{GREY}");
         assert_eq!(
             validate(&storage),
             Err(PostShaderError::ExtraResource {
                 group: 0,
-                binding: 4
+                binding: 5
             })
         );
     }
@@ -275,15 +286,38 @@ fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {
     }
 
     #[test]
-    fn a_resource_at_binding_4_is_refused() {
-        let extra = format!("@group(0) @binding(4) var extra: texture_2d<f32>;\n{GREY}");
+    fn a_resource_at_binding_5_is_refused() {
+        let extra = format!("@group(0) @binding(5) var extra: texture_2d<f32>;\n{GREY}");
         assert_eq!(
             validate(&extra),
+            Err(PostShaderError::ExtraResource {
+                group: 0,
+                binding: 5
+            })
+        );
+    }
+
+    #[test]
+    fn a_second_resource_on_a_prelude_binding_is_refused() {
+        let twin = format!("@group(0) @binding(4) var twin: texture_2d<f32>;\n{GREY}");
+        assert_eq!(
+            validate(&twin),
             Err(PostShaderError::ExtraResource {
                 group: 0,
                 binding: 4
             })
         );
+    }
+
+    #[test]
+    fn a_shader_reading_the_entity_mask_validates() {
+        let outline = "@fragment
+fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {
+    let c = textureSample(umi_scene, umi_sampler, in.uv);
+    let m = textureSample(umi_entity_mask, umi_sampler, in.uv);
+    return vec4<f32>(mix(c.rgb, m.rgb, m.a * umi.mask.x), c.a);
+}";
+        assert!(validate(outline).is_ok());
     }
 
     #[test]

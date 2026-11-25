@@ -27,6 +27,7 @@ use crate::cave_graph::CaveGraph;
 use crate::chunk_pass::{cutout_layers, QuadIndices};
 use crate::clouds::CloudRenderer;
 use crate::dynamic_blocks::MovingBlocksPass;
+use crate::entity_mask::EntityMaskRenderer;
 use crate::entity_pass::EntityRenderer;
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
@@ -316,6 +317,8 @@ impl Renderer {
         let outline = LineRenderer::new(&device, &camera_layout, format, SELECTION_EDGES);
         let debug_lines = LineRenderer::new(&device, &camera_layout, format, MAX_DEBUG_LINES);
         let mod_world = ModWorldRenderer::new(&device, &camera_layout, format);
+        let entity_mask =
+            EntityMaskRenderer::new(&device, &camera_layout, entity_renderer.texture_layout());
         let weather = WeatherRenderer::new(&device, &queue, &camera_layout, format);
         let particles = ParticleRenderer::new(&device, &queue, &terrain_layout, format);
         let screen = ScreenRenderer::new(&device, &queue, &terrain_layout, format);
@@ -481,6 +484,7 @@ impl Renderer {
             outline,
             debug_lines,
             mod_world,
+            entity_mask,
             scene_blur,
             motion_blur: MotionBlur::new(format),
             background_blur: false,

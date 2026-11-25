@@ -17,6 +17,22 @@ impl Renderer {
         self.entity_batches.set(&self.device, &self.queue, batches);
     }
 
+    /// Uploads the entities the mods marked for the mask of their post passes
+    /// (API 1.4): vertices made with [`mask_vertex`](crate::mask_vertex),
+    /// `tested` ones drawn where the world shows them, `through` ones whole.
+    /// `marked` is how many entities they are, which the passes read as
+    /// `umi.mask.y`.
+    pub fn upload_mask_entities(
+        &mut self,
+        tested: &[(&[EntityVertex], &wgpu::BindGroup)],
+        through: &[(&[EntityVertex], &wgpu::BindGroup)],
+        marked: u32,
+    ) {
+        self.entity_mask
+            .set(&self.device, &self.queue, tested, through);
+        self.post_chain.set_marked(marked);
+    }
+
     /// Uploads the glowing entity layers (eyes, charge, aura, glint) to be
     /// drawn after the entities. The `light` of their vertices is the tint
     /// (bits 0..=23, `0xBBGGRR`) and bit 24 squares the colour.

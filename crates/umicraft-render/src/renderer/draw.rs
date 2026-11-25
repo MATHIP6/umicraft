@@ -204,6 +204,16 @@ impl Renderer {
         blur: bool,
     ) -> wgpu::RenderPass<'a> {
         if post {
+            // The mask the passes read: the marked entities, against the depth of
+            // the finished world (API 1.4).
+            if let Some(mask) = self.post_chain.mask_view() {
+                self.entity_mask.render(
+                    encoder,
+                    mask,
+                    &self.depth_view,
+                    &self.local_camera_bind_group,
+                );
+            }
             self.post_chain.run(
                 encoder,
                 (

@@ -120,6 +120,8 @@ pub struct EntityTextures {
     /// The chests of the frame, meshed by the block-entity renderer and drawn
     /// with the entities (P7c). Taken by the next upload.
     block_entities: RefCell<BlockEntityMeshes>,
+    /// The entities the mods marked for the mask of their post passes (API 1.4).
+    marks: RefCell<super::EntityMarks>,
 }
 
 impl EntityTextures {
@@ -154,6 +156,7 @@ impl EntityTextures {
             shadows_enabled: Cell::new(true),
             camera: Cell::new(glam::Vec3::ZERO),
             hand_swing: Cell::new(0.0),
+            marks: RefCell::default(),
             appearance: Cell::new(None),
             block_entities: RefCell::default(),
         }
@@ -211,6 +214,12 @@ impl EntityTextures {
     /// that the experience orbs face.
     pub fn set_view_pitch(&self, pitch: f32) {
         self.view_pitch.set(pitch);
+    }
+
+    /// Sets the entities the mods marked this frame (API 1.4); the next
+    /// [`mesh_and_upload`](Self::mesh_and_upload) draws them into the mask.
+    pub fn set_marks(&self, highlights: &[umicraft_modhost::Highlight]) {
+        self.marks.borrow_mut().set(highlights);
     }
 
     /// Sets where the player is and looks (the space of the entity snapshots), to
@@ -406,6 +415,7 @@ impl EntityTextures {
                 style: self.biped_style.get(),
             },
             self.cull_view.get(),
+            &self.marks.borrow(),
         );
         let apparition = self.appearance.get().map(|progress| {
             super::appearance::elder_guardian(
@@ -440,6 +450,12 @@ impl EntityTextures {
         }
         let shadows = bound_batches(&meshed.shadows, &textures);
         renderer.upload_shadow_entities(&shadows);
+        let [tested, through] = &meshed.mask;
+        renderer.upload_mask_entities(
+            &bound_batches(tested, &textures),
+            &bound_batches(through, &textures),
+            meshed.marked,
+        );
     }
 
     /// The face of the skin at `url` for a tab list head, once it is downloaded,
@@ -470,6 +486,7 @@ impl EntityTextures {
                 ..super::Viewer::default()
             },
             None,
+            &super::EntityMarks::default(),
         );
         self.compose_missing_coats(meshed.solid.keys(), renderer);
         let textures = self.textures.borrow();

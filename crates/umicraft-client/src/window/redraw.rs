@@ -415,6 +415,7 @@ impl App {
                     .map(u128::from_be_bytes),
             );
             entity_textures.set_cull_view(self.camera.relative_eye(), self.camera.forward());
+            entity_textures.set_marks(self.mod_world.highlights());
             entity_textures.set_viewer_spectator(
                 umicraft_game::gamemode::GameMode::from_wire(world.status().gamemode)
                     == umicraft_game::gamemode::GameMode::Spectator,

@@ -52,10 +52,11 @@ pub struct PostPassFrame {
     pub params: [[f32; 4]; 4],
 }
 
-/// The uniform of a pass: the `UmiPost` struct of the prelude, 96 bytes.
+/// The uniform of a pass: the `UmiPost` struct of the prelude, 112 bytes.
 ///
-/// `depth` closes the struct (offset 80, a 16-aligned `vec4`), so a 1.0 shader's
-/// view of the earlier fields is unchanged.
+/// Each API version only appended a 16-aligned `vec4` (`depth` at 80 in 1.1,
+/// `mask` at 96 in 1.4), so an older shader's view of the earlier fields is
+/// unchanged.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub(crate) struct PostUniform {
@@ -65,6 +66,8 @@ pub(crate) struct PostUniform {
     params: [[f32; 4]; 4],
     /// `x` near, `y` far, `z` 1.0 when `umi_depth` is the real scene depth, `w` unused.
     depth: [f32; 4],
+    /// `x` 1.0 when an entity is marked this frame, `y` how many (API 1.4).
+    mask: [f32; 4],
 }
 
 /// Where a pass reads and writes: the `scene` texture or the extra target.
@@ -109,11 +112,15 @@ struct PassGpu {
     groups: Option<[wgpu::BindGroup; 2]>,
 }
 
-/// The extra full-size target of the ping-pong.
+/// A full-size target: the extra one of the ping-pong, or the entity mask.
 struct Extra {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
 }
+
+/// The format of the entity mask (API 1.4): the colour and opacity a mod gave a
+/// marked entity.
+pub(crate) const MASK_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// The post passes of the mods and the target they ping-pong through.
 pub(crate) struct PostChain {
@@ -135,6 +142,11 @@ pub(crate) struct PostChain {
     active: usize,
     /// Present only while at least one pass compiled.
     extra: Option<Extra>,
+    /// The entity mask the passes read as `umi_entity_mask` (API 1.4); present
+    /// only while at least one pass compiled, like `extra`.
+    mask: Option<Extra>,
+    /// How many entities the mask holds this frame.
+    marked: u32,
 }
 
 impl PostChain {
@@ -164,7 +176,19 @@ impl PostChain {
             enabled: Vec::new(),
             active: 0,
             extra: None,
+            mask: None,
+            marked: 0,
         }
+    }
+
+    /// The view the entity mask is drawn into, while a pass exists to read it.
+    pub(crate) fn mask_view(&self) -> Option<&wgpu::TextureView> {
+        self.mask.as_ref().map(|mask| &mask.view)
+    }
+
+    /// Records how many entities the mask holds this frame, for `umi.mask`.
+    pub(crate) fn set_marked(&mut self, marked: u32) {
+        self.marked = marked;
     }
 
     /// Whether at least one pass runs this frame.
@@ -277,25 +301,35 @@ impl PostChain {
         let depth = depth.unwrap_or(&self.placeholder_depth);
         if self.passes.iter().all(Option::is_none) {
             self.extra = None;
+            self.mask = None;
             return;
         }
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("post extra target"),
-            size: wgpu::Extent3d {
-                width: self.size.0,
-                height: self.size.1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let target = |label, format, usage| {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d {
+                    width: self.size.0,
+                    height: self.size.1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | usage,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            Extra { texture, view }
+        };
+        let extra = target(
+            "post extra target",
+            self.format,
+            wgpu::TextureUsages::COPY_SRC,
+        );
+        let mask = target("entity mask", MASK_FORMAT, wgpu::TextureUsages::empty());
         for pass in self.passes.iter_mut().flatten() {
             let group = |source: &wgpu::TextureView| {
                 device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -318,12 +352,17 @@ impl PostChain {
                             binding: 3,
                             resource: wgpu::BindingResource::TextureView(depth),
                         },
+                        wgpu::BindGroupEntry {
+                            binding: 4,
+                            resource: wgpu::BindingResource::TextureView(&mask.view),
+                        },
                     ],
                 })
             };
-            pass.groups = Some([group(scene), group(&view)]);
+            pass.groups = Some([group(scene), group(&extra.view)]);
         }
-        self.extra = Some(Extra { texture, view });
+        self.extra = Some(extra);
+        self.mask = Some(mask);
     }
 
     /// Follows a window resize: the extra target and the groups are rebuilt
@@ -346,6 +385,12 @@ impl PostChain {
         let time = self.started.elapsed().as_secs_f32();
         let resolution = [self.size.0 as f32, self.size.1 as f32];
         let depth = [NEAR, FAR, f32::from(u8::from(self.depth_valid)), 0.0];
+        let mask = [
+            f32::from(u8::from(self.marked > 0)),
+            self.marked as f32,
+            0.0,
+            0.0,
+        ];
         self.active = 0;
         for (index, enabled) in self.enabled.iter_mut().enumerate() {
             let frame = frames.get(index).filter(|frame| frame.enabled);
@@ -361,6 +406,7 @@ impl PostChain {
                 frame: self.frame,
                 params: frame.params,
                 depth,
+                mask,
             };
             queue.write_buffer(&pass.uniform, 0, bytemuck::bytes_of(&uniform));
         }
@@ -451,7 +497,7 @@ fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     })
 }
 
-fn layout_entries() -> [wgpu::BindGroupLayoutEntry; 4] {
+fn layout_entries() -> [wgpu::BindGroupLayoutEntry; 5] {
     let entry = |binding, ty| wgpu::BindGroupLayoutEntry {
         binding,
         visibility: wgpu::ShaderStages::FRAGMENT,
@@ -487,6 +533,14 @@ fn layout_entries() -> [wgpu::BindGroupLayoutEntry; 4] {
                 multisampled: false,
             },
         ),
+        entry(
+            4,
+            wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+        ),
     ]
 }
 
@@ -503,11 +557,13 @@ const PRELUDE_TEXT: &str = r#"struct UmiPost {
     frame: u32,
     params: array<vec4<f32>, 4>,
     depth: vec4<f32>,
+    mask: vec4<f32>,
 };
 @group(0) @binding(0) var umi_scene: texture_2d<f32>;
 @group(0) @binding(1) var umi_sampler: sampler;
 @group(0) @binding(2) var<uniform> umi: UmiPost;
 @group(0) @binding(3) var umi_depth: texture_depth_2d;
+@group(0) @binding(4) var umi_entity_mask: texture_2d<f32>;
 
 struct UmiVertexOut {
     @builtin(position) position: vec4<f32>,
@@ -560,13 +616,14 @@ fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {
     }
 
     #[test]
-    fn the_uniform_is_96_bytes_like_the_prelude_struct() {
-        assert_eq!(std::mem::size_of::<PostUniform>(), 96);
+    fn the_uniform_is_112_bytes_like_the_prelude_struct() {
+        assert_eq!(std::mem::size_of::<PostUniform>(), 112);
         assert_eq!(std::mem::offset_of!(PostUniform, resolution), 0);
         assert_eq!(std::mem::offset_of!(PostUniform, time), 8);
         assert_eq!(std::mem::offset_of!(PostUniform, frame), 12);
         assert_eq!(std::mem::offset_of!(PostUniform, params), 16);
         assert_eq!(std::mem::offset_of!(PostUniform, depth), 80);
+        assert_eq!(std::mem::offset_of!(PostUniform, mask), 96);
     }
 
     #[test]
@@ -692,6 +749,17 @@ fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {
             .find(|(_, global)| global.binding.as_ref().is_some_and(|b| b.binding == 3))
             .expect("binding 3");
         assert_eq!(depth.name.as_deref(), Some("umi_depth"));
+    }
+
+    #[test]
+    fn the_prelude_declares_the_entity_mask() {
+        let module = module();
+        let (_, mask) = module
+            .global_variables
+            .iter()
+            .find(|(_, global)| global.binding.as_ref().is_some_and(|b| b.binding == 4))
+            .expect("binding 4");
+        assert_eq!(mask.name.as_deref(), Some("umi_entity_mask"));
     }
 
     #[test]

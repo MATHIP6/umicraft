@@ -33,6 +33,7 @@ use crate::cave_graph::CaveGraph;
 use crate::chunk_pass::QuadIndices;
 use crate::clouds::CloudRenderer;
 use crate::dynamic_blocks::MovingBlocksPass;
+use crate::entity_mask::EntityMaskRenderer;
 use crate::entity_pass::EntityRenderer;
 use crate::environment::RenderEnvironment;
 use crate::error::RenderError;
@@ -374,6 +375,8 @@ pub struct Renderer {
     debug_lines: LineRenderer,
     /// The lines and shapes the mods draw in the world (API 1.4).
     mod_world: ModWorldRenderer,
+    /// The entities the mods marked for the mask of their post passes (API 1.4).
+    entity_mask: EntityMaskRenderer,
     /// The blur of the game behind a menu, and whether a menu asks for it.
     scene_blur: SceneBlur,
     /// The motion blur of the world (the Motion Blur mod).

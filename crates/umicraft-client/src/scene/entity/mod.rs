@@ -35,6 +35,7 @@ mod glow;
 mod guardian_beam;
 mod hand;
 mod horse_coat;
+mod marks;
 mod mobs;
 mod mushrooms;
 mod paintings;
@@ -58,12 +59,13 @@ use std::collections::HashMap;
 use glam::{Mat4, Vec3};
 use umicraft_game::entity::{EntityKind, EntityRenderSnapshot};
 use umicraft_model::entity::{BipedStyle, ModelVertex, TextureSlot};
-use umicraft_render::EntityVertex;
+use umicraft_render::{mask_vertex, EntityVertex};
 
 pub(crate) use animals::WITCH_SCALE;
 pub use capes::{CapeSettings, OwnCape};
 pub use cull::CullView;
 pub use hand::hand_vertices;
+pub(crate) use marks::EntityMarks;
 pub(crate) use mobs::posed_humanoid_mob;
 pub(crate) use player::{player_head, posed_player};
 pub(crate) use pose::arm_pose;
@@ -86,6 +88,7 @@ pub fn mesh_entities(
         Eye::default(),
         Viewer::default(),
         None,
+        &EntityMarks::default(),
     )
     .solid
 }
@@ -137,6 +140,11 @@ pub(crate) struct MeshedEntities {
     tinted: HashMap<TextureSlot, Vec<EntityVertex>>,
     /// The shadows under the entities.
     pub(crate) shadows: HashMap<TextureSlot, Vec<EntityVertex>>,
+    /// The models of the entities the mods marked, as mask vertices: depth-tested
+    /// ones first, then those drawn through the world (API 1.4).
+    pub(crate) mask: [HashMap<TextureSlot, Vec<EntityVertex>>; 2],
+    /// How many entities the mask holds.
+    pub(crate) marked: u32,
 }
 
 /// [`mesh_entities`] with the downloaded skins and capes of players.
@@ -146,6 +154,7 @@ pub(super) fn mesh_entities_with(
     eye: Eye,
     viewer: Viewer,
     view: Option<CullView>,
+    marks: &EntityMarks,
 ) -> MeshedEntities {
     let (camera, view_yaw, view_pitch) = (eye.position, eye.yaw, eye.pitch);
     let mut solid: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
@@ -154,6 +163,8 @@ pub(super) fn mesh_entities_with(
     let mut ghost: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
     let mut tinted: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
     let mut shadows: HashMap<TextureSlot, Vec<EntityVertex>> = HashMap::new();
+    let mut mask: [HashMap<TextureSlot, Vec<EntityVertex>>; 2] = Default::default();
+    let mut marked = 0;
 
     for ent in snapshots {
         // A beam can be in view while its guardian is not
@@ -167,6 +178,8 @@ pub(super) fn mesh_entities_with(
         let matrix = transform::model_matrix(ent);
         let xform = MatrixTransform::new(matrix);
         let light = entity_light(ent);
+        let mark = marks.get(ent.id);
+        marked += u32::from(mark.is_some());
         for layer in mobs::build_entity_layers_for(ent, skins, viewer) {
             if let Some(glow) = layer.glow {
                 let word = glow.light_word();
@@ -191,12 +204,23 @@ pub(super) fn mesh_entities_with(
             };
             let dest = target.entry(layer.slot).or_default();
             dest.reserve(layer.vertices.len());
+            let start = dest.len();
             dest.extend(
                 layer
                     .vertices
                     .into_iter()
                     .map(|vertex| xform.transform(vertex, light)),
             );
+            if let Some(mark) = mark {
+                mask[usize::from(mark.through_walls)]
+                    .entry(layer.slot)
+                    .or_default()
+                    .extend(
+                        dest[start..]
+                            .iter()
+                            .map(|&vertex| mask_vertex(vertex, mark.color)),
+                    );
+            }
         }
         fire::add_fire(&mut solid, ent, view_yaw);
         arrows::add_flying_arrow(&mut solid, ent, light);
@@ -219,6 +243,8 @@ pub(super) fn mesh_entities_with(
         ghost,
         tinted,
         shadows,
+        mask,
+        marked,
     }
 }
 
@@ -392,6 +418,66 @@ mod world_light_tests {
 mod tests {
     use super::*;
     use umicraft_game::entity::{EntityFlags, EntityId, EntityKind};
+
+    /// A zombie (id 1) and a cow (id 2), as the store snapshots them.
+    fn zombie_and_cow() -> Vec<EntityRenderSnapshot> {
+        let mut store = umicraft_game::entity::EntityStore::new();
+        for (id, mob_type) in [(1, 54), (2, 92)] {
+            store.spawn_mob(
+                EntityId(id),
+                mob_type,
+                glam::DVec3::new(f64::from(id) * 3.0, 64.0, 0.0),
+                0.0,
+                0.0,
+                0.0,
+                Vec3::ZERO,
+                EntityFlags::default(),
+            );
+        }
+        store.snapshots(1.0)
+    }
+
+    #[test]
+    fn a_marked_entity_is_meshed_again_into_its_side_of_the_mask() {
+        let snapshots = zombie_and_cow();
+        let mut marks = EntityMarks::default();
+        marks.set(&[umicraft_modhost::Highlight {
+            entity: 1,
+            color: [1.0, 0.0, 0.0, 1.0],
+            through_walls: true,
+        }]);
+        let meshed = mesh_entities_with(
+            &snapshots,
+            &skins::NoSkins,
+            Eye::default(),
+            Viewer::default(),
+            None,
+            &marks,
+        );
+        assert_eq!(meshed.marked, 1);
+        assert!(meshed.mask[0].is_empty(), "nothing depth-tested");
+        let zombie = &meshed.mask[1][&TextureSlot::Zombie];
+        assert_eq!(zombie.len(), meshed.solid[&TextureSlot::Zombie].len());
+        assert!(zombie
+            .iter()
+            .zip(&meshed.solid[&TextureSlot::Zombie])
+            .all(|(mask, solid)| mask.position == solid.position && mask.uv == solid.uv));
+        assert!(zombie.iter().all(|vertex| vertex.normal == [1.0, 0.0, 0.0]));
+        assert!(
+            !meshed.mask[1].contains_key(&TextureSlot::Cow),
+            "the cow is not marked"
+        );
+        let unmarked = mesh_entities_with(
+            &snapshots,
+            &skins::NoSkins,
+            Eye::default(),
+            Viewer::default(),
+            None,
+            &EntityMarks::default(),
+        );
+        assert_eq!(unmarked.marked, 0);
+        assert!(unmarked.mask.iter().all(HashMap::is_empty));
+    }
 
     #[test]
     fn empty_snapshots_produce_empty_batches() {

@@ -474,6 +474,11 @@ impl EntityRenderer {
         }
     }
 
+    /// The layout of an entity texture's bind group (texture and sampler).
+    pub(crate) fn texture_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.texture_layout
+    }
+
     /// Renders entity batches.
     pub fn render<'a>(
         &self,
@@ -497,7 +502,7 @@ impl EntityRenderer {
 }
 
 /// Draws `batches` with `pipeline`: one vertex buffer and one texture each.
-fn draw_batches<'a>(
+pub(crate) fn draw_batches<'a>(
     pass: &mut wgpu::RenderPass<'_>,
     pipeline: &wgpu::RenderPipeline,
     camera_bind_group: &wgpu::BindGroup,
