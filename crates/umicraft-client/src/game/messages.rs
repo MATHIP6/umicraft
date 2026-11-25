@@ -76,6 +76,10 @@ pub enum GameEvent {
     ParticleSetting(u8),
     /// The 1.7 animations the built-in mod selects (ADR-0079).
     LegacyAnimations(umicraft_game::legacy::LegacyAnimations),
+    /// Whether a mod's camera layer moved the camera away from where the client put
+    /// it (an orbit, a free camera): the body of the player is then drawn, and the
+    /// first-person hand is not (ADR-0096).
+    DetachedCamera(bool),
     /// A line the client shows in its own chat (the completion list).
     LocalChat(String),
     /// F3 + D: empties the chat history.

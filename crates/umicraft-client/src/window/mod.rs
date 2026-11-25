@@ -243,6 +243,9 @@ struct App {
     /// Whether a camera layer captured the input in the last placed frame (API 1.3):
     /// the movement keys and the mouse look then turn the camera, not the player.
     camera_capture: bool,
+    /// Whether the game thread was told that a camera layer moved the camera away
+    /// from the player, so it draws the body (ADR-0096).
+    camera_detached: bool,
     /// The threads still dropping stopped sessions; joined at exit before the
     /// mods shut down, because their game threads may still dispatch.
     releasing: Vec<std::thread::JoinHandle<()>>,

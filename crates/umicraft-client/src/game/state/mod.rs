@@ -124,6 +124,9 @@ pub(super) struct Game {
     pub(super) item_use: ItemUse,
     /// Where the camera sits (`F5`).
     pub(super) perspective: Perspective,
+    /// Whether a mod's camera layer moved the camera away from the player
+    /// (ADR-0096): the body is drawn as in the third person, the hand is not.
+    pub(super) camera_detached: bool,
     /// The animation state of the first-person hand.
     pub(super) hand: HandState,
     /// The 1.7 animations the built-in mod selects (ADR-0079).
@@ -222,6 +225,7 @@ impl Game {
             interaction: Interaction::new(),
             item_use: ItemUse::new(),
             perspective: Perspective::default(),
+            camera_detached: false,
             hand: HandState::new(),
             legacy: LegacyAnimations::default(),
             sneak_camera: SneakCamera::default(),

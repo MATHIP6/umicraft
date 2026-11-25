@@ -224,6 +224,7 @@ impl App {
             camera_layers,
             frame_look: (0.0, 0.0),
             camera_capture: false,
+            camera_detached: false,
             releasing: Vec::new(),
             post_frames: Vec::new(),
             options,

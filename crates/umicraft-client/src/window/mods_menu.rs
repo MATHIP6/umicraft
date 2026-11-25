@@ -21,7 +21,7 @@ use umicraft_ui::FontAtlas;
 
 use super::App;
 use crate::game::GameEvent;
-use crate::mods::camera::{camera_input, camera_of, place_camera};
+use crate::mods::camera::{camera_input, camera_moved, camera_of, place_camera};
 use crate::mods::external::ExternalMods;
 use crate::mods::external_menu;
 use crate::mods::hud::{item_of, mod_widget_view, mod_widget_views, screen_widget_view};
@@ -192,8 +192,11 @@ impl App {
         self.refresh_entity_snapshot(now);
         self.camera_capture = false;
         if self.world.is_none() {
+            // A new session's game thread starts with the body hidden.
+            self.camera_detached = false;
             return;
         }
+        let before = self.camera.eye();
         let input = camera_input(&self.key_state(), self.frame_look, elapsed);
         let Self {
             camera,
@@ -211,6 +214,12 @@ impl App {
                 render_bus.dispatch(&mut PreRender::new(camera_of(camera)));
             }
         });
+        let detached = camera_moved(before, self.camera.eye());
+        // Told on a change only; a full inbox is retried on the next frame.
+        if detached != self.camera_detached && self.send_event(GameEvent::DetachedCamera(detached))
+        {
+            self.camera_detached = detached;
+        }
     }
 
     /// Sends this frame's `Frame` event, with the camera the frame is drawn with,

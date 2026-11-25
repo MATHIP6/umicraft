@@ -66,6 +66,17 @@ pub fn place_camera(chain: &CameraChain, camera: &mut Camera, input: &UmiCameraI
     captured
 }
 
+/// How far a camera layer must move the eye, in blocks, for the camera to count as
+/// away from the player (the third person's own threshold).
+const DETACHED_DISTANCE: f64 = 0.05;
+
+/// Whether the layers moved the eye from `before` (where the client put it) to
+/// `after` far enough that the player's body should be drawn and the hand not.
+#[must_use]
+pub fn camera_moved(before: glam::DVec3, after: glam::DVec3) -> bool {
+    before.distance(after) > DETACHED_DISTANCE
+}
+
 /// What the player is given while a camera layer captures the input: `keys` with
 /// no movement key held, as if the player let go of them. Attack and use stay, so
 /// the player can still act where it looks.
@@ -167,6 +178,14 @@ mod tests {
         assert_eq!(after.eye, [0.0, 100.0, 0.0]);
         assert!((after.yaw - 90.0).abs() < 1e-3 && (after.pitch + 45.0).abs() < 1e-3);
         assert!((after.fov_y - 50.0).abs() < 1e-3, "no sprint factor on top");
+    }
+
+    #[test]
+    fn only_a_real_move_of_the_eye_detaches_the_camera() {
+        let eye = glam::DVec3::new(10.0, 64.0, -3.0);
+        assert!(!camera_moved(eye, eye));
+        assert!(!camera_moved(eye, eye + glam::DVec3::Y * 0.01));
+        assert!(camera_moved(eye, eye + glam::DVec3::X * 2.0));
     }
 
     #[test]

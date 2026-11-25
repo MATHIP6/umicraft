@@ -445,3 +445,34 @@ fn the_1_7_sneak_camera_rises_back_over_a_few_ticks() {
     let lowered = vanilla - eye_y(&game);
     assert!((lowered - 0.032).abs() < 1e-6, "{lowered}");
 }
+
+/// A mod's camera layer away from the head (an orbit, a free camera, ADR-0096)
+/// shows the body like the third person and hides the hand, without moving the
+/// camera of the game.
+#[test]
+fn a_detached_mod_camera_shows_the_body_and_hides_the_hand() {
+    let mut game = game_on_floor_with(BlockState::AIR);
+    game.entity_id = 1;
+    let (frames, received) = mpsc::sync_channel(16);
+    let frame = |game: &Game| {
+        publish_frame(game, &frames, Instant::now());
+        match received.try_recv() {
+            Ok(RenderEvent::Frame(frame)) => frame,
+            _ => panic!("a frame was expected"),
+        }
+    };
+    follow_body(&mut game);
+    tick_hand(&mut game);
+    let attached = frame(&game);
+    assert!(attached.entities.is_empty() && attached.state.effects.hand.visible);
+
+    game.camera_detached = true;
+    let detached = frame(&game);
+    assert_eq!(detached.entities.len(), 1);
+    assert_eq!(detached.entities[0].id, EntityId(1));
+    assert!(!detached.state.effects.hand.visible);
+    assert_eq!(
+        detached.state.position, attached.state.position,
+        "the game's own camera stays at the head"
+    );
+}

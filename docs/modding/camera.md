@@ -72,6 +72,15 @@ and `camera_next(cx)` to run what is inside.
   (since 1.1 this is true in the third person too). To move the player, wrap
   `player_physics` as well (`movement = true`).
 
+## The player's body
+
+While the layers keep the eye more than 0.05 block from where the client put it (an
+orbit, a free camera), the player's own body is drawn, with its skin, as in the third
+person, and the first-person hand is not. This follows the camera of each frame, with
+the game's one-tick delay; nothing to declare. The other entities are placed against
+the final camera of the frame, so they stay where they are in the world whatever the
+layers do.
+
 ## Capturing the input (API 1.3)
 
 `Camera::capture_input()` (C: `camera_capture(cx)`, its own `cx` only, else `DENIED`)

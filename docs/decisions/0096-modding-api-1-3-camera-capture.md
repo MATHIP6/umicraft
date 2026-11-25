@@ -40,6 +40,13 @@ itself (owner decision of ADR-0094).
 - A free camera is a wrapper that calls `next`, flies its own eye from the input
   and calls `capture_input` (example `mods/examples/free_cam`).
 - The world only exists where the server sent chunks, around the player.
+- While a layer keeps the eye away from where the client put it (more than 0.05
+  block, the third person's own threshold), the window tells the game thread, which
+  draws the local body (with its skin) and hides the hand, as in the third person.
+  Any camera layer benefits, the orbit too.
+- The entities of a frame are built after the camera layers, against the final
+  render origin. Built before (as in 1.1), they were offset by however far a layer
+  moved the camera and seemed to follow it.
 - The first frame after the key is pressed still goes to the player (one frame of
   input, at most a few hundredths of a block).
 - A 1.3 mod is refused by a 1.2 host; older mods load unchanged.

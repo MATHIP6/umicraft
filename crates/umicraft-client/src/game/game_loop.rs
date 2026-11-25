@@ -294,6 +294,10 @@ pub(super) fn handle_event(
             game.hand.set_legacy(legacy);
             false
         }
+        GameEvent::DetachedCamera(detached) => {
+            game.camera_detached = detached;
+            false
+        }
         GameEvent::LocalChat(text) => {
             let line = local_chat_line(&text);
             push_chat(game, line);

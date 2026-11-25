@@ -33,8 +33,10 @@ pub(super) fn player_view(game: &Game) -> Option<(RenderState, bool)> {
     }
     // MCP `EntityRenderer.renderHand`: only the first-person view of a
     // player who plays shows the hand.
+    // Nor does a camera a mod moved away from the head (ADR-0096).
     let hand_visible = followed.is_none()
         && game.perspective == Perspective::FirstPerson
+        && !game.camera_detached
         && game.gamemode != GameMode::Spectator;
     view.effects.hand = HandPose {
         visible: hand_visible,

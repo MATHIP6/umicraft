@@ -94,13 +94,16 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
             frame.ridden |= frame.id.0 == vehicle;
         }
     }
-    if first_person && game.perspective.shows_player() {
+    // The body is drawn when the camera is away from the head: the third person, or
+    // a mod's camera layer (an orbit, a free camera, ADR-0096).
+    let shows_body = game.perspective.shows_player() || game.camera_detached;
+    if first_person && shows_body {
         entities.push(game.body.frame_data());
     }
     // The line of the bobber of the local player ties to their rod, which is
     // not among the frames from the first person: the render thread places
     // that end from the camera of the frame.
-    if first_person && !game.perspective.shows_player() {
+    if first_person && !shows_body {
         for bobber in &mut entities {
             if bobber.kind == EntityKind::FishHook && bobber.object_data == game.entity_id {
                 bobber.tied_to_hand = true;
