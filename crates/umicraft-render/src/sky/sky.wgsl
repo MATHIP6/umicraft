@@ -48,6 +48,10 @@ fn vs_main(in: VertexIn) -> VertexOut {
     let relative = slot.model * vec4<f32>(in.position, 1.0);
     var out: VertexOut;
     out.position = slot.view_proj * relative;
+    // On the far plane (depth 1.0): the sky is drawn after the opaque
+    // terrain with a less-equal test, so only the pixels nothing covers run
+    // this shader. The layers still blend over the clear colour in order.
+    out.position.z = out.position.w;
     out.uv = in.uv;
     out.color = in.color * slot.tint;
     out.relative = relative.xyz;

@@ -134,7 +134,8 @@ fn blend_state(blend: Blend) -> wgpu::BlendState {
     }
 }
 
-/// The pipeline for `blend`: no culling, no depth write, depth test always.
+/// The pipeline for `blend`: no culling, no depth write, a less-equal depth
+/// test against the far plane (the sky is drawn after the opaque terrain).
 pub(super) fn pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
@@ -163,7 +164,9 @@ pub(super) fn pipeline(
         depth_stencil: Some(wgpu::DepthStencilState {
             format: crate::renderer::DEPTH_FORMAT,
             depth_write_enabled: Some(false),
-            depth_compare: Some(wgpu::CompareFunction::Always),
+            // The sky lies on the far plane and is drawn after the opaque
+            // terrain: only the uncovered pixels (depth still 1.0) pass.
+            depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
