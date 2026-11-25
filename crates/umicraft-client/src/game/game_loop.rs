@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 
 use umicraft_assets::profile_textures::AccountSkinFetcher;
 use umicraft_game::chat::commands;
+use umicraft_net::play::PlayEvent;
 
 use super::actions::handle_input;
 use super::chat::{local_chat_line, push_chat};
@@ -97,18 +98,66 @@ pub(super) fn run(
         let pacing = !period.is_zero();
         let mut events_processed = 0;
         let now = Instant::now();
+        // A pass also stops once the next tick is due (plus a little grace):
+        // chunk columns are decoded here, and on a two-core CPU a pass of a
+        // few chunk bulks ran past the tick, which then went out late and in
+        // a burst with the next one. Servers read a burst as a timer cheat,
+        // or the knockback in it as taken a tick late, and pulled the player
+        // back; the replies to their ping checks waited too. The rest of the
+        // events follow right after the tick, in order: the transaction
+        // replies keep the server aware of what the tick had seen.
+        let mut split = false;
         if !pacing || now >= next_drain || now >= next_tick {
-            while events_processed < MAX_EVENTS_PER_PASS {
+            let deadline = next_tick.max(now) + PASS_GRACE;
+            // Events that must still come before the tick when the pass is
+            // cut (`must_precede_tick`): every event up to the last of them
+            // is handled first, in order.
+            let mut must_finish = 0_usize;
+            loop {
+                let at_limit = events_processed >= MAX_EVENTS_PER_PASS;
+                let late = events_processed > 0 && Instant::now() >= deadline;
+                if must_finish == 0 && (at_limit || late) {
+                    // Vanilla handles every packet that arrived before the
+                    // tick (`Minecraft.runTick` runs the scheduled tasks
+                    // first). Cutting the pass put a knockback behind the
+                    // tick: it was applied a tick late, the knockback felt
+                    // heavy and the server pulled the player back. So the
+                    // pass only stops after the last knockback, explosion,
+                    // teleport or input already received.
+                    while let Ok(event) = events.try_recv() {
+                        deferred.push_back(event);
+                        if deferred.len() >= MAX_PEEKED_EVENTS {
+                            break;
+                        }
+                    }
+                    must_finish = deferred
+                        .iter()
+                        .rposition(|event| must_precede_tick(event, game.entity_id))
+                        .map_or(0, |index| index + 1);
+                    if must_finish == 0 {
+                        // A pass cut by its length leaves the slot open
+                        // (below); one cut by the tick is a split.
+                        split = !at_limit;
+                        break;
+                    }
+                }
                 let Some(event) = deferred.pop_front().or_else(|| events.try_recv().ok()) else {
                     break;
                 };
                 events_processed += 1;
+                // Once the last of them is handled, the deadline check above
+                // decides again whether the rest waits for the tick.
+                must_finish = must_finish.saturating_sub(1);
                 if dispatch(&mut game, event, &mut queue, &frames) {
                     ended = game.end.take();
                     break;
                 }
             }
-            if pacing && events_processed > 0 {
+            // A pass that stopped at its limit leaves the slot open: the
+            // rest of a burst (chunks, a crowd of moving players) comes in
+            // the next pass, not one frame later, so the knockback behind
+            // it is not delayed.
+            if pacing && events_processed > 0 && events_processed < MAX_EVENTS_PER_PASS && !split {
                 next_drain = Instant::now() + period;
             }
         }
@@ -147,7 +196,9 @@ pub(super) fn run(
         if now >= next_tick {
             continue;
         }
-        if events_processed == MAX_EVENTS_PER_PASS && !events.is_empty() {
+        if (events_processed >= MAX_EVENTS_PER_PASS || split)
+            && (!events.is_empty() || !deferred.is_empty())
+        {
             continue;
         }
 
@@ -190,6 +241,28 @@ pub(super) fn run(
 
     if let Some(reason) = ended {
         let _ = frames.send(RenderEvent::Ended(reason));
+    }
+}
+
+/// How far past the start of the next tick a pass of network events may
+/// run before it stops for the tick.
+const PASS_GRACE: Duration = Duration::from_millis(4);
+
+/// The most events a cut pass looks ahead at for [`must_precede_tick`].
+const MAX_PEEKED_EVENTS: usize = 4096;
+
+/// Whether `event` must be handled before the next tick even when the pass
+/// runs late: what moves the local player (its knockback, an explosion, a
+/// teleport, a respawn) and the player's own input. Heavy events such as
+/// chunks may wait until after the tick, unless one of these follows them.
+pub(super) fn must_precede_tick(event: &GameEvent, own_entity: i32) -> bool {
+    match event {
+        GameEvent::Input(_) => true,
+        GameEvent::Net(PlayEvent::EntityVelocity(packet)) => packet.entity_id == own_entity,
+        GameEvent::Net(
+            PlayEvent::Explosion(_) | PlayEvent::Placement(_) | PlayEvent::Respawn(_),
+        ) => true,
+        _ => false,
     }
 }
 
