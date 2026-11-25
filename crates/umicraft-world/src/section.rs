@@ -249,22 +249,23 @@ impl Section {
         set_nibble(data.as_mut_slice(), x, y, z, level);
     }
 
+    #[inline]
     fn state_at(&self, index: usize) -> BlockState {
         self.palette[self.read_entry(index) as usize]
     }
 
+    /// Hot path: every block read of the mesher, the physics and the light
+    /// engine ends here.
+    #[inline]
     fn read_entry(&self, index: usize) -> u16 {
-        let per_word = entries_per_word(self.bits);
-        let word = self.packed[index / per_word];
-        let shift = (index % per_word) as u32 * u32::from(self.bits);
-        ((word >> shift) & ((1u64 << self.bits) - 1)) as u16
+        let (word, shift) = word_and_shift(self.bits, index);
+        ((self.packed[word] >> shift) & ((1u64 << self.bits) - 1)) as u16
     }
 
     fn write_entry(&mut self, index: usize, entry: u16) {
-        let per_word = entries_per_word(self.bits);
-        let shift = (index % per_word) as u32 * u32::from(self.bits);
+        let (word, shift) = word_and_shift(self.bits, index);
         let mask = (1u64 << self.bits) - 1;
-        let word = &mut self.packed[index / per_word];
+        let word = &mut self.packed[word];
         *word = (*word & !(mask << shift)) | ((u64::from(entry) & mask) << shift);
     }
 
@@ -387,6 +388,41 @@ fn entries_per_word(bits: u8) -> usize {
     64 / usize::from(bits)
 }
 
+/// Shift of the fixed-point reciprocals in [`WORD_LAYOUT`].
+const RECIPROCAL_SHIFT: u32 = 20;
+
+/// For each index width `bits` (`1..=12`), the entries per word and
+/// `ceil(2^20 / entries_per_word)`.
+///
+/// `entries_per_word` is not a power of two for most widths (21, 12, 10, 9,
+/// 7, 6, 5), so `index / per_word` and `index % per_word` compiled to two
+/// hardware divisions on every block read. A multiply by the rounded-up
+/// reciprocal gives the same quotient for every index below 2^20 / 64 =
+/// 16 384, well above the 4 096 blocks of a section (checked for every width
+/// and every index by `word_layout_matches_the_division`).
+const WORD_LAYOUT: [(u32, u32); MAX_PALETTE_BITS as usize + 1] = {
+    let mut table = [(1, 1 << RECIPROCAL_SHIFT); MAX_PALETTE_BITS as usize + 1];
+    let mut bits = 1;
+    while bits <= MAX_PALETTE_BITS as usize {
+        let per_word = (64 / bits) as u32;
+        table[bits] = (per_word, (1u32 << RECIPROCAL_SHIFT).div_ceil(per_word));
+        bits += 1;
+    }
+    table
+};
+
+/// The word holding entry `index` and the bit offset of the entry in it:
+/// `(index / per_word, index % per_word * bits)` without a division.
+#[inline]
+fn word_and_shift(bits: u8, index: usize) -> (usize, u32) {
+    debug_assert!(index < BLOCKS_PER_SECTION);
+    let (per_word, reciprocal) = WORD_LAYOUT[usize::from(bits)];
+    let index = index as u32;
+    let word = (index * reciprocal) >> RECIPROCAL_SHIFT;
+    let slot = index - word * per_word;
+    (word as usize, slot * u32::from(bits))
+}
+
 fn word_count(bits: u8) -> usize {
     BLOCKS_PER_SECTION.div_ceil(entries_per_word(bits))
 }
@@ -426,6 +462,23 @@ mod tests {
         assert_eq!(section.block_light(1, 0, 0), 2);
         assert_eq!(section.sky_light(1, 3, 2), Some(15));
         assert_eq!(section.sky_light(0, 0, 0), Some(0));
+    }
+
+    #[test]
+    fn word_layout_matches_the_division() {
+        for bits in 1..=MAX_PALETTE_BITS {
+            let per_word = entries_per_word(bits);
+            for index in 0..BLOCKS_PER_SECTION {
+                assert_eq!(
+                    word_and_shift(bits, index),
+                    (
+                        index / per_word,
+                        (index % per_word) as u32 * u32::from(bits)
+                    ),
+                    "bits {bits}, index {index}"
+                );
+            }
+        }
     }
 
     #[test]
