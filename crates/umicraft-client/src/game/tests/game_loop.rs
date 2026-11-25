@@ -43,6 +43,12 @@ fn teleport_ping_pong(harness: &mut LoopHarness, window: std::time::Duration) ->
 /// Phase E.9, vanilla `runGameLoop`: network tasks are taken once per frame,
 /// so an endless teleport / confirmation exchange runs at the frame rate,
 /// never faster (at 50 frames per second, 20 ms: about 25 in half a second).
+///
+/// The slot also opens when a tick is due, so that the packets that arrived
+/// before a tick are handled before it (the ticks run on their own clock
+/// here, not inside the frame loop as in vanilla): at most one more
+/// exchange per tick, ten in half a second. The exchange stays bounded, far
+/// below the unpaced loop below.
 #[test]
 fn a_teleport_loop_runs_at_the_frame_rate() {
     let mut harness = LoopHarness::start(65_536);
@@ -53,7 +59,7 @@ fn a_teleport_loop_runs_at_the_frame_rate() {
     let count = teleport_ping_pong(&mut harness, window);
     let _ = harness.finish();
     assert!(
-        (15..=30).contains(&count),
+        (15..=36).contains(&count),
         "{count} confirmations in 500 ms at a 20 ms frame"
     );
 }
