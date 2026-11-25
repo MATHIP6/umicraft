@@ -131,11 +131,27 @@ impl Renderer {
     pub fn new_offscreen(width: u32, height: u32) -> Result<Self, RenderError> {
         let width = width.max(1);
         let height = height.max(1);
-        // From the environment, so `WGPU_BACKEND` picks the backend here as it
-        // does for the window.
-        let instance =
-            wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle_from_env());
-        let adapter = request_adapter(&instance, None)?;
+        // Direct3D 12 on Windows, as the window uses: the Vulkan driver of
+        // Intel's integrated GPUs (igvk64.dll) crashes the process here, so
+        // `--bench-scene` and the screenshots died without a word on a UHD
+        // 610. Every backend when no Direct3D 12 adapter answers. The
+        // environment still wins: `WGPU_BACKEND` picks the backend.
+        let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
+        if cfg!(windows) {
+            descriptor.backends = wgpu::Backends::DX12;
+        }
+        let instance = wgpu::Instance::new(descriptor.with_env());
+        let (instance, adapter) = match request_adapter(&instance, None) {
+            Ok(adapter) => (instance, adapter),
+            Err(_) if cfg!(windows) => {
+                let instance = wgpu::Instance::new(
+                    wgpu::InstanceDescriptor::new_without_display_handle_from_env(),
+                );
+                let adapter = request_adapter(&instance, None)?;
+                (instance, adapter)
+            }
+            Err(error) => return Err(error),
+        };
         let (device, queue) = request_device(&adapter)?;
         Self::create(
             instance,
