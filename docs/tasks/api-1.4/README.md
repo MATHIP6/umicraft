@@ -1,6 +1,6 @@
 # API 1.4 — combat facts, teams, HUD shapes, world layers and the entity mask
 
-Status: **in progress** (2026-11-25). Design: ADR-0097. Base: API 1.3 (ADR-0096).
+Status: **done** (2026-11-25). Design: ADR-0097. Base: API 1.3 (ADR-0096).
 
 | # | Phase | Acceptance | State |
 |---|---|---|---|
@@ -9,8 +9,8 @@ Status: **in progress** (2026-11-25). Design: ADR-0097. Base: API 1.3 (ADR-0096)
 | 1.4.2 | Entity facts: combat, effects of every entity, teams, visibility, local player | facts tests for each field; snapshot equals the query | done |
 | 1.4.3 | HUD: circle, polygon, clipping, thin lines | draw tests, UI tessellation tests | done |
 | 1.4.4 | World layers: registration, primitives, caps, render pipelines (depth on and off) | host tests of caps and refusals; renderer pipeline test | done |
-| 1.4.5 | Entity mask: highlights, mask pass, post binding 4 and `umi.mask` | highlight routing tests; 1.1 shaders still validate | |
-| 1.4.6 | `umicraft-modapi`: entity accessors, HUD shapes, `WorldCx`; example `entity_glow`; docs; template on 1.4; header | fmt, clippy `-D warnings`, workspace tests | |
+| 1.4.5 | Entity mask: highlights, mask pass, post binding 4 and `umi.mask` | highlight routing tests; 1.1 shaders still validate | done |
+| 1.4.6 | `umicraft-modapi`: entity accessors, HUD shapes, `WorldCx`; example `entity_glow`; docs; template on 1.4; header | fmt, clippy `-D warnings`, workspace tests | done |
 
 ## Frozen interface (spec §14 rule 11)
 

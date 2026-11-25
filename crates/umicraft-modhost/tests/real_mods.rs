@@ -24,13 +24,13 @@ use umicraft_builtin_mods::SettingValue;
 use umicraft_core::EventBus;
 use umicraft_modapi_sys::{
     UmiCameraInput, UmiEventId, UmiMode, UmiPhysicsInput, UmiPlayerPhysics, UmiRenderCamera,
-    UmiStatus, UMI_ENTITY_LIVING,
+    UmiStatus, UMI_ENTITY_LIVING, UMI_ENTITY_TEAMMATE,
 };
 use umicraft_modhost::{
     discover, library_file_name, platform_dir, resolve, with_entity_snapshot, with_world,
     ApiVersion, Arch, Candidate, ChatSend, CommandOutcome, EntitySnapshot, EntityView, EventThread,
     Frame, FrameCamera, FrameFacts, KeyPressed, LoadError, ModHost, ModId, Os, PacketReceived,
-    PostTick, PreTick, TrustList, WorldQuery,
+    PostTick, PreTick, TrustList, WorldDraw, WorldQuery,
 };
 
 /// The directory holding the built example libraries (`<target>/<profile>`).
@@ -60,6 +60,8 @@ fn built_libraries() -> &'static Path {
                 "umicraft-example-suite",
                 "-p",
                 "umicraft-example-free-cam",
+                "-p",
+                "umicraft-example-entity-glow",
                 "--offline",
             ])
             .status()
@@ -843,4 +845,73 @@ fn host_version() -> ApiVersion {
         major: umicraft_modapi_sys::UMI_API_VERSION.major,
         minor: umicraft_modapi_sys::UMI_API_VERSION.minor,
     }
+}
+
+/// The real `entity_glow` (API 1.4): its world layer reads the local player and the
+/// snapshot and marks, depth-tested, the living entities in range, in the colour
+/// the 1.4 facts give them; its pass validates against the 1.4 prelude.
+#[test]
+fn entity_glow_marks_the_living_entities_near_the_player() {
+    let tmp = TempDir::new();
+    install(&tmp.0, "entity_glow");
+    let candidates = discover(&tmp.0).into_iter().map(|d| Candidate {
+        manifest: d.manifest.unwrap(),
+        enabled: true,
+    });
+    let resolution = resolve(candidates, host_version());
+    let (mut host, failures) =
+        ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
+    assert!(failures.is_empty(), "{failures:?}");
+    assert_eq!(
+        host.post_passes().count(),
+        1,
+        "its pass compiled on the host"
+    );
+
+    let mut snapshot = EntitySnapshot::new();
+    snapshot.begin();
+    snapshot.set_local(&EntityView {
+        render_position: [0.0, 64.0, 0.0],
+        ..listed(99, "player", "Me", 20.0)
+    });
+    let mate = EntityView {
+        flags: UMI_ENTITY_LIVING | UMI_ENTITY_TEAMMATE,
+        ..listed(1, "player", "Ann", 20.0)
+    };
+    snapshot.push(&mate);
+    snapshot.push(&listed(2, "item", "", 0.0));
+    let far = EntityView {
+        render_position: [200.0, 64.0, 0.0],
+        ..listed(3, "zombie", "", 20.0)
+    };
+    snapshot.push(&far);
+    let hurt = EntityView {
+        hurt_time: 10,
+        ..listed(4, "zombie", "", 20.0)
+    };
+    snapshot.push(&hurt);
+
+    let mut draw = WorldDraw::default();
+    with_entity_snapshot(&snapshot, || host.draw_world_layers(&mut draw));
+    let marks: Vec<_> = draw
+        .highlights
+        .iter()
+        .map(|mark| (mark.entity, mark.color, mark.through_walls))
+        .collect();
+    let blue = [1.0 / 3.0, 1.0 / 3.0, 1.0, 1.0];
+    let red = [1.0, 1.0 / 3.0, 1.0 / 3.0, 1.0];
+    assert_eq!(marks.len(), 2, "the item and the far zombie are left out");
+    assert_eq!((marks[0].0, marks[0].2), (1, false));
+    assert_eq!((marks[1].0, marks[1].2), (4, false));
+    for (got, want) in [(marks[0].1, blue), (marks[1].1, red)] {
+        assert!(
+            got.iter().zip(want).all(|(g, w)| (g - w).abs() < 0.01),
+            "{got:?}"
+        );
+    }
+
+    // Outside the snapshot scope there is no local player: nothing is marked.
+    host.draw_world_layers(&mut draw);
+    assert!(draw.is_empty());
+    host.shutdown_all();
 }

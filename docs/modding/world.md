@@ -45,11 +45,50 @@ snapshot alike. The values are what the client knows, not what the server knows:
 
 The sources of each value are in `docs/sources.md`.
 
+## Combat, teams and the tab list (API 1.4)
+
+API 1.4 (ADR-0097) appends these to `UmiEntity` (offset 168, the struct is now 280
+bytes) and adds four flag bits. A mod built for 1.1 to 1.3 still gets rows of its own
+168-byte struct from `world_entities_snapshot`: the host writes each row at the size
+the mod was built with.
+
+| Field (Rust getter) | Meaning |
+|---|---|
+| `hurt_time` (`hurt_time()`, `is_hurt()`) | Ticks left of the red hurt flash, 10 right after a hit, then down to 0 (vanilla `hurtTime`). |
+| `death_time` (`death_time()`) | Ticks into the death fall, 0 while alive (vanilla `deathTime`). |
+| `held_item`, `held_damage` (`held_item()`) | The item id in the main hand and its damage value; `-1` (`None`) when empty or unknown. |
+| `display_name` (`display_name()`) | A player's team prefix, name and suffix with their `§` colour codes (`ScorePlayerTeam.formatPlayerName`); for another entity its name tag; empty when none. |
+| `team_color` (`team_color()`) | `0xRRGGBB`: the team's colour index when the server set one, else the last colour code of the team prefix (what 1.8 colours names with); `UMI_NO_COLOR` (`None`) when there is none. |
+| `ping` (`ping()`) | The latency the tab list shows, in ms; `-1` (`None`) for an entity the tab list does not list. |
+| `uuid_version` (`uuid_version()`) | The version nibble of the UUID: 4 for an online-mode player, 3 offline, 2 for many server-made NPCs; 0 unknown. |
+| `effect_count`, `effects` (`effects()`, `effect(id)`) | Up to 8 potion effects in id order: id, amplifier (0 = level I), a hide-particles flag and the ticks left. A 1.8 server sends `Entity Effect` for every tracked living entity; the client counts the durations down. |
+| `UMI_ENTITY_SPECTATOR` (`spectator()`) | A player in spectator mode (from the tab list). |
+| `UMI_ENTITY_IN_TAB_LIST` (`in_tab_list()`) | The tab list shows the entity. |
+| `UMI_ENTITY_VISIBLE` (`visible()`) | A block-free line runs from the local player's eye to the entity's eye height, middle or feet, tested on the game thread each tick against the blocks the crosshair stops at, up to 128 blocks. One tick old; from the player's eye, not a mod camera's. For the exact visible pixels, use the [entity mask](post.md#the-entity-mask-api-14). |
+| `UMI_ENTITY_TEAMMATE` (`teammate()`) | On the local player's scoreboard team. |
+
+The client does not decide what a bot is: a mod combines `in_tab_list`, `ping` and
+`uuid_version` with its own rules.
+
+### The local player (API 1.4)
+
+`world_local_player(out)` (Rust: `World::local_player(|me| ...)`) fills one
+`UmiEntity` for the local player, under the same rules as the snapshot below (render
+thread, inside a callback; strings valid until it returns). Its id, name, team,
+display name and team colour, health, effects, held item, ping and position are the
+player's own; `UMI_ENTITY_VISIBLE` is never set, and `UMI_ENTITY_TEAMMATE` is set when
+the player is on a team. `UNAVAILABLE` before the client knows the player.
+
+```rust
+let my_team = world.local_player(|me| me.team().to_owned())?;
+```
+
 ## The entity snapshot (render thread, API 1.1)
 
 `world_entities_snapshot(out, capacity, count)` (Rust: `World::snapshot(visitor)`)
 answers on the **render thread**, inside a mod callback that thread runs: a `FRAME`
-intercept or a HUD widget draw (and, once added, `PRE_RENDER` and camera layers). The
+intercept, a HUD widget draw, a `PRE_RENDER` handler, a camera layer or, since 1.4, a
+[world layer](draw.md). The
 client rebuilds the snapshot once per frame, right before the `FRAME` event, and keeps
 it for the widget draws of that frame.
 

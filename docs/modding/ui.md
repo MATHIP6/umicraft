@@ -31,7 +31,29 @@ kind per widget), and both fall under the same 0.5 ms budget:
   edges of a rectangle. They are four rectangles, so an outline needs room for four
   more ticks.
 - `Hud::segment(x1, y1, x2, y2, color, alpha, thickness)` (C: `hud_segment`) draws a
-  line at any angle. The thickness is in GUI pixels and is clamped to 0.5..=8.
+  line at any angle. The thickness is in GUI pixels and is clamped to 0.05..=8 (0.5..=8
+  before API 1.4). The UI has no anti-aliasing, so a line thinner than one screen
+  pixel is drawn one pixel wide with its opacity multiplied by its width: a 0.25-pixel
+  line is a one-pixel line at a quarter of the opacity.
+
+### Shapes and clipping (API 1.4)
+
+API 1.4 (ADR-0097) adds two shapes and a clip. The shapes count against the caps like
+the other items (256 of each kind per widget and frame):
+
+- `Hud::circle(x, y, radius, color, alpha)` draws a filled disc and
+  `Hud::ring(x, y, radius, color, alpha, thickness)` a ring `thickness` GUI pixels
+  wide inside the edge, at most 8 (C: `hud_circle`, a `thickness` of 0 or less
+  fills). The edges fade over one screen pixel.
+- `Hud::polygon(&[[x, y]; n], color, alpha)` (C: `hud_polygon`, points as
+  `x0, y0, x1, y1, …`) fills a convex polygon of 3 to 64 points. A concave one is
+  drawn as the fan of its first point: split it into convex pieces.
+- `Hud::clip(x, y, w, h, |hud| ...)` (C: `hud_clip_push` / `hud_clip_pop`) cuts what
+  the closure adds to the rectangle, inside any clip already open. It applies to the
+  free items: cells, labels, rectangles, outlines, segments, circles and polygons.
+  The stacked lines of `Hud::line` are not clipped. At most 8 clips nest; a ninth is
+  `DENIED`, and popping with none open is `INVALID_ARGUMENT`. Clips still open when
+  the draw returns end with it.
 
 ### Widgets on the screen (API 1.1)
 
@@ -144,7 +166,9 @@ its switch until the client restarts. A mod whose id equals the id of a built-in
 | Option of a choice setting | 64 bytes, 1 to 32 options |
 | Key (binding) name | 32 bytes |
 | Text of one HUD item (longer is cut) | 256 bytes |
-| Lines, cells, labels, ticks per widget and frame | 256 each |
+| Lines, cells, labels, ticks, segments, circles, polygons per widget and frame | 256 each |
+| Points of a HUD polygon | 3 to 64 |
+| Nested HUD clips | 8 |
 | `chat_print` line | 1024 bytes |
 | Settings per mod | 64 |
 | HUD widgets per mod | 16 |

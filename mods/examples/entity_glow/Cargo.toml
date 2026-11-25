@@ -1,0 +1,22 @@
+[package]
+name = "umicraft-example-entity-glow"
+description = "Example Umicraft mod: the entity mask of API 1.4 turned into an outline or a glow."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "entity_glow"
+crate-type = ["cdylib"]
+
+[dependencies]
+umicraft-modapi.workspace = true
+
+[dev-dependencies]
+# Dev-only: validates the shader the way the host does, never shipped in the mod.
+naga = { version = "30.0.1", features = ["wgsl-in"] }
+
+[lints]
+workspace = true

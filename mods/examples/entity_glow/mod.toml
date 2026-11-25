@@ -1,0 +1,9 @@
+[mod]
+id = "entity_glow"
+name = "Entity glow"
+version = "0.1.0"
+authors = ["Umicraft contributors"]
+api_version = "1.4"
+license = "MIT"
+description = "Teaching example: outlines or makes glow the living entities near the player, only where they are in sight. Team mates are blue, an entity that was just hit flashes red."
+library = "entity_glow"

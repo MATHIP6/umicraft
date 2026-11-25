@@ -100,3 +100,10 @@ crates may use `unsafe`.
   `UmiSettingDef` keeps its 1.0 size. Only the `UmiHost` size assertion changed.
 - **2026-11-24 — 1.3 (ADR-0096).** One host function appended after
   `module_enabled`: `camera_capture`. Only the `UmiHost` size assertion changed.
+- **2026-11-25 — 1.4 (ADR-0097).** Ten host functions appended after
+  `camera_capture`, fields appended to `UmiEntity` (168 to 280 bytes), the new
+  `UmiEffect`, `UmiWorldCx` and `UmiWorldDrawFn`, four entity flags and attach kind 3.
+  `UmiEntity` is the first struct a mod hands the host as an **array** that grew
+  (`world_entities_snapshot`): the host now records the `api_version` each library
+  declares and writes rows of the size that version knows, so a 1.1 mod's buffer is
+  never overrun. Any future growth of a struct passed as an array must do the same.

@@ -4389,6 +4389,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "umicraft-example-entity-glow"
+version = "0.1.0"
+dependencies = [
+ "naga",
+ "umicraft-modapi",
+]
+
+[[package]]
 name = "umicraft-example-entity-list"
 version = "0.1.0"
 dependencies = [

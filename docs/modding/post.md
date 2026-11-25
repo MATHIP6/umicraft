@@ -1,6 +1,7 @@
 # Post-process passes
 
-API 0.6, F3.7, ADR-0086; scene depth since API 1.1 (ADR-0094). A mod adds full-screen passes over the picture of the
+API 0.6, F3.7, ADR-0086; scene depth since API 1.1 (ADR-0094), the entity mask since
+API 1.4 (ADR-0097). A mod adds full-screen passes over the picture of the
 world: colour grading, a vignette, a blur. No permission is needed: a pass sees only
 the picture it is given.
 
@@ -23,11 +24,13 @@ struct UmiPost {
     frame: u32,
     params: array<vec4<f32>, 4>,
     depth: vec4<f32>,
+    mask: vec4<f32>,
 };
 @group(0) @binding(0) var umi_scene: texture_2d<f32>;
 @group(0) @binding(1) var umi_sampler: sampler;
 @group(0) @binding(2) var<uniform> umi: UmiPost;
 @group(0) @binding(3) var umi_depth: texture_depth_2d;
+@group(0) @binding(4) var umi_entity_mask: texture_2d<f32>;
 
 struct UmiVertexOut {
     @builtin(position) position: vec4<f32>,
@@ -95,15 +98,55 @@ returns far for every pixel).
 - The depth texture is only sampled while the passes run: the world pass that writes
   it has ended, and a post pass has no depth attachment.
 - A shader written for API 1.0 never mentions depth and runs unchanged; the
-  `UmiPost` struct only grew at its end (`depth` at offset 80, 96 bytes in all).
+  `UmiPost` struct only grew at its end (`depth` at offset 80, `mask` at 96 since
+  1.4, 112 bytes in all).
 
 `mods/examples/depth_fog` fades pixels beyond a distance toward a fog colour.
 
+## The entity mask (API 1.4)
+
+`umi_entity_mask` (binding 4) is a colour texture the size of the scene. Where an
+entity a mod marked this frame is drawn, it holds the colour and opacity the mod gave
+it; everywhere else it is `(0, 0, 0, 0)`. `umi.mask` is `(any, count, 0, 0)`: `x` is
+1.0 when at least one entity is marked this frame, `y` how many are in the mask.
+
+- **Marking.** A [world layer](draw.md) calls `WorldCx::highlight(id, color, alpha,
+  depth)` (C: `world_highlight`) with an entity's server id, from the snapshot. With
+  `Depth::Tested` only the parts the world does not hide land in the mask; with
+  `Depth::ThroughWalls` the whole model does. The host keeps every mark of every mod;
+  for an entity marked twice in a frame the later mark wins (mods run in load order).
+- **What is drawn.** The model of the entity with its armour and held layers, in the
+  flat colour; the transparent texels of its skin are dropped, so the shape is the
+  drawn one. Glowing layers (eyes, the charged creeper), shadows and name tags are not
+  part of it. An entity out of view or not drawn is not drawn in the mask either.
+- **Reading it.** It is filterable: `textureSample(umi_entity_mask, umi_sampler, uv)`
+  smooths between texels, so a pass can blur it. Every pass of the chain reads the
+  same mask, made after the world and the hand were drawn, before the first pass.
+- **Effects.** The client draws no effect itself: a pass of the mod turns the mask into
+  what it wants. An outline is a mask texel that is empty with a marked neighbour; a
+  glow adds a blurred copy of the mask around the silhouette; a Gaussian blur weighs
+  the neighbours by distance. `mods/examples/entity_glow` does the first two.
+- **Cost.** The mask exists only while some mod has a pass. Marked entities are drawn
+  once more, into the mask; with no mark the mask is only cleared.
+
+```wgsl
+@fragment
+fn fs_main(in: UmiVertexOut) -> @location(0) vec4<f32> {
+    let scene = textureSample(umi_scene, umi_sampler, in.uv);
+    let here = textureSample(umi_entity_mask, umi_sampler, in.uv);
+    let right = textureSample(umi_entity_mask, umi_sampler, in.uv + vec2<f32>(2.0 / umi.resolution.x, 0.0));
+    // An edge: the neighbour is marked, this pixel is not.
+    let edge = right.a * (1.0 - here.a) * umi.mask.x;
+    return vec4<f32>(mix(scene.rgb, right.rgb, edge), scene.a);
+}
+```
+
 The source is checked before it is accepted, with naga and every validation flag:
 at most 64 KiB, it must parse and validate, the module must have exactly the entry
-points `umi_vs` and `fs_main`, and it may declare no resource beyond the four of the
-prelude: the resource whitelist is the four bindings of the prelude, `umi_scene`,
-`umi_sampler`, `umi` and `umi_depth`. A refused shader makes `post_pass` fail with the naga message in the log. A
+points `umi_vs` and `fs_main`, and it may declare no resource beyond the five of the
+prelude: the resource whitelist is the five bindings of the prelude, `umi_scene`,
+`umi_sampler`, `umi`, `umi_depth` and `umi_entity_mask`. A second resource on one of
+those bindings is refused too. A refused shader makes `post_pass` fail with the naga message in the log. A
 mod has at most 8 passes. A pass the GPU still refuses when the client compiles it is
 switched off for the run, its mod keeps running.
 

@@ -112,6 +112,21 @@
 #define UMI_INPUT_SPRINT 4
 
 /**
+ * Most effects one [`UmiEntity`] carries (API 1.4).
+ */
+#define UMI_MAX_ENTITY_EFFECTS 8
+
+/**
+ * [`UmiEffect::flags`]: the server hides the effect's particles.
+ */
+#define UMI_EFFECT_HIDE_PARTICLES 1
+
+/**
+ * [`UmiEntity::team_color`] of an entity with no team colour.
+ */
+#define UMI_NO_COLOR 4294967295
+
+/**
  * [`UmiEntity::flags`]: the entity burns.
  */
 #define UMI_ENTITY_ON_FIRE 1
@@ -142,6 +157,27 @@
 #define UMI_ENTITY_LIVING 32
 
 /**
+ * [`UmiEntity::flags`]: a player in spectator mode. Added in API 1.4.
+ */
+#define UMI_ENTITY_SPECTATOR 64
+
+/**
+ * [`UmiEntity::flags`]: a player the tab list shows. Added in API 1.4.
+ */
+#define UMI_ENTITY_IN_TAB_LIST 128
+
+/**
+ * [`UmiEntity::flags`]: a block-free line runs from the local player's eye to
+ * the entity, tested once per tick. Added in API 1.4.
+ */
+#define UMI_ENTITY_VISIBLE 256
+
+/**
+ * [`UmiEntity::flags`]: on the local player's scoreboard team. Added in API 1.4.
+ */
+#define UMI_ENTITY_TEAMMATE 512
+
+/**
  * [`UmiHudPlacement::anchor`]: the offset is absolute GUI pixels from the
  * top-left corner of the screen, the scale is 1 and the player cannot move the
  * widget; for annotations placed with the `FRAME` projection. Added in API 1.1.
@@ -165,6 +201,23 @@
  */
 #define UMI_ATTACH_POST_PASS 2
 
+/**
+ * `UmiHost::module_attach` kind: a world layer, drawn only while the module is
+ * on. Added in API 1.4.
+ */
+#define UMI_ATTACH_WORLD_LAYER 3
+
+/**
+ * `world_*` flag: drawn over the blocks in front of it instead of hidden by
+ * them (no depth test).
+ */
+#define UMI_WORLD_THROUGH_WALLS 1
+
+/**
+ * `world_box` flag: fills the six faces instead of drawing the twelve edges.
+ */
+#define UMI_WORLD_FILL 2
+
 typedef struct Option_UmiCameraFn Option_UmiCameraFn;
 
 typedef struct Option_UmiCommandFn Option_UmiCommandFn;
@@ -176,6 +229,8 @@ typedef struct Option_UmiHandlerFn Option_UmiHandlerFn;
 typedef struct Option_UmiHudDrawFn Option_UmiHudDrawFn;
 
 typedef struct Option_UmiPhysicsFn Option_UmiPhysicsFn;
+
+typedef struct Option_UmiWorldDrawFn Option_UmiWorldDrawFn;
 
 /**
  * The API version a host implements or a mod was built for.
@@ -558,6 +613,32 @@ typedef struct UmiDisconnected {
 } UmiDisconnected;
 
 /**
+ * One potion effect of an entity (API 1.4).
+ */
+typedef struct UmiEffect {
+  /**
+   * 1.8 potion id (1 speed to 23 saturation).
+   */
+  uint8_t id;
+  /**
+   * Level minus one (0 for level I).
+   */
+  uint8_t amplifier;
+  /**
+   * Bit set of `UMI_EFFECT_*`.
+   */
+  uint8_t flags;
+  /**
+   * Zero.
+   */
+  uint8_t reserved;
+  /**
+   * Ticks left as the server sent them (32767 shows as `**:**`).
+   */
+  int32_t duration;
+} UmiEffect;
+
+/**
  * One entity of the world, lent to a `world_entities` visitor. The local
  * player is not listed.
  */
@@ -633,6 +714,53 @@ typedef struct UmiEntity {
    * `position` in a game-thread query. Added in API 1.1.
    */
   double render_position[3];
+  /**
+   * Ticks left of the hurt flash, 10 down to 0. Added in API 1.4: check
+   * `size`.
+   */
+  uint32_t hurt_time;
+  /**
+   * Ticks into the death fall, 0 while alive. Added in API 1.4.
+   */
+  uint32_t death_time;
+  /**
+   * Item id in the main hand, -1 when empty. Added in API 1.4.
+   */
+  int32_t held_item;
+  /**
+   * Damage (metadata) of the held item. Added in API 1.4.
+   */
+  int32_t held_damage;
+  /**
+   * A player's team prefix, name and suffix with their `§` codes, else the
+   * name tag; empty when there is none. Added in API 1.4.
+   */
+  struct UmiStr display_name;
+  /**
+   * Team colour as `0xRRGGBB`: the team's colour, else the last colour code
+   * of its prefix, else [`UMI_NO_COLOR`]. Added in API 1.4.
+   */
+  uint32_t team_color;
+  /**
+   * Latency the tab list shows, in milliseconds; -1 when the entity is not
+   * listed. Added in API 1.4.
+   */
+  int32_t ping;
+  /**
+   * Version nibble of the entity's UUID (4 for an online player, 3 for an
+   * offline one, 2 for many server-side NPCs), 0 when unknown. Added in
+   * API 1.4.
+   */
+  uint32_t uuid_version;
+  /**
+   * Number of used entries of `effects`. Added in API 1.4.
+   */
+  uint32_t effect_count;
+  /**
+   * Potion effects the server told the client about, in id order. Added in
+   * API 1.4.
+   */
+  struct UmiEffect effects[UMI_MAX_ENTITY_EFFECTS];
 } UmiEntity;
 
 /**
@@ -986,6 +1114,13 @@ typedef struct UmiModuleDef {
 } UmiModuleDef;
 
 /**
+ * The host's buffer a world layer fills while it is drawn; opaque to mods.
+ */
+typedef struct UmiWorldCx {
+  uint8_t _private[0];
+} UmiWorldCx;
+
+/**
  * The host function table, append-only (ADR-0087).
  *
  * A mod must check `size` before using a field added in a later minor.
@@ -1271,6 +1406,103 @@ typedef struct UmiHost {
    * for a `cx` that is not the running camera layer's. Added in API 1.3.
    */
   UmiStatus (*camera_capture)(struct UmiCameraCx *cx);
+  /**
+   * Fills `out` with the local player, as `world_entities_snapshot` fills an
+   * entity of the snapshot, with the same rules (render thread, inside one
+   * of the mod's callbacks). The strings stay valid until the callback
+   * returns. Added in API 1.4.
+   */
+  UmiStatus (*world_local_player)(UmiModHandle me, struct UmiEntity *out);
+  /**
+   * Adds a circle centred on `(x, y)` to the widget being drawn: filled when
+   * `thickness <= 0`, else a ring that many GUI pixels wide (at most 8).
+   * Added in API 1.4.
+   */
+  UmiStatus (*hud_circle)(struct UmiHudCx *hud,
+                          float x,
+                          float y,
+                          float radius,
+                          uint32_t color,
+                          float alpha,
+                          float thickness);
+  /**
+   * Adds a filled convex polygon of `count` points (3 to 64) given as
+   * `x0, y0, x1, y1, …` in widget pixels. Added in API 1.4.
+   */
+  UmiStatus (*hud_polygon)(struct UmiHudCx *hud,
+                           const float *points,
+                           size_t count,
+                           uint32_t color,
+                           float alpha);
+  /**
+   * Clips the free items added next (cells, labels, rectangles, segments,
+   * circles, polygons; not the stacked lines) to the rectangle, within the
+   * enclosing clip. `DENIED` past 8 nested clips. Added in API 1.4.
+   */
+  UmiStatus (*hud_clip_push)(struct UmiHudCx *hud, float x, float y, float width, float height);
+  /**
+   * Ends the innermost clip; `INVALID_ARGUMENT` when none is open. Clips
+   * still open when the draw returns are closed. Added in API 1.4.
+   */
+  UmiStatus (*hud_clip_pop)(struct UmiHudCx *hud);
+  /**
+   * Declares a world layer `key` (during `umi_mod_init` only), drawn by
+   * `draw` each frame in a world while the mod is enabled. `DENIED` past 4
+   * layers, `CONFLICT` for a key already used. Added in API 1.4.
+   */
+  UmiStatus (*register_world_layer)(UmiModHandle me,
+                                    struct UmiStr key,
+                                    struct Option_UmiWorldDrawFn draw,
+                                    void *user);
+  /**
+   * Adds a line between two world points; `thickness` in GUI pixels
+   * (0.05 to 8), `flags`: `UMI_WORLD_THROUGH_WALLS`. Added in API 1.4.
+   */
+  UmiStatus (*world_line)(struct UmiWorldCx *world,
+                          double x1,
+                          double y1,
+                          double z1,
+                          double x2,
+                          double y2,
+                          double z2,
+                          uint32_t color,
+                          float alpha,
+                          float thickness,
+                          uint32_t flags);
+  /**
+   * Adds the box between two corners: its 12 edges, or its 6 faces with
+   * `UMI_WORLD_FILL`. Added in API 1.4.
+   */
+  UmiStatus (*world_box)(struct UmiWorldCx *world,
+                         double min_x,
+                         double min_y,
+                         double min_z,
+                         double max_x,
+                         double max_y,
+                         double max_z,
+                         uint32_t color,
+                         float alpha,
+                         uint32_t flags);
+  /**
+   * Adds a filled convex polygon of `count` world points (3 to 64) given as
+   * `x0, y0, z0, x1, …`. Added in API 1.4.
+   */
+  UmiStatus (*world_polygon)(struct UmiWorldCx *world,
+                             const double *points,
+                             size_t count,
+                             uint32_t color,
+                             float alpha,
+                             uint32_t flags);
+  /**
+   * Marks the entity `entity` (a server id) for the entity mask of the post
+   * passes, with a colour and an opacity; `UMI_WORLD_THROUGH_WALLS` keeps
+   * the parts behind blocks. Added in API 1.4.
+   */
+  UmiStatus (*world_highlight)(struct UmiWorldCx *world,
+                               int32_t entity,
+                               uint32_t color,
+                               float alpha,
+                               uint32_t flags);
 } UmiHost;
 
 /**
@@ -1496,6 +1728,13 @@ typedef struct UmiScreen {
 } UmiScreen;
 
 /**
+ * Fills a world layer for the current frame through the `world_*` host
+ * functions. Called on the render thread once per frame in a world, after the
+ * camera layers, within a time budget.
+ */
+typedef UmiStatus (*UmiWorldDrawFn)(struct UmiWorldCx *world, void *user);
+
+/**
  * The API version of this crate: unstable `0.x` until the `1.0` freeze.
  *
  * 0.2 added the chat, connection and screen events, `UMI_EVENT_MUTABLE` and
@@ -1512,6 +1751,6 @@ typedef struct UmiScreen {
  * mods menu (ADR-0095); 1.3 added `camera_capture`, for a free camera
  * (ADR-0096).
  */
-#define UMI_API_VERSION (UmiVersion){ .major = 1, .minor = 3 }
+#define UMI_API_VERSION (UmiVersion){ .major = 1, .minor = 4 }
 
 #endif  /* UMICRAFT_H */

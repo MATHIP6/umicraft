@@ -507,6 +507,16 @@ Reference: the behaviour of the Fabric mod "Capes" (LGPL-2.1, read only, no code
 | 2026-11-23 | Bounding box size | MCP `Entity.width` / `height` of each class, `EntityAgeable.setScaleForAge` (half for a child), `EntitySlime.setSlimeSize` (0.6 per size), `EntityGuardian.setElder` | The same table as the crosshair ray (`combat::hitbox::size_of`), with the kind's width and height for what the ray ignores (items, arrows). |
 | 2026-11-23 | Velocity | observed: the position change over the last tick (`Entity.posX - prevPosX`) | The client does not keep the server's motion packets, and a relative move is smoothed over three ticks, so this is the motion the entity actually made. |
 
+## Entity facts for mods (API 1.4, ADR-0097)
+
+| Date | Area | Source | Notes |
+|---|---|---|---|
+| 2026-11-25 | Hurt and death time | MCP `EntityLivingBase.hurtTime` (`handleStatusUpdate`: `hurtTime = maxHurtTime = 10`), `EntityLivingBase.deathTime` (`onDeathUpdate`) | The client's own counters of the hurt flash and the death fall, as the entity renderer reads them. |
+| 2026-11-25 | Effects of other entities | MCP `EntityTrackerEntry.updatePlayerEntity` (sends `S1DPacketEntityEffect` for every active effect of a tracked `EntityLivingBase`), `EntityLivingBase.updatePotionEffects` (durations count down on the client) | The wire byte named "hide particles" holds `isShowParticles` (see `server::effects`). |
+| 2026-11-25 | Display name and team colour | MCP `ScorePlayerTeam.formatPlayerName` (prefix + name + suffix), `S3EPacketTeams` (colour index, `-1` none), `FontRenderer.colorCode` | 1.8 colours a member's name with the prefix's codes; the colour index is used when set, else the last colour code of the prefix. |
+| 2026-11-25 | Line of sight | MCP `EntityLivingBase.canEntityBeSeen` (one ray, eye to eye, `World.rayTraceBlocks`), `Entity.getEyeHeight` (`height * 0.85`) | The client tests three points (eye height, middle, just above the feet) so a partly covered entity counts as visible; the blocks that stop the ray are those the crosshair stops at. |
+| 2026-11-25 | Tab list facts | MCP `S38PacketPlayerListItem` (ping, game mode), `NetworkPlayerInfo` | Spectator from the game mode 3 of the entry; the UUID version is the high nibble of byte 6 (RFC 4122). |
+
 ## Discord Rich Presence (ADR-0084)
 
 | Date | Area | Source | Notes |

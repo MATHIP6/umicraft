@@ -23,6 +23,7 @@ include = [
     "UmiCommandFn",
     "UmiConnected",
     "UmiDisconnected",
+    "UmiEffect",
     "UmiEntity",
     "UmiEntityVisitFn",
     "UmiEventHeader",
@@ -60,6 +61,8 @@ include = [
     "UmiStatus",
     "UmiStr",
     "UmiVersion",
+    "UmiWorldCx",
+    "UmiWorldDrawFn",
 ]
 
 [export.rename]
