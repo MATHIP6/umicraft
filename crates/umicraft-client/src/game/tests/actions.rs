@@ -11,7 +11,7 @@ fn a_click_swings_the_hand_and_a_placement_swings_it_too() {
     let mut queue = CommandQueue::default();
     game.pitch = 85.9;
     game.controls.input.attack = true;
-    game.controls.attack_pressed = true;
+    game.controls.attack_presses = 1;
     run_attack(&mut game, &mut queue);
     tick_hand(&mut game);
     assert!(game.hand.pose().swing > 0.0 || game.hand.swing_progress(1.0) >= 0.0);
@@ -49,7 +49,7 @@ fn a_click_swings_the_hand_and_a_placement_swings_it_too() {
 
 fn click_attack(game: &mut Game, queue: &mut CommandQueue) {
     game.controls.input.attack = true;
-    game.controls.attack_pressed = true;
+    game.controls.attack_presses = 1;
     run_attack(game, queue);
 }
 
@@ -293,4 +293,36 @@ fn the_server_finishing_the_meal_ends_the_use() {
     );
     handle_net(&mut game, status, &mut queue, &frames);
     assert!(!game.item_use.is_using());
+}
+
+/// Two clicks that reach the game thread inside one tick are two attacks, as
+/// the mouse event loop of `Minecraft.runTick` makes them; a flag merged
+/// them into one and lost every second click of a fast clicker.
+#[test]
+fn two_clicks_inside_one_tick_are_two_attacks() {
+    let mut game = game_on_floor_with(BlockState::AIR);
+    let mut queue = CommandQueue::default();
+    spawn_ahead(&mut game, false);
+    for _ in 0..2 {
+        let update = InputUpdate {
+            break_block: true,
+            ..InputUpdate::default()
+        };
+        handle_input(&mut game, update, &mut queue);
+    }
+    run_attack(&mut game, &mut queue);
+    let attacks = commands(&queue)
+        .iter()
+        .filter(|command| {
+            matches!(
+                command,
+                ClientCommand::UseEntity {
+                    action: UseEntityAction::Attack,
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(attacks, 2);
+    assert_eq!(game.controls.attack_presses, 0, "the tick took them all");
 }

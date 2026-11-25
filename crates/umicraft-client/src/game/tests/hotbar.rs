@@ -278,7 +278,7 @@ fn a_slot_before_an_attack_is_announced_between_the_swing_and_the_attack_packet(
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
     game.controls.input.attack = true;
-    game.controls.attack_pressed = true;
+    game.controls.attack_presses = 1;
     run_ticks(&mut game, &mut queue, 1);
     let seen = tags(&queue);
     // `clickMouse`: swing, then the controller syncs and sends.
@@ -314,7 +314,7 @@ fn the_actions_of_one_tick_keep_the_run_tick_order() {
     press_drop(&mut game, &mut queue, DropKind::One);
     press_pick(&mut game, &mut queue);
     game.controls.input.attack = true;
-    game.controls.attack_pressed = true;
+    game.controls.attack_presses = 1;
     run_ticks(&mut game, &mut queue, 1);
     let seen = tags(&queue);
     // keys (drop), then the click (swing, sync, controller), then the
@@ -627,7 +627,7 @@ fn an_attack_on_a_mob_swings_then_syncs_then_attacks() {
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
     game.controls.input.attack = true;
-    game.controls.attack_pressed = true;
+    game.controls.attack_presses = 1;
     run_ticks(&mut game, &mut queue, 1);
     assert_eq!(tags(&queue), ["swing", "slot2", "attack", "move"]);
 }
@@ -640,7 +640,7 @@ fn a_click_that_only_swings_does_not_sync_the_slot() {
     let mut queue = CommandQueue::default();
     press_slot(&mut game, &mut queue, 2);
     game.controls.input.attack = true;
-    game.controls.attack_pressed = true;
+    game.controls.attack_presses = 1;
     run_ticks(&mut game, &mut queue, 1);
     // `clickMouse` on air: `swingItem`, no controller call, no sync.
     assert_eq!(tags(&queue), ["swing", "move"]);

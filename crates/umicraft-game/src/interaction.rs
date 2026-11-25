@@ -203,14 +203,29 @@ impl Interaction {
     /// aborts the dig. Every swing also sends `Animation`
     /// (`EntityPlayerSP.swingItem`).
     pub fn attack<W: BlockSource + ?Sized>(&mut self, tick: &AttackTick<'_, W>) -> AttackOutput {
+        self.attack_clicks(tick, u8::from(tick.pressed))
+    }
+
+    /// [`Self::attack`] for a tick in which the button went down `clicks`
+    /// times. MCP `Minecraft.runTick` takes every mouse event of the tick
+    /// (`while (Mouse.next())`) and runs `clickMouse` for each press, so two
+    /// clicks inside one 50 ms tick are two attacks, two swings; a miss
+    /// still blocks the clicks after it (`leftClickCounter`).
+    pub fn attack_clicks<W: BlockSource + ?Sized>(
+        &mut self,
+        tick: &AttackTick<'_, W>,
+        clicks: u8,
+    ) -> AttackOutput {
         let mut run = AttackRun {
             interaction: self,
             tick,
             output: AttackOutput::default(),
         };
         run.interaction.click_delay = run.interaction.click_delay.saturating_sub(1);
-        if tick.pressed && run.interaction.click_delay == 0 {
-            run.click();
+        for _ in 0..clicks {
+            if run.interaction.click_delay == 0 {
+                run.click();
+            }
         }
         run.hold();
         run.output
@@ -627,6 +642,63 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    fn attacks(output: &AttackOutput) -> usize {
+        output
+            .packets
+            .iter()
+            .filter(|packet| matches!(packet, Outgoing::Attack { .. }))
+            .count()
+    }
+
+    #[test]
+    fn two_clicks_in_one_tick_on_a_player_are_two_attacks() {
+        let world = One(BlockPos::new(0, 0, 0), 0);
+        let mut interaction = Interaction::new();
+        let output = interaction.attack_clicks(
+            &AttackTick {
+                entity: Some(EntityId(42)),
+                mode: GameMode::Survival,
+                pressed: true,
+                held: false,
+                target: None,
+                world: &world,
+                digger: Digger::default(),
+            },
+            2,
+        );
+        assert_eq!(attacks(&output), 2, "{:?}", output.packets);
+        let swings = output
+            .packets
+            .iter()
+            .filter(|packet| matches!(packet, Outgoing::Swing))
+            .count();
+        assert_eq!(swings, 2);
+    }
+
+    #[test]
+    fn a_miss_still_blocks_the_clicks_after_it_in_the_same_tick() {
+        let world = One(BlockPos::new(0, 0, 0), 0);
+        let mut interaction = Interaction::new();
+        let output = interaction.attack_clicks(
+            &AttackTick {
+                entity: None,
+                mode: GameMode::Survival,
+                pressed: true,
+                held: true,
+                target: None,
+                world: &world,
+                digger: Digger::default(),
+            },
+            3,
+        );
+        let swings = output
+            .packets
+            .iter()
+            .filter(|packet| matches!(packet, Outgoing::Swing))
+            .count();
+        assert_eq!(swings, 1, "leftClickCounter stops the next two");
     }
 
     #[test]

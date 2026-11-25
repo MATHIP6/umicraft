@@ -166,7 +166,7 @@ fn a_movement_then_an_attack_leave_in_the_order_of_their_ticks() {
     let mut queue = CommandQueue::default();
     run_ticks(&mut game, &mut queue, 1);
     game.controls.input.attack = true;
-    game.controls.attack_pressed = true;
+    game.controls.attack_presses = 1;
     run_ticks(&mut game, &mut queue, 1);
     let moves = movement_indices(&queue);
     let swing = index_of(&queue, |c| matches!(c, ClientCommand::Swing));
@@ -211,7 +211,7 @@ fn interleaved_actions_keep_one_report_per_tick_and_their_own_tick() {
     run_ticks(&mut game, &mut queue, 1);
     ends.push(queue.ordered.len());
     game.controls.input.attack = true;
-    game.controls.attack_pressed = true;
+    game.controls.attack_presses = 1;
     run_ticks(&mut game, &mut queue, 1);
     game.controls.input.attack = false;
     ends.push(queue.ordered.len());
