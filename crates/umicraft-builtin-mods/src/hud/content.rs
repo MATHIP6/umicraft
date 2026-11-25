@@ -44,6 +44,8 @@ pub struct HudCell {
     pub color: u32,
     /// The text, centered in the box.
     pub text: String,
+    /// The rectangle `[x, y, width, height]` it is cut to, `None` for none.
+    pub clip: Option<[f32; 4]>,
 }
 
 /// A text placed freely in a widget, centered on a point and faded: the numbers
@@ -61,6 +63,8 @@ pub struct HudLabel {
     pub alpha: f32,
     /// Size of the text relative to the normal one.
     pub scale: f32,
+    /// The rectangle `[x, y, width, height]` it is cut to, `None` for none.
+    pub clip: Option<[f32; 4]>,
 }
 
 /// A small filled rectangle of a widget, such as a mark of the direction HUD ruler.
@@ -72,6 +76,8 @@ pub struct HudTick {
     pub color: u32,
     /// Opacity, `0.0` to `1.0`.
     pub alpha: f32,
+    /// The rectangle `[x, y, width, height]` it is cut to, `None` for none.
+    pub clip: Option<[f32; 4]>,
 }
 
 /// A straight line of a widget, at any angle (the `hud_segment` of mods).
@@ -87,6 +93,38 @@ pub struct HudSegment {
     pub color: u32,
     /// Opacity, `0.0` to `1.0`.
     pub alpha: f32,
+    /// The rectangle `[x, y, width, height]` it is cut to, `None` for none.
+    pub clip: Option<[f32; 4]>,
+}
+
+/// A circle of a widget, filled or a ring (the `hud_circle` of mods, API 1.4).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct HudCircle {
+    /// Centre, in GUI units from the top-left of the widget.
+    pub center: [f32; 2],
+    /// Radius, in GUI units.
+    pub radius: f32,
+    /// Width of the ring in GUI units; `0.0` fills the disc.
+    pub thickness: f32,
+    /// Color as `0xRRGGBB`.
+    pub color: u32,
+    /// Opacity, `0.0` to `1.0`.
+    pub alpha: f32,
+    /// The rectangle `[x, y, width, height]` it is cut to, `None` for none.
+    pub clip: Option<[f32; 4]>,
+}
+
+/// A filled convex polygon of a widget (the `hud_polygon` of mods, API 1.4).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct HudPolygon {
+    /// The corners in order, in GUI units from the top-left of the widget.
+    pub points: Vec<[f32; 2]>,
+    /// Color as `0xRRGGBB`.
+    pub color: u32,
+    /// Opacity, `0.0` to `1.0`.
+    pub alpha: f32,
+    /// The rectangle `[x, y, width, height]` it is cut to, `None` for none.
+    pub clip: Option<[f32; 4]>,
 }
 
 /// The lines and boxes of one widget.
@@ -103,6 +141,11 @@ pub struct HudContent {
     labels_used: usize,
     ticks: Vec<HudTick>,
     segments: Vec<HudSegment>,
+    circles: Vec<HudCircle>,
+    polygons: Vec<HudPolygon>,
+    polygons_used: usize,
+    /// The open clip rectangles, each already cut to the one before it.
+    clips: Vec<[f32; 4]>,
     /// The look of the widget, set by the registry from the shared options.
     pub style: HudStyle,
     /// Whether the player asked to swap the side of the pictures: they stand
@@ -122,7 +165,38 @@ impl HudContent {
         self.labels_used = 0;
         self.ticks.clear();
         self.segments.clear();
+        self.circles.clear();
+        self.polygons_used = 0;
+        self.clips.clear();
         self.reserve = [0.0; 2];
+    }
+
+    /// The clip the next free item gets: the innermost open one.
+    #[must_use]
+    pub fn clip(&self) -> Option<[f32; 4]> {
+        self.clips.last().copied()
+    }
+
+    /// How many clips are open.
+    #[must_use]
+    pub fn clip_depth(&self) -> usize {
+        self.clips.len()
+    }
+
+    /// Opens a clip: the free items added next are cut to `rect`
+    /// (`[x, y, width, height]`) within the clip already open. An empty
+    /// intersection hides them.
+    pub fn push_clip(&mut self, rect: [f32; 4]) {
+        let rect = match self.clip() {
+            Some(outer) => intersect(outer, rect),
+            None => rect,
+        };
+        self.clips.push(rect);
+    }
+
+    /// Closes the innermost clip; `false` when none is open.
+    pub fn pop_clip(&mut self) -> bool {
+        self.clips.pop().is_some()
     }
 
     /// Starts a new line of the given color and returns its (empty) text to write into.
@@ -157,6 +231,7 @@ impl HudContent {
         cell.pressed = pressed;
         cell.color = color;
         cell.text.clear();
+        cell.clip = self.clips.last().copied();
         &mut cell.text
     }
 
@@ -173,6 +248,7 @@ impl HudContent {
         label.alpha = alpha;
         label.scale = scale;
         label.text.clear();
+        label.clip = self.clips.last().copied();
         &mut label.text
     }
 
@@ -184,7 +260,13 @@ impl HudContent {
 
     /// Adds a small filled rectangle.
     pub fn tick(&mut self, rect: [f32; 4], color: u32, alpha: f32) {
-        self.ticks.push(HudTick { rect, color, alpha });
+        let clip = self.clip();
+        self.ticks.push(HudTick {
+            rect,
+            color,
+            alpha,
+            clip,
+        });
     }
 
     /// The rectangles added since the last [`clear`](Self::clear).
@@ -193,9 +275,10 @@ impl HudContent {
         &self.ticks
     }
 
-    /// Adds a straight line.
+    /// Adds a straight line, cut to the open clip.
     pub fn segment(&mut self, segment: HudSegment) {
-        self.segments.push(segment);
+        let clip = self.clip();
+        self.segments.push(HudSegment { clip, ..segment });
     }
 
     /// The lines added since the last [`clear`](Self::clear).
@@ -204,8 +287,41 @@ impl HudContent {
         &self.segments
     }
 
-    /// Whether the widget shows nothing: no line, box, label, mark or segment,
-    /// and no reserved size.
+    /// Adds a circle, cut to the open clip.
+    pub fn circle(&mut self, circle: HudCircle) {
+        let clip = self.clip();
+        self.circles.push(HudCircle { clip, ..circle });
+    }
+
+    /// The circles added since the last [`clear`](Self::clear).
+    #[must_use]
+    pub fn circles(&self) -> &[HudCircle] {
+        &self.circles
+    }
+
+    /// Adds a filled convex polygon through `points`, cut to the open clip.
+    pub fn polygon(&mut self, points: impl IntoIterator<Item = [f32; 2]>, color: u32, alpha: f32) {
+        if self.polygons_used == self.polygons.len() {
+            self.polygons.push(HudPolygon::default());
+        }
+        let clip = self.clip();
+        let polygon = &mut self.polygons[self.polygons_used];
+        self.polygons_used += 1;
+        polygon.points.clear();
+        polygon.points.extend(points);
+        polygon.color = color;
+        polygon.alpha = alpha;
+        polygon.clip = clip;
+    }
+
+    /// The polygons added since the last [`clear`](Self::clear).
+    #[must_use]
+    pub fn polygons(&self) -> &[HudPolygon] {
+        &self.polygons[..self.polygons_used]
+    }
+
+    /// Whether the widget shows nothing: no line, box, label, mark, segment,
+    /// circle or polygon, and no reserved size.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.used == 0
@@ -213,6 +329,8 @@ impl HudContent {
             && self.labels_used == 0
             && self.ticks.is_empty()
             && self.segments.is_empty()
+            && self.circles.is_empty()
+            && self.polygons_used == 0
             && self.reserve == [0.0; 2]
     }
 
@@ -229,11 +347,65 @@ impl HudContent {
     }
 }
 
+/// The part of `a` inside `b`, both `[x, y, width, height]`; zero-sized when they
+/// do not overlap.
+fn intersect(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    let left = a[0].max(b[0]);
+    let top = a[1].max(b[1]);
+    let right = (a[0] + a[2]).min(b[0] + b[2]);
+    let bottom = (a[1] + a[3]).min(b[1] + b[3]);
+    [left, top, (right - left).max(0.0), (bottom - top).max(0.0)]
+}
+
 #[cfg(test)]
 mod tests {
     use std::fmt::Write;
 
     use super::*;
+
+    #[test]
+    fn free_items_take_the_innermost_clip_and_clear_closes_them() {
+        let mut c = HudContent::default();
+        c.tick([0.0; 4], 0, 1.0);
+        c.push_clip([0.0, 0.0, 10.0, 10.0]);
+        c.push_clip([5.0, 5.0, 10.0, 10.0]);
+        c.segment(HudSegment::default());
+        c.circle(HudCircle::default());
+        c.polygon([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], 0, 1.0);
+        assert!(c.pop_clip());
+        c.label([0.0; 2], 0, 1.0, 1.0).push('x');
+        c.cell([0.0; 4], false, 0).push('y');
+        assert_eq!(c.ticks()[0].clip, None);
+        let inner = Some([5.0, 5.0, 5.0, 5.0]);
+        assert_eq!(c.segments()[0].clip, inner);
+        assert_eq!(c.circles()[0].clip, inner);
+        assert_eq!(c.polygons()[0].clip, inner);
+        assert_eq!(c.labels()[0].clip, Some([0.0, 0.0, 10.0, 10.0]));
+        assert_eq!(c.cells()[0].clip, Some([0.0, 0.0, 10.0, 10.0]));
+        c.clear();
+        assert_eq!(c.clip_depth(), 0);
+        assert!(!c.pop_clip());
+        assert!(c.circles().is_empty() && c.polygons().is_empty() && c.is_empty());
+    }
+
+    #[test]
+    fn disjoint_clips_leave_an_empty_rectangle() {
+        let mut c = HudContent::default();
+        c.push_clip([0.0, 0.0, 4.0, 4.0]);
+        c.push_clip([10.0, 10.0, 4.0, 4.0]);
+        assert_eq!(c.clip(), Some([10.0, 10.0, 0.0, 0.0]));
+    }
+
+    #[test]
+    fn a_polygon_reuses_its_points_buffer() {
+        let mut c = HudContent::default();
+        c.polygon([[0.0; 2]; 16], 0, 1.0);
+        let capacity = c.polygons[0].points.capacity();
+        c.clear();
+        c.polygon([[1.0; 2]; 3], 0, 1.0);
+        assert_eq!(c.polygons()[0].points, [[1.0; 2]; 3]);
+        assert_eq!(c.polygons[0].points.capacity(), capacity);
+    }
 
     #[test]
     fn lines_are_kept_in_order() {

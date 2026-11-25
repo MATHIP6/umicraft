@@ -11,7 +11,9 @@ mod preset;
 pub mod snap;
 mod style;
 
-pub use content::{HudCell, HudContent, HudIcon, HudLabel, HudLine, HudSegment, HudTick};
+pub use content::{
+    HudCell, HudCircle, HudContent, HudIcon, HudLabel, HudLine, HudPolygon, HudSegment, HudTick,
+};
 pub use placement::{Anchor, HudPlacement, HudRect, MAX_SCALE, MIN_SCALE};
 pub use preset::HudPreset;
 pub use style::{HudStyle, Shadow};

@@ -253,6 +253,8 @@ pub struct UiPass {
     /// Scratch polygons of the rounded-rectangle clipper, reused every frame.
     polygon: Vec<FringeVertex>,
     clipped: Vec<FringeVertex>,
+    /// Scratch corners of a mod's polygon or of a disc, reused every frame.
+    shape: Vec<FringeVertex>,
 }
 
 impl UiPass {
@@ -273,6 +275,7 @@ impl UiPass {
             brand: None,
             polygon: Vec::new(),
             clipped: Vec::new(),
+            shape: Vec::new(),
         }
     }
 
@@ -390,6 +393,27 @@ impl UiPass {
                     );
                     self.push_segment([*from, *to], *thickness, *color, atlas);
                 }
+                DrawCommand::Circle {
+                    center,
+                    radius,
+                    thickness,
+                    color,
+                } => {
+                    self.flush_batch_if_needed(
+                        UiBatchKind::Font,
+                        &mut current_kind,
+                        &mut batch_start,
+                    );
+                    self.push_circle(*center, *radius, *thickness, *color, atlas);
+                }
+                DrawCommand::Polygon { points, color } => {
+                    self.flush_batch_if_needed(
+                        UiBatchKind::Font,
+                        &mut current_kind,
+                        &mut batch_start,
+                    );
+                    self.push_polygon(points, *color, atlas);
+                }
                 DrawCommand::VerticalGradient { rect, top, bottom } => {
                     self.flush_batch_if_needed(
                         UiBatchKind::Font,
@@ -505,6 +529,15 @@ impl UiPass {
         if !(length.is_finite() && thickness.is_finite()) || length < f32::EPSILON {
             return;
         }
+        // There is no anti-aliasing: a band under one pixel would flicker in and
+        // out of the pixel grid. It is drawn one pixel wide instead, as faint as
+        // the share of the pixel it covers (API 1.4, ADR-0097).
+        let (thickness, color) = if thickness < 1.0 {
+            let coverage = thickness.max(0.0);
+            (1.0, [color[0], color[1], color[2], color[3] * coverage])
+        } else {
+            (thickness, color)
+        };
         let half = thickness / 2.0 / length;
         let (nx, ny) = (-dy * half, dx * half);
         let corner =
@@ -517,6 +550,146 @@ impl UiPass {
         ];
         let uv = white_texel_uv(atlas);
         self.emit_polygon(&corners, color, uv, clip);
+    }
+
+    /// The convex polygon through `points`, clipped to the current scope. Fewer
+    /// than three points or a non-finite one draws nothing.
+    fn push_polygon(&mut self, points: &[[f32; 2]], color: [f32; 4], atlas: &FontAtlas) {
+        let Some(clip) = self.clip else {
+            return;
+        };
+        if points.len() < 3 || !points.iter().flatten().all(|v| v.is_finite()) {
+            return;
+        }
+        let mut shape = std::mem::take(&mut self.shape);
+        shape.clear();
+        shape.extend(points.iter().map(|&point| FringeVertex::opaque_at(point)));
+        self.emit_polygon(&shape, color, white_texel_uv(atlas), clip);
+        self.shape = shape;
+    }
+
+    /// A disc (`thickness <= 0`) or a ring `thickness` wide inside the edge,
+    /// with a one-pixel fringe fading each edge like the rounded rectangles. A
+    /// ring thinner than a pixel is drawn one pixel wide and fainter, as a thin
+    /// segment is.
+    fn push_circle(
+        &mut self,
+        center: [f32; 2],
+        radius: f32,
+        thickness: f32,
+        color: [f32; 4],
+        atlas: &FontAtlas,
+    ) {
+        let Some(clip) = self.clip else {
+            return;
+        };
+        if !(center.iter().all(|v| v.is_finite()) && radius.is_finite() && thickness.is_finite())
+            || radius <= 0.0
+        {
+            return;
+        }
+        let uv = white_texel_uv(atlas);
+        let steps = circle_steps(radius);
+        let at = |r: f32, i: usize| {
+            let angle = std::f32::consts::TAU * i as f32 / steps as f32;
+            [center[0] + r * angle.cos(), center[1] + r * angle.sin()]
+        };
+        let ring = |pass: &mut Self, inner: FringeVertexAt, outer: FringeVertexAt| {
+            for i in 0..steps {
+                let next = (i + 1) % steps;
+                pass.emit_polygon(
+                    &[
+                        inner.vertex(at(inner.radius, i)),
+                        outer.vertex(at(outer.radius, i)),
+                        outer.vertex(at(outer.radius, next)),
+                        inner.vertex(at(inner.radius, next)),
+                    ],
+                    color,
+                    uv,
+                    clip,
+                );
+            }
+        };
+        if thickness <= 0.0 || thickness >= radius {
+            let core = (radius - FRINGE).max(0.0);
+            let mut shape = std::mem::take(&mut self.shape);
+            shape.clear();
+            shape.extend((0..steps).map(|i| FringeVertex::opaque_at(at(core, i))));
+            self.emit_polygon(&shape, color, uv, clip);
+            self.shape = shape;
+            ring(
+                self,
+                FringeVertexAt::opaque(core),
+                FringeVertexAt::clear(radius + FRINGE),
+            );
+            return;
+        }
+        let (inner, outer) = (radius - thickness, radius);
+        if thickness < 1.0 {
+            // One pixel centred on the ring, fading to both sides.
+            let middle = (inner + outer) / 2.0;
+            let faint = [color[0], color[1], color[2], color[3] * thickness];
+            return self.push_circle_band(center, middle, faint, uv, clip, steps);
+        }
+        ring(
+            self,
+            FringeVertexAt::clear(inner - FRINGE),
+            FringeVertexAt::opaque(inner + FRINGE),
+        );
+        if outer - inner > 2.0 * FRINGE {
+            ring(
+                self,
+                FringeVertexAt::opaque(inner + FRINGE),
+                FringeVertexAt::opaque(outer - FRINGE),
+            );
+        }
+        ring(
+            self,
+            FringeVertexAt::opaque(outer - FRINGE),
+            FringeVertexAt::clear(outer + FRINGE),
+        );
+    }
+
+    /// A one-pixel ring of radius `middle`: opaque on the circle, fading over a
+    /// pixel on each side.
+    fn push_circle_band(
+        &mut self,
+        center: [f32; 2],
+        middle: f32,
+        color: [f32; 4],
+        uv: [f32; 2],
+        clip: Rect,
+        steps: usize,
+    ) {
+        let at = |r: f32, i: usize| {
+            let angle = std::f32::consts::TAU * i as f32 / steps as f32;
+            [center[0] + r * angle.cos(), center[1] + r * angle.sin()]
+        };
+        for (from, to) in [
+            (
+                FringeVertexAt::clear(middle - 1.0),
+                FringeVertexAt::opaque(middle),
+            ),
+            (
+                FringeVertexAt::opaque(middle),
+                FringeVertexAt::clear(middle + 1.0),
+            ),
+        ] {
+            for i in 0..steps {
+                let next = (i + 1) % steps;
+                self.emit_polygon(
+                    &[
+                        from.vertex(at(from.radius, i)),
+                        to.vertex(at(to.radius, i)),
+                        to.vertex(at(to.radius, next)),
+                        from.vertex(at(from.radius, next)),
+                    ],
+                    color,
+                    uv,
+                    clip,
+                );
+            }
+        }
     }
 
     /// Two triangles whose corner colours interpolate `colors` (top, bottom)
@@ -737,6 +910,43 @@ impl UiPass {
 /// Half the width of the antialiasing fringe of a rounded rectangle, in
 /// physical pixels: the shape edge is the middle of a one-pixel ramp.
 const FRINGE: f32 = 0.5;
+
+/// Corners of a circle: enough that the chord strays less than about a quarter
+/// pixel from the arc (`r (1 - cos(pi / n))`), between 12 and 128.
+fn circle_steps(radius: f32) -> usize {
+    ((radius.max(0.0).sqrt() * 4.5).ceil() as usize).clamp(12, 128)
+}
+
+/// One edge of a circle band: its radius and whether the colour is full there.
+#[derive(Debug, Clone, Copy)]
+struct FringeVertexAt {
+    radius: f32,
+    opaque: bool,
+}
+
+impl FringeVertexAt {
+    fn opaque(radius: f32) -> Self {
+        Self {
+            radius: radius.max(0.0),
+            opaque: true,
+        }
+    }
+
+    fn clear(radius: f32) -> Self {
+        Self {
+            radius: radius.max(0.0),
+            opaque: false,
+        }
+    }
+
+    fn vertex(self, position: [f32; 2]) -> FringeVertex {
+        if self.opaque {
+            FringeVertex::opaque_at(position)
+        } else {
+            FringeVertex::clear_at(position)
+        }
+    }
+}
 
 /// A polygon corner with the share of the shape colour it carries.
 #[derive(Debug, Clone, Copy)]
@@ -1101,6 +1311,91 @@ mod tests {
             assert!((y.abs() - 0.04).abs() < 1e-5, "{y}");
             assert_eq!(vertex.color, COLOR);
         }
+    }
+
+    #[test]
+    fn a_segment_thinner_than_a_pixel_is_one_pixel_and_fainter() {
+        let mut list = DrawList::new();
+        list.segment([10.0, 50.0], [90.0, 50.0], 0.25, COLOR);
+        let mut pass = UiPass::new(100, 100);
+        pass.rebuild(&list, &atlas());
+        assert_eq!(pass.vertex_count(), 6);
+        for vertex in pass.vertices() {
+            // Half a pixel either side of y = 50 is 0.01 in clip space.
+            assert!((vertex.position[1].abs() - 0.01).abs() < 1e-5);
+            assert!((vertex.color[3] - COLOR[3] * 0.25).abs() < 1e-6);
+        }
+    }
+
+    /// The pixel position of a clip-space vertex of a 100x100 pass.
+    fn pixel(position: [f32; 2]) -> [f32; 2] {
+        [(position[0] + 1.0) * 50.0, (1.0 - position[1]) * 50.0]
+    }
+
+    #[test]
+    fn a_disc_stays_within_its_radius_and_fades_at_the_edge() {
+        let mut list = DrawList::new();
+        list.circle([50.0, 50.0], 20.0, 0.0, COLOR);
+        let mut pass = UiPass::new(100, 100);
+        pass.rebuild(&list, &atlas());
+        assert!(pass.vertex_count() > 0);
+        let mut edge = 0;
+        for vertex in pass.vertices() {
+            let [x, y] = pixel(vertex.position);
+            let r = (x - 50.0).hypot(y - 50.0);
+            assert!(r <= 20.5 + 1e-3, "{r}");
+            if r > 20.25 {
+                edge += 1;
+                assert_eq!(vertex.color[3], 0.0, "the outer fringe is clear");
+            }
+        }
+        assert!(edge > 0, "an outer fringe");
+    }
+
+    #[test]
+    fn a_ring_leaves_its_middle_empty() {
+        let mut list = DrawList::new();
+        list.circle([50.0, 50.0], 20.0, 4.0, COLOR);
+        let mut pass = UiPass::new(100, 100);
+        pass.rebuild(&list, &atlas());
+        for vertex in pass.vertices() {
+            let [x, y] = pixel(vertex.position);
+            let r = (x - 50.0).hypot(y - 50.0);
+            assert!((15.5 - 1e-3..=20.5 + 1e-3).contains(&r), "{r}");
+        }
+        let mut thin = DrawList::new();
+        thin.circle([50.0, 50.0], 20.0, 0.5, COLOR);
+        pass.rebuild(&thin, &atlas());
+        assert!(pass
+            .vertices()
+            .iter()
+            .all(|vertex| vertex.color[3] <= COLOR[3] * 0.5 + 1e-6));
+    }
+
+    #[test]
+    fn a_polygon_is_a_fan_cut_to_the_clip() {
+        let mut list = DrawList::new();
+        list.polygon(
+            vec![[10.0, 10.0], [60.0, 10.0], [60.0, 60.0], [10.0, 60.0]],
+            COLOR,
+        );
+        let mut pass = UiPass::new(100, 100);
+        pass.rebuild(&list, &atlas());
+        assert_eq!(pass.vertex_count(), 6, "two triangles");
+        let mut clipped = DrawList::new();
+        clipped.push_clip(Rect::new(0.0, 0.0, 30.0, 30.0));
+        clipped.polygon(vec![[10.0, 10.0], [60.0, 10.0], [10.0, 60.0]], COLOR);
+        clipped.pop_clip();
+        pass.rebuild(&clipped, &atlas());
+        assert!(pass.vertex_count() > 0);
+        for vertex in pass.vertices() {
+            let [x, y] = pixel(vertex.position);
+            assert!(x <= 30.0 + 1e-3 && y <= 30.0 + 1e-3);
+        }
+        let mut degenerate = DrawList::new();
+        degenerate.polygon(vec![[0.0, 0.0], [1.0, 1.0]], COLOR);
+        pass.rebuild(&degenerate, &atlas());
+        assert_eq!(pass.vertex_count(), 0);
     }
 
     #[test]

@@ -203,6 +203,11 @@ fn register_ui(cx: &mut InitCx<'_>) -> Result<(), ModError> {
         hud.label(1.0, 2.0, "text", 0xFF_FFFF, 0.5, 2.0);
         hud.cell(3.0, 4.0, 5.0, 6.0, true, "W", 0x00_FF00);
         hud.tick(7.0, 8.0, 9.0, 10.0, 0x00_00FF, 0.25);
+        hud.clip(0.0, 0.0, 20.0, 10.0, |hud| {
+            hud.circle(5.0, 5.0, 3.0, 0xFF_0000, 1.0);
+            hud.ring(5.0, 5.0, 4.0, 0xFF_0000, 0.5, 1.5);
+        });
+        hud.polygon(&[[0.0, 0.0], [4.0, 0.0], [0.0, 4.0]], 0x12_3456, 1.0);
     })?;
     cx.key("greet", "Greet", "KeyH")?;
     cx.observe::<KeyPressed>(0, |e| see(format!("key={}", e.key())))?;
@@ -860,38 +865,42 @@ extern "C" fn fake_world_local_player(_me: UmiModHandle, out: *mut UmiEntity) ->
 
 extern "C" fn fake_hud_circle(
     _hud: *mut UmiHudCx,
-    _x: f32,
-    _y: f32,
-    _radius: f32,
-    _color: u32,
-    _alpha: f32,
-    _thickness: f32,
+    x: f32,
+    y: f32,
+    radius: f32,
+    color: u32,
+    alpha: f32,
+    thickness: f32,
 ) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    hud_call(format!(
+        "circle {x} {y} {radius} {color:06x} {alpha} {thickness}"
+    ))
 }
 
 extern "C" fn fake_hud_polygon(
     _hud: *mut UmiHudCx,
-    _points: *const f32,
-    _count: usize,
-    _color: u32,
-    _alpha: f32,
+    points: *const f32,
+    count: usize,
+    color: u32,
+    alpha: f32,
 ) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    // SAFETY: the module under test passes `count` points of two floats.
+    let floats = unsafe { std::slice::from_raw_parts(points, 2 * count) };
+    hud_call(format!("polygon {floats:?} {color:06x} {alpha}"))
 }
 
 extern "C" fn fake_hud_clip_push(
     _hud: *mut UmiHudCx,
-    _x: f32,
-    _y: f32,
-    _width: f32,
-    _height: f32,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
 ) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    hud_call(format!("clip {x} {y} {width} {height}"))
 }
 
 extern "C" fn fake_hud_clip_pop(_hud: *mut UmiHudCx) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    hud_call("pop".to_owned())
 }
 
 extern "C" fn fake_register_world_layer(
@@ -1722,6 +1731,11 @@ fn every_hud_primitive_reaches_the_host() {
             "label 1 2 text ffffff 0.5 2",
             "cell 3 4 5 6 1 W 00ff00",
             "tick 7 8 9 10 0000ff 0.25",
+            "clip 0 0 20 10",
+            "circle 5 5 3 ff0000 1 0",
+            "circle 5 5 4 ff0000 0.5 1.5",
+            "pop",
+            "polygon [0.0, 0.0, 4.0, 0.0, 0.0, 4.0] 123456 1",
         ]
     );
 }

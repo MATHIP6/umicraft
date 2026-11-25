@@ -182,6 +182,26 @@ pub enum DrawCommand {
         /// Straight-alpha RGBA colour.
         color: Color,
     },
+    /// Fill a circle, or a ring `thickness` pixels wide inside its edge (the
+    /// circle primitive of mod widgets, API 1.4). The renderer tessellates it.
+    Circle {
+        /// Centre, in physical pixels.
+        center: [f32; 2],
+        /// Radius, in physical pixels.
+        radius: f32,
+        /// Width of the ring in physical pixels; `0.0` fills the disc.
+        thickness: f32,
+        /// Straight-alpha RGBA colour.
+        color: Color,
+    },
+    /// Fill the convex polygon through `points` (the polygon primitive of mod
+    /// widgets, API 1.4).
+    Polygon {
+        /// The corners in order, in physical pixels.
+        points: Vec<[f32; 2]>,
+        /// Straight-alpha RGBA colour.
+        color: Color,
+    },
     /// Draw one line of text at `position` (top-left of the first glyph).
     Text {
         /// Top-left position of the text run.
@@ -351,6 +371,27 @@ impl DrawList {
             from,
             to,
             thickness,
+            color,
+        });
+    }
+
+    /// Appends a circle of `radius` pixels around `center`: filled when
+    /// `thickness` is `0.0`, else a ring that wide inside its edge.
+    pub fn circle(&mut self, center: [f32; 2], radius: f32, thickness: f32, color: Color) {
+        let color = self.faded(color);
+        self.commands.push(DrawCommand::Circle {
+            center,
+            radius,
+            thickness,
+            color,
+        });
+    }
+
+    /// Appends the filled convex polygon through `points`.
+    pub fn polygon(&mut self, points: impl Into<Vec<[f32; 2]>>, color: Color) {
+        let color = self.faded(color);
+        self.commands.push(DrawCommand::Polygon {
+            points: points.into(),
             color,
         });
     }

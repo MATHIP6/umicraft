@@ -7,7 +7,7 @@
 //! sizes non-negative, opacity and text scale are clamped, text is cut to a
 //! bounded length and a widget has a bounded number of items (ADR-0086, F3.4).
 
-use umicraft_builtin_mods::{HudContent, HudSegment};
+use umicraft_builtin_mods::{HudCircle, HudContent, HudSegment};
 use umicraft_modapi_sys::UmiStatus;
 
 use super::{MAX_HUD_ITEMS, MAX_HUD_TEXT_BYTES};
@@ -16,8 +16,15 @@ use super::{MAX_HUD_ITEMS, MAX_HUD_TEXT_BYTES};
 const MAX_RESERVE: f32 = 4096.0;
 /// Range of the scale of a free label, so a mod cannot draw invisible or screen-size text.
 const LABEL_SCALE: (f32, f32) = (0.25, 4.0);
-/// Range of the thickness of a segment, in GUI pixels (ADR-0094).
-const SEGMENT_THICKNESS: (f32, f32) = (0.5, 8.0);
+/// Range of the thickness of a segment, in GUI pixels (ADR-0094; the lower end
+/// went from 0.5 to 0.05 in API 1.4, ADR-0097).
+const SEGMENT_THICKNESS: (f32, f32) = (0.05, 8.0);
+/// Widest ring of a circle, in GUI pixels.
+const MAX_RING: f32 = 8.0;
+/// Corners a polygon may have (API 1.4).
+pub(crate) const POLYGON_POINTS: (usize, usize) = (3, 64);
+/// Clips a widget may nest (API 1.4).
+const MAX_CLIPS: usize = 8;
 /// Width of the edges of an outline, in GUI pixels.
 const OUTLINE_WIDTH: f32 = 1.0;
 
@@ -157,8 +164,74 @@ pub(crate) fn segment(
             thickness: thickness.clamp(SEGMENT_THICKNESS.0, SEGMENT_THICKNESS.1),
             color: rgb(color),
             alpha: alpha.clamp(0.0, 1.0),
+            clip: None,
         });
     }))
+}
+
+/// `hud_circle`: adds a disc (`thickness <= 0`) or a ring at most [`MAX_RING`]
+/// wide.
+pub(crate) fn circle(
+    content: &mut HudContent,
+    center: [f32; 2],
+    radius: f32,
+    color: u32,
+    alpha: f32,
+    thickness: f32,
+) -> UmiStatus {
+    if !all_finite(&[center[0], center[1], radius, alpha, thickness]) || radius < 0.0 {
+        return UmiStatus::INVALID_ARGUMENT;
+    }
+    status(room(content.circles().len()).map(|()| {
+        content.circle(HudCircle {
+            center,
+            radius: radius.min(MAX_RESERVE),
+            thickness: thickness.clamp(0.0, MAX_RING),
+            color: rgb(color),
+            alpha: alpha.clamp(0.0, 1.0),
+            clip: None,
+        });
+    }))
+}
+
+/// `hud_polygon`: adds a filled polygon through `points` (3 to 64 of them).
+pub(crate) fn polygon(
+    content: &mut HudContent,
+    points: &[[f32; 2]],
+    color: u32,
+    alpha: f32,
+) -> UmiStatus {
+    let (fewest, most) = POLYGON_POINTS;
+    if !(fewest..=most).contains(&points.len())
+        || !alpha.is_finite()
+        || !points.iter().all(|point| all_finite(point))
+    {
+        return UmiStatus::INVALID_ARGUMENT;
+    }
+    status(room(content.polygons().len()).map(|()| {
+        content.polygon(points.iter().copied(), rgb(color), alpha.clamp(0.0, 1.0));
+    }))
+}
+
+/// `hud_clip_push`: opens a clip; `DENIED` past [`MAX_CLIPS`].
+pub(crate) fn clip_push(content: &mut HudContent, rect: [f32; 4]) -> UmiStatus {
+    if !all_finite(&rect) || rect[2] < 0.0 || rect[3] < 0.0 {
+        return UmiStatus::INVALID_ARGUMENT;
+    }
+    if content.clip_depth() >= MAX_CLIPS {
+        return UmiStatus::DENIED;
+    }
+    content.push_clip(rect);
+    UmiStatus::OK
+}
+
+/// `hud_clip_pop`: closes the innermost clip; `INVALID_ARGUMENT` when none is open.
+pub(crate) fn clip_pop(content: &mut HudContent) -> UmiStatus {
+    if content.pop_clip() {
+        UmiStatus::OK
+    } else {
+        UmiStatus::INVALID_ARGUMENT
+    }
 }
 
 /// `hud_reserve`: keeps the widget at least `width` x `height` pixels big.
@@ -269,6 +342,57 @@ mod tests {
             (wide.thickness, thin.thickness),
             (SEGMENT_THICKNESS.1, SEGMENT_THICKNESS.0)
         );
+    }
+
+    #[test]
+    fn a_circle_is_a_disc_or_a_clamped_ring() {
+        let mut c = HudContent::default();
+        assert_eq!(
+            circle(&mut c, [5.0, 5.0], 4.0, 0xff_00ff00, 0.5, -1.0),
+            UmiStatus::OK
+        );
+        assert_eq!(circle(&mut c, [5.0, 5.0], 4.0, 0, 2.0, 50.0), UmiStatus::OK);
+        let [disc, ring] = c.circles() else {
+            panic!("two circles");
+        };
+        assert_eq!(
+            (disc.thickness, disc.color, disc.alpha),
+            (0.0, 0x00ff00, 0.5)
+        );
+        assert_eq!((ring.thickness, ring.alpha), (MAX_RING, 1.0));
+        let bad = UmiStatus::INVALID_ARGUMENT;
+        assert_eq!(circle(&mut c, [0.0; 2], -1.0, 0, 1.0, 0.0), bad);
+        assert_eq!(circle(&mut c, [f32::NAN, 0.0], 1.0, 0, 1.0, 0.0), bad);
+    }
+
+    #[test]
+    fn a_polygon_needs_three_to_sixty_four_finite_points() {
+        let mut c = HudContent::default();
+        let triangle = [[0.0, 0.0], [4.0, 0.0], [0.0, 4.0]];
+        assert_eq!(polygon(&mut c, &triangle, 0xffffff, 1.0), UmiStatus::OK);
+        assert_eq!(c.polygons()[0].points, triangle);
+        let bad = UmiStatus::INVALID_ARGUMENT;
+        assert_eq!(polygon(&mut c, &triangle[..2], 0, 1.0), bad);
+        assert_eq!(polygon(&mut c, &[[0.0; 2]; 65], 0, 1.0), bad);
+        assert_eq!(polygon(&mut c, &[[0.0, f32::INFINITY]; 3], 0, 1.0), bad);
+        assert_eq!(polygon(&mut c, &[[0.0; 2]; 64], 0, 1.0), UmiStatus::OK);
+    }
+
+    #[test]
+    fn clips_nest_up_to_the_bound_and_a_stray_pop_is_refused() {
+        let mut c = HudContent::default();
+        assert_eq!(clip_pop(&mut c), UmiStatus::INVALID_ARGUMENT);
+        assert_eq!(
+            clip_push(&mut c, [0.0, 0.0, -1.0, 1.0]),
+            UmiStatus::INVALID_ARGUMENT
+        );
+        for _ in 0..MAX_CLIPS {
+            assert_eq!(clip_push(&mut c, [0.0, 0.0, 9.0, 9.0]), UmiStatus::OK);
+        }
+        assert_eq!(clip_push(&mut c, [0.0; 4]), UmiStatus::DENIED);
+        tick(&mut c, [1.0, 1.0, 2.0, 2.0], 0, 1.0);
+        assert_eq!(c.ticks()[0].clip, Some([0.0, 0.0, 9.0, 9.0]));
+        assert_eq!(clip_pop(&mut c), UmiStatus::OK);
     }
 
     #[test]

@@ -157,7 +157,8 @@ impl Hud<'_> {
     }
 
     /// Adds a line from `(x1, y1)` to `(x2, y2)`, `thickness` pixels wide (the
-    /// host keeps it within 0.5..=8).
+    /// host keeps it within 0.05..=8 since API 1.4, 0.5..=8 before; under one
+    /// screen pixel it is drawn one pixel wide and fainter).
     #[allow(clippy::too_many_arguments)] // mirrors `hud_segment` of the C ABI
     pub fn segment(
         &mut self,
@@ -170,5 +171,47 @@ impl Hud<'_> {
         thickness: f32,
     ) {
         self.emit(|host, raw| (host.hud_segment)(raw, x1, y1, x2, y2, color, alpha, thickness));
+    }
+
+    /// Adds a filled disc of `radius` pixels centred on `(x, y)`. API 1.4.
+    pub fn circle(&mut self, x: f32, y: f32, radius: f32, color: u32, alpha: f32) {
+        self.emit(|host, raw| (host.hud_circle)(raw, x, y, radius, color, alpha, 0.0));
+    }
+
+    /// Adds a ring of `radius` pixels centred on `(x, y)`, `thickness` pixels
+    /// wide inside its edge (at most 8). API 1.4.
+    #[allow(clippy::too_many_arguments)] // mirrors `hud_circle` of the C ABI
+    pub fn ring(&mut self, x: f32, y: f32, radius: f32, color: u32, alpha: f32, thickness: f32) {
+        self.emit(|host, raw| (host.hud_circle)(raw, x, y, radius, color, alpha, thickness));
+    }
+
+    /// Adds the filled convex polygon through `points` (3 to 64 of them). API
+    /// 1.4.
+    pub fn polygon(&mut self, points: &[[f32; 2]], color: u32, alpha: f32) {
+        self.emit(|host, raw| {
+            (host.hud_polygon)(raw, points.as_ptr().cast(), points.len(), color, alpha)
+        });
+    }
+
+    /// Runs `draw` with the free items it adds (cells, labels, rectangles,
+    /// segments, circles, polygons; not [`line`](Self::line)s) cut to the
+    /// `w` x `h` rectangle at `(x, y)`, within any enclosing clip. At most 8
+    /// clips nest: a ninth is refused, and like any refused call it skips the
+    /// rest of the frame. API 1.4.
+    ///
+    /// ```ignore
+    /// hud.clip(0.0, 0.0, 60.0, 10.0, |hud| hud.label(30.0, 0.0, long_text, WHITE, 1.0, 1.0));
+    /// ```
+    pub fn clip(&mut self, x: f32, y: f32, w: f32, h: f32, draw: impl FnOnce(&mut Self)) {
+        let mut pushed = false;
+        self.emit(|host, raw| {
+            let status = (host.hud_clip_push)(raw, x, y, w, h);
+            pushed = status.is_ok();
+            status
+        });
+        draw(self);
+        if pushed {
+            self.emit(|host, raw| (host.hud_clip_pop)(raw));
+        }
     }
 }

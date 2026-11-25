@@ -6,8 +6,8 @@
 
 use umicraft_builtin_mods::{HudContent, HudPlacement, HudStyle, HudWidget, Shadow};
 use umicraft_render::{
-    gui_scale, measure_mod_widget_view, ModCell, ModLabel, ModLine, ModSegment, ModTick,
-    ModWidgetView, ShadowStyle, WidgetStyle,
+    gui_scale, measure_mod_widget_view, ModCell, ModCircle, ModLabel, ModLine, ModPolygon,
+    ModSegment, ModTick, ModWidgetView, ShadowStyle, WidgetStyle,
 };
 use umicraft_ui::FontAtlas;
 
@@ -105,6 +105,7 @@ fn content_view(content: &HudContent, icons: &ModIcons<'_>) -> ModWidgetView {
             pressed: cell.pressed,
             color: cell.color,
             text: cell.text.clone(),
+            clip: cell.clip,
         })
         .collect();
     let labels = content
@@ -116,6 +117,7 @@ fn content_view(content: &HudContent, icons: &ModIcons<'_>) -> ModWidgetView {
             color: label.color,
             alpha: label.alpha,
             scale: label.scale,
+            clip: label.clip,
         })
         .collect();
     let ticks = content
@@ -125,6 +127,7 @@ fn content_view(content: &HudContent, icons: &ModIcons<'_>) -> ModWidgetView {
             rect: tick.rect,
             color: tick.color,
             alpha: tick.alpha,
+            clip: tick.clip,
         })
         .collect();
     let segments = content
@@ -136,6 +139,29 @@ fn content_view(content: &HudContent, icons: &ModIcons<'_>) -> ModWidgetView {
             thickness: segment.thickness,
             color: segment.color,
             alpha: segment.alpha,
+            clip: segment.clip,
+        })
+        .collect();
+    let circles = content
+        .circles()
+        .iter()
+        .map(|circle| ModCircle {
+            center: circle.center,
+            radius: circle.radius,
+            thickness: circle.thickness,
+            color: circle.color,
+            alpha: circle.alpha,
+            clip: circle.clip,
+        })
+        .collect();
+    let polygons = content
+        .polygons()
+        .iter()
+        .map(|polygon| ModPolygon {
+            points: polygon.points.clone(),
+            color: polygon.color,
+            alpha: polygon.alpha,
+            clip: polygon.clip,
         })
         .collect();
     ModWidgetView {
@@ -144,6 +170,8 @@ fn content_view(content: &HudContent, icons: &ModIcons<'_>) -> ModWidgetView {
         labels,
         ticks,
         segments,
+        circles,
+        polygons,
         reserve: content.reserve,
         style: widget_style(&content.style),
         ..ModWidgetView::default()
@@ -198,6 +226,7 @@ mod tests {
             thickness: 1.0,
             color: 0xff0000,
             alpha: 1.0,
+            clip: None,
         });
         let placement = HudPlacement {
             scale: 2.5,

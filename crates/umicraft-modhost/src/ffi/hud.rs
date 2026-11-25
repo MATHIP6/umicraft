@@ -170,39 +170,51 @@ pub(super) extern "C" fn host_hud_segment(
 }
 
 pub(super) extern "C" fn host_hud_circle(
-    _hud: *mut UmiHudCx,
-    _x: f32,
-    _y: f32,
-    _radius: f32,
-    _color: u32,
-    _alpha: f32,
-    _thickness: f32,
+    hud: *mut UmiHudCx,
+    x: f32,
+    y: f32,
+    radius: f32,
+    color: u32,
+    alpha: f32,
+    thickness: f32,
 ) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    with_call(hud, |content| {
+        draw::circle(content, [x, y], radius, color, alpha, thickness)
+    })
 }
 
 pub(super) extern "C" fn host_hud_polygon(
-    _hud: *mut UmiHudCx,
-    _points: *const f32,
-    _count: usize,
-    _color: u32,
-    _alpha: f32,
+    hud: *mut UmiHudCx,
+    points: *const f32,
+    count: usize,
+    color: u32,
+    alpha: f32,
 ) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    let (fewest, most) = draw::POLYGON_POINTS;
+    if points.is_null() || !(fewest..=most).contains(&count) {
+        return UmiStatus::INVALID_ARGUMENT;
+    }
+    // SAFETY: `points` is non-null and the ABI promises `2 * count` readable
+    // floats; `count` is at most 64, so the length cannot overflow. `[f32; 2]` has
+    // the alignment of `f32`.
+    let points = unsafe { core::slice::from_raw_parts(points.cast::<[f32; 2]>(), count) };
+    with_call(hud, |content| draw::polygon(content, points, color, alpha))
 }
 
 pub(super) extern "C" fn host_hud_clip_push(
-    _hud: *mut UmiHudCx,
-    _x: f32,
-    _y: f32,
-    _width: f32,
-    _height: f32,
+    hud: *mut UmiHudCx,
+    x: f32,
+    y: f32,
+    width: f32,
+    height: f32,
 ) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    with_call(hud, |content| {
+        draw::clip_push(content, [x, y, width, height])
+    })
 }
 
-pub(super) extern "C" fn host_hud_clip_pop(_hud: *mut UmiHudCx) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+pub(super) extern "C" fn host_hud_clip_pop(hud: *mut UmiHudCx) -> UmiStatus {
+    with_call(hud, draw::clip_pop)
 }
 
 pub(super) extern "C" fn host_hud_reserve(
@@ -211,4 +223,56 @@ pub(super) extern "C" fn host_hud_reserve(
     height: f32,
 ) -> UmiStatus {
     with_call(hud, |content| draw::reserve(content, width, height))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ffi::host_table;
+
+    #[test]
+    fn shapes_and_clips_reach_the_widget_being_drawn() {
+        let mut content = HudContent::default();
+        let host = host_table();
+        let status = with_hud_cx(&mut content, |cx| {
+            assert_eq!(
+                (host.hud_clip_push)(cx, 0.0, 0.0, 20.0, 20.0),
+                UmiStatus::OK
+            );
+            let points = [0.0_f32, 0.0, 8.0, 0.0, 0.0, 8.0];
+            assert_eq!(
+                (host.hud_polygon)(cx, points.as_ptr(), 3, 0xffffff, 1.0),
+                UmiStatus::OK
+            );
+            assert_eq!(
+                (host.hud_circle)(cx, 4.0, 4.0, 3.0, 0xff0000, 1.0, 1.0),
+                UmiStatus::OK
+            );
+            assert_eq!((host.hud_clip_pop)(cx), UmiStatus::OK);
+            assert_eq!((host.hud_clip_pop)(cx), UmiStatus::INVALID_ARGUMENT);
+            UmiStatus::OK
+        });
+        assert_eq!(status, UmiStatus::OK);
+        assert_eq!(content.polygons()[0].points[1], [8.0, 0.0]);
+        assert_eq!(content.circles()[0].clip, Some([0.0, 0.0, 20.0, 20.0]));
+    }
+
+    #[test]
+    fn a_polygon_with_a_null_pointer_or_a_bad_count_is_refused() {
+        let mut content = HudContent::default();
+        let host = host_table();
+        with_hud_cx(&mut content, |cx| {
+            let points = [0.0_f32; 2 * 65];
+            let bad = UmiStatus::INVALID_ARGUMENT;
+            assert_eq!((host.hud_polygon)(cx, core::ptr::null(), 3, 0, 1.0), bad);
+            assert_eq!((host.hud_polygon)(cx, points.as_ptr(), 2, 0, 1.0), bad);
+            assert_eq!((host.hud_polygon)(cx, points.as_ptr(), 65, 0, 1.0), bad);
+            UmiStatus::OK
+        });
+        assert!(content.polygons().is_empty());
+        // Outside a draw the shapes are denied like every `hud_*` call.
+        let mut fake = 0_u8;
+        let stray = core::ptr::from_mut(&mut fake).cast::<UmiHudCx>();
+        assert_eq!((host.hud_clip_pop)(stray), UmiStatus::DENIED);
+    }
 }

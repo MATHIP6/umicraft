@@ -158,6 +158,9 @@ pub struct ModCell {
     pub color: u32,
     /// The text, centred in the box.
     pub text: String,
+    /// The rectangle `[x, y, width, height]` in GUI units from the top-left of
+    /// the content it is cut to, `None` for none (API 1.4).
+    pub clip: Option<[f32; 4]>,
 }
 
 /// A text centered on a point of a widget, with its own opacity and size.
@@ -174,6 +177,9 @@ pub struct ModLabel {
     pub alpha: f32,
     /// Size relative to the normal text.
     pub scale: f32,
+    /// The rectangle `[x, y, width, height]` in GUI units from the top-left of
+    /// the content it is cut to, `None` for none (API 1.4).
+    pub clip: Option<[f32; 4]>,
 }
 
 /// A small filled rectangle of a widget.
@@ -185,6 +191,9 @@ pub struct ModTick {
     pub color: u32,
     /// Opacity, `0.0` to `1.0`.
     pub alpha: f32,
+    /// The rectangle `[x, y, width, height]` in GUI units from the top-left of
+    /// the content it is cut to, `None` for none (API 1.4).
+    pub clip: Option<[f32; 4]>,
 }
 
 /// A straight line of a widget, at any angle.
@@ -200,6 +209,41 @@ pub struct ModSegment {
     pub color: u32,
     /// Opacity, `0.0` to `1.0`.
     pub alpha: f32,
+    /// The rectangle `[x, y, width, height]` in GUI units from the top-left of
+    /// the content it is cut to, `None` for none (API 1.4).
+    pub clip: Option<[f32; 4]>,
+}
+
+/// A circle of a widget, filled or a ring (API 1.4).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModCircle {
+    /// Centre, in GUI units from the top-left of the content.
+    pub center: [f32; 2],
+    /// Radius, in GUI units.
+    pub radius: f32,
+    /// Width of the ring in GUI units, `0.0` for a disc.
+    pub thickness: f32,
+    /// The colour as `0xRRGGBB`.
+    pub color: u32,
+    /// Opacity, `0.0` to `1.0`.
+    pub alpha: f32,
+    /// The rectangle `[x, y, width, height]` in GUI units from the top-left of
+    /// the content it is cut to, `None` for none (API 1.4).
+    pub clip: Option<[f32; 4]>,
+}
+
+/// A filled convex polygon of a widget (API 1.4).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModPolygon {
+    /// The corners, in GUI units from the top-left of the content.
+    pub points: Vec<[f32; 2]>,
+    /// The colour as `0xRRGGBB`.
+    pub color: u32,
+    /// Opacity, `0.0` to `1.0`.
+    pub alpha: f32,
+    /// The rectangle `[x, y, width, height]` in GUI units from the top-left of
+    /// the content it is cut to, `None` for none (API 1.4).
+    pub clip: Option<[f32; 4]>,
 }
 
 /// A mod widget whose position is already resolved.
@@ -218,6 +262,10 @@ pub struct ModWidgetView {
     pub ticks: Vec<ModTick>,
     /// The straight lines.
     pub segments: Vec<ModSegment>,
+    /// The circles (API 1.4).
+    pub circles: Vec<ModCircle>,
+    /// The polygons (API 1.4).
+    pub polygons: Vec<ModPolygon>,
     /// The size `[width, height]` in GUI units the content keeps at least.
     pub reserve: [f32; 2],
     /// Whether the rows are mirrored (text, then picture, against the right
@@ -240,6 +288,8 @@ impl Default for ModWidgetView {
             labels: Vec::new(),
             ticks: Vec::new(),
             segments: Vec::new(),
+            circles: Vec::new(),
+            polygons: Vec::new(),
             reserve: [0.0; 2],
             mirrored: false,
             position: [0.0; 2],
@@ -258,6 +308,8 @@ impl ModWidgetView {
             && self.labels.is_empty()
             && self.ticks.is_empty()
             && self.segments.is_empty()
+            && self.circles.is_empty()
+            && self.polygons.is_empty()
             && self.reserve == [0.0; 2]
     }
 
@@ -298,6 +350,22 @@ fn content_size(font: &FontAtlas, widget: &ModWidgetView) -> (f32, f32) {
         .segments
         .iter()
         .flat_map(|segment| [segment.from, segment.to])
+        .fold((width, height), |(w, h), [x, y]| (w.max(x), h.max(y)));
+    let (width, height) = widget
+        .circles
+        .iter()
+        .map(|circle| {
+            [
+                circle.center[0] + circle.radius,
+                circle.center[1] + circle.radius,
+            ]
+        })
+        .chain(
+            widget
+                .polygons
+                .iter()
+                .flat_map(|p| p.points.iter().copied()),
+        )
         .fold((width, height), |(w, h), [x, y]| (w.max(x), h.max(y)));
     let (width, height) = widget.labels.iter().fold((width, height), |(w, h), label| {
         let text_width = font.measure(&label.text, 1.0) * label.scale;
@@ -391,37 +459,69 @@ fn draw_widget(list: &mut DrawList, widget: &ModWidgetView, sf: f32, font: &Font
     };
     let inner_width = width / widget.scale - 2.0 * style.padding;
     for cell in &widget.cells {
-        draw_cell(list, cell, origin, style, font);
+        clipped(list, origin, cell.clip, |list| {
+            draw_cell(list, cell, origin, style, font);
+        });
     }
     for tick in &widget.ticks {
         let [x, y, width, height] = tick.rect;
         let mut colour = rgb(tick.color);
         colour[3] = tick.alpha;
-        list.rect(origin.rect(x, y, width, height), colour);
+        clipped(list, origin, tick.clip, |list| {
+            list.rect(origin.rect(x, y, width, height), colour);
+        });
     }
     for segment in &widget.segments {
         let mut colour = rgb(segment.color);
         colour[3] = segment.alpha;
-        list.segment(
-            origin.at(segment.from[0], segment.from[1]),
-            origin.at(segment.to[0], segment.to[1]),
-            segment.thickness * origin.unit,
-            colour,
-        );
+        clipped(list, origin, segment.clip, |list| {
+            list.segment(
+                origin.at(segment.from[0], segment.from[1]),
+                origin.at(segment.to[0], segment.to[1]),
+                segment.thickness * origin.unit,
+                colour,
+            );
+        });
+    }
+    for circle in &widget.circles {
+        let mut colour = rgb(circle.color);
+        colour[3] = circle.alpha;
+        clipped(list, origin, circle.clip, |list| {
+            list.circle(
+                origin.at(circle.center[0], circle.center[1]),
+                circle.radius * origin.unit,
+                circle.thickness * origin.unit,
+                colour,
+            );
+        });
+    }
+    for polygon in &widget.polygons {
+        let mut colour = rgb(polygon.color);
+        colour[3] = polygon.alpha;
+        let points: Vec<[f32; 2]> = polygon
+            .points
+            .iter()
+            .map(|&[x, y]| origin.at(x, y))
+            .collect();
+        clipped(list, origin, polygon.clip, |list| {
+            list.polygon(points, colour)
+        });
     }
     for label in &widget.labels {
         let text_width = font.measure(&label.text, 1.0) * label.scale;
         let at = origin.at(label.at[0] - text_width / 2.0, label.at[1]);
         let mut ink = rgb(label.color);
         ink[3] = label.alpha;
-        draw_text(
-            list,
-            at,
-            &label.text,
-            ink,
-            style.shadow,
-            origin.unit * label.scale,
-        );
+        clipped(list, origin, label.clip, |list| {
+            draw_text(
+                list,
+                at,
+                &label.text,
+                ink,
+                style.shadow,
+                origin.unit * label.scale,
+            );
+        });
     }
     let mut row_top = 0.0;
     for line in &widget.lines {
@@ -434,6 +534,23 @@ fn draw_widget(list: &mut DrawList, widget: &ModWidgetView, sf: f32, font: &Font
             font,
         );
         row_top += line.height();
+    }
+}
+
+/// Runs `draw` inside a clip scope of `clip` (content units), or as is for none.
+fn clipped(
+    list: &mut DrawList,
+    origin: Origin,
+    clip: Option<[f32; 4]>,
+    draw: impl FnOnce(&mut DrawList),
+) {
+    match clip {
+        Some([x, y, width, height]) => {
+            list.push_clip(origin.rect(x, y, width, height));
+            draw(list);
+            list.pop_clip();
+        }
+        None => draw(list),
     }
 }
 
@@ -855,12 +972,14 @@ mod tests {
                 pressed: true,
                 color: 0xFFFFFF,
                 text: "W".into(),
+                clip: None,
             },
             ModCell {
                 rect: [0.0, 24.0, 70.0, 10.0],
                 pressed: false,
                 color: 0xFFFFFF,
                 text: "---".into(),
+                clip: None,
             },
         ];
         let view = only(Vec::new(), cells, false);
@@ -888,11 +1007,13 @@ mod tests {
                 color: 0xFF_FFFF,
                 alpha: 0.5,
                 scale: 2.0,
+                clip: None,
             }],
             ticks: vec![ModTick {
                 rect: [10.0, 1.0, 1.0, 3.0],
                 color: 0xFF_FFFF,
                 alpha: 0.25,
+                clip: None,
             }],
             reserve: [100.0, 30.0],
             style: WidgetStyle {
@@ -919,6 +1040,55 @@ mod tests {
             width >= 50.0,
             "to the middle of the label and half its width"
         );
+    }
+
+    #[test]
+    fn shapes_are_scaled_measured_and_clipped() {
+        let font = FontAtlas::fallback();
+        let view = ModWidgetView {
+            circles: vec![ModCircle {
+                center: [10.0, 10.0],
+                radius: 5.0,
+                thickness: 1.0,
+                color: 0xFF_0000,
+                alpha: 1.0,
+                clip: Some([0.0, 0.0, 12.0, 12.0]),
+            }],
+            polygons: vec![ModPolygon {
+                points: vec![[0.0, 0.0], [30.0, 0.0], [0.0, 8.0]],
+                color: 0x00_FF00,
+                alpha: 0.5,
+                clip: None,
+            }],
+            style: WidgetStyle {
+                background: None,
+                padding: 0.0,
+                ..WidgetStyle::default()
+            },
+            ..ModWidgetView::default()
+        };
+        assert!(!view.is_empty());
+        assert_eq!(measure_view(&font, &view), (30.0, 15.0));
+        let mut list = DrawList::new();
+        draw_mod_widgets(&mut list, &[view], 2.0, &font);
+        let commands = list.commands();
+        assert!(matches!(
+            commands[0],
+            DrawCommand::PushClip { rect } if rect == Rect::new(0.0, 0.0, 24.0, 24.0)
+        ));
+        assert!(matches!(
+            commands[1],
+            DrawCommand::Circle { center: [20.0, 20.0], radius, thickness, .. }
+                if radius == 10.0 && thickness == 2.0
+        ));
+        assert!(matches!(commands[2], DrawCommand::PopClip));
+        match &commands[3] {
+            DrawCommand::Polygon { points, color } => {
+                assert_eq!(points[1], [60.0, 0.0]);
+                assert_eq!(color[3], 0.5);
+            }
+            other => panic!("a polygon, not {other:?}"),
+        }
     }
 
     #[test]
