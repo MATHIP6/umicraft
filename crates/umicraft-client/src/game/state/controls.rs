@@ -8,7 +8,7 @@ pub(in crate::game) struct Controls {
     /// The latest key state.
     pub(in crate::game) input: crate::input::InputState,
     /// The attack button went down since the last tick.
-    pub(in crate::game) attack_pressed: bool,
+    pub(in crate::game) attack_presses: u8,
     /// The use button went down since the last tick.
     pub(in crate::game) use_pressed: bool,
     /// The `F5` presses since the last tick, applied by the next one.

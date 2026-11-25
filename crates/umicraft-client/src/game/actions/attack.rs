@@ -49,7 +49,8 @@ fn swing_while_using(game: &mut Game) {
 /// `PlayerControllerMP.onPlayerDestroyBlock`; the server confirms or
 /// restores them with a block change.
 pub(in crate::game) fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
-    let pressed = std::mem::take(&mut game.controls.attack_pressed);
+    let clicks = std::mem::take(&mut game.controls.attack_presses);
+    let pressed = clicks > 0;
     // MCP `Minecraft.runTick` lines 2098-2121: the attack button does
     // nothing while an item is in use.
     if game.spectating() || game.dead() || game.item_use.is_using() {
@@ -94,15 +95,18 @@ pub(in crate::game) fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
             .is_some_and(|nbt| enchantment_level(nbt, AQUA_AFFINITY) > 0),
         on_ground: player.on_ground,
     };
-    let output = game.interaction.attack(&AttackTick {
-        mode: game.gamemode,
-        pressed,
-        held: game.controls.input.attack,
-        target,
-        entity,
-        world,
-        digger,
-    });
+    let output = game.interaction.attack_clicks(
+        &AttackTick {
+            mode: game.gamemode,
+            pressed,
+            held: game.controls.input.attack,
+            target,
+            entity,
+            world,
+            digger,
+        },
+        clicks,
+    );
     let effects = swing_effects(game);
     if let Some(state) = game.state.as_mut() {
         state.queue_sound_cues(output.sounds);

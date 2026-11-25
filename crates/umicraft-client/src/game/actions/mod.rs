@@ -64,7 +64,11 @@ pub(super) fn handle_input(game: &mut Game, update: InputUpdate, _queue: &mut Co
     if update.toggle_perspective {
         game.controls.perspective_presses = game.controls.perspective_presses.saturating_add(1);
     }
-    game.controls.attack_pressed |= update.break_block;
+    // Every click counts: two inside one tick are two attacks, as the
+    // mouse event loop of `Minecraft.runTick` makes them.
+    if update.break_block {
+        game.controls.attack_presses = game.controls.attack_presses.saturating_add(1);
+    }
     game.controls.use_pressed |= update.place_block;
     if update.pick_block {
         game.hotbar.picks = game.hotbar.picks.saturating_add(1);

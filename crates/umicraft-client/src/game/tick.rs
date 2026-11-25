@@ -24,6 +24,7 @@ use super::actions::use_item::run_use;
 use super::body::follow_body;
 use super::combat;
 use super::commands::{command_of, CommandQueue};
+use super::game_loop::handle_event;
 use super::hud::tick_hud_view;
 use super::messages::{ChunkEvent, RenderEvent};
 use super::movement::report_movement;
@@ -138,6 +139,11 @@ pub(super) fn tick(
     // come the clicks (each syncing the slot before its controller packet)
     // and the pick-block.
     sync_held_item(game, queue);
+    // `GuiScreen.handleInput` comes next: the clicks and the lines of the
+    // screens, so their packets go before the movement packet of the tick.
+    for event in std::mem::take(&mut game.screen_actions) {
+        handle_event(game, event, queue, frames);
+    }
     run_hotbar_keys(game);
     for kind in std::mem::take(&mut game.hotbar.drops) {
         if let Some(outgoing) = drop_item(game.gamemode, kind) {

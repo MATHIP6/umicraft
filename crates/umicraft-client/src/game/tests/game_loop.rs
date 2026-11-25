@@ -58,6 +58,23 @@ fn a_teleport_loop_runs_at_the_frame_rate() {
     );
 }
 
+/// A stutter does not hold the server's packets back for its whole length:
+/// with 200 ms frames the exchange still runs at least once per tick (50 ms),
+/// so knockback and teleports reach the ticks that follow them.
+#[test]
+fn a_slow_frame_does_not_hold_the_server_packets_longer_than_a_tick() {
+    let mut harness = LoopHarness::start(65_536);
+    harness.join_world();
+    harness.wait_for_ticks(3);
+    harness.frame_micros.store(200_000, Ordering::Relaxed);
+    let count = teleport_ping_pong(&mut harness, std::time::Duration::from_millis(500));
+    let _ = harness.finish();
+    assert!(
+        count >= 8,
+        "{count} confirmations in 500 ms with 200 ms frames (a tick is 50 ms)"
+    );
+}
+
 /// With the pacing off (value 0, the old behaviour) the same exchange runs
 /// as fast as the threads allow: far more than a frame rate.
 #[test]
