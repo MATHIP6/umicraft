@@ -41,6 +41,7 @@ use crate::gpu_timer::{DrawCallStats, GpuTimer};
 use crate::hires_blocks::HiresBlocks;
 use crate::items::{DynamicMesh, GlintPass, IconAtlas, WorldGlint};
 use crate::lightmap::{self, TorchFlicker};
+use crate::mod_world::ModWorldRenderer;
 use crate::motion_blur::MotionBlur;
 use crate::nametag::NametagRenderer;
 use crate::outline::LineRenderer;
@@ -371,6 +372,8 @@ pub struct Renderer {
     outline: LineRenderer,
     /// The coloured lines of the debug chords (hitboxes, chunk borders).
     debug_lines: LineRenderer,
+    /// The lines and shapes the mods draw in the world (API 1.4).
+    mod_world: ModWorldRenderer,
     /// The blur of the game behind a menu, and whether a menu asks for it.
     scene_blur: SceneBlur,
     /// The motion blur of the world (the Motion Blur mod).

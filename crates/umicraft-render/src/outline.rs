@@ -55,13 +55,24 @@ pub struct DebugLine {
     pub color: [f32; 4],
 }
 
-/// One edge as the vertex shader reads it: end points and colour.
+/// One edge as the vertex shader reads it: end points, colour and width in
+/// pixels.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Edge {
-    from: [f32; 3],
-    to: [f32; 3],
-    color: [f32; 4],
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub(crate) struct Edge {
+    pub(crate) from: [f32; 3],
+    pub(crate) to: [f32; 3],
+    pub(crate) color: [f32; 4],
+    pub(crate) width: f32,
+}
+
+/// Whether a line renderer tests the depth of the world.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LineDepth {
+    /// Hidden by what is in front of it, like the selection outline.
+    Tested,
+    /// Drawn over everything already in the pass (a mod's line through walls).
+    Ignored,
 }
 
 /// An axis-aligned box in world space, as plain data for the renderer.
@@ -123,6 +134,17 @@ impl LineRenderer {
         format: wgpu::TextureFormat,
         capacity: usize,
     ) -> Self {
+        Self::with_depth(device, camera_layout, format, capacity, LineDepth::Tested)
+    }
+
+    /// Like [`new`](Self::new), choosing whether the world's depth hides the lines.
+    pub(crate) fn with_depth(
+        device: &wgpu::Device,
+        camera_layout: &wgpu::BindGroupLayout,
+        format: wgpu::TextureFormat,
+        capacity: usize,
+        depth: LineDepth,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("outline shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("outline.wgsl").into()),
@@ -151,12 +173,12 @@ impl LineRenderer {
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
-                // One instance per edge: its two end points and its colour.
+                // One instance per edge: its two end points, colour and width.
                 buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Edge>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x3, 1 => Float32x3, 2 => Float32x4
+                        0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32
                     ],
                 })],
                 compilation_options: Default::default(),
@@ -178,7 +200,10 @@ impl LineRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
                 depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                depth_compare: Some(match depth {
+                    LineDepth::Tested => wgpu::CompareFunction::LessEqual,
+                    LineDepth::Ignored => wgpu::CompareFunction::Always,
+                }),
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -218,13 +243,13 @@ impl LineRenderer {
 
     /// Replaces the edges to draw; an empty slice hides them. Edges beyond
     /// the capacity are ignored.
-    fn set_edges(&mut self, queue: &wgpu::Queue, edges: &[Edge], viewport: (u32, u32)) {
+    pub(crate) fn set_edges(&mut self, queue: &wgpu::Queue, edges: &[Edge], viewport: (u32, u32)) {
         let edges = &edges[..edges.len().min(self.capacity)];
         if !edges.is_empty() {
             queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(edges));
         }
         self.edge_count = edges.len() as u32;
-        let screen = [viewport.0 as f32, viewport.1 as f32, LINE_WIDTH_PX, 0.0];
+        let screen = [viewport.0 as f32, viewport.1 as f32, 0.0, 0.0];
         queue.write_buffer(&self.screen, 0, bytemuck::cast_slice(&screen));
     }
 
@@ -246,6 +271,7 @@ impl LineRenderer {
                         from: pair[0],
                         to: pair[1],
                         color: SELECTION_COLOR,
+                        width: LINE_WIDTH_PX,
                     })
                     .collect::<Vec<_>>()
             })
@@ -267,6 +293,7 @@ impl LineRenderer {
                 from: line.from,
                 to: line.to,
                 color: line.color,
+                width: LINE_WIDTH_PX,
             })
             .collect();
         self.set_edges(queue, &edges, viewport);

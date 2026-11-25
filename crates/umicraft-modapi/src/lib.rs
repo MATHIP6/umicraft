@@ -73,6 +73,7 @@
 
 mod camera;
 mod chat;
+mod draw3d;
 mod error;
 mod event;
 mod ffi;
@@ -93,6 +94,7 @@ mod world;
 
 pub use camera::{Camera, CameraInput, CameraState};
 pub use chat::Chat;
+pub use draw3d::{Depth, WorldCx};
 pub use error::ModError;
 pub use event::{
     ButtonPressed, ChatPosition, ChatReceived, ChatSend, Connected, Control, Disconnected, Event,

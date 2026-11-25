@@ -56,6 +56,7 @@ mod trust;
 pub mod ui;
 mod worker;
 mod world;
+mod world_layer;
 
 pub use budget::{ModStats, BUDGET, HUD_BUDGET, LOG_EVERY, MAX_CONSECUTIVE_OVERRUNS};
 pub use camera::CameraChain;
@@ -97,4 +98,8 @@ pub use worker::QUEUE_CAPACITY;
 pub use world::{
     with_world, Effect, EntityEffects, EntityTexts, EntityView, HeldItem, WorldQuery,
     MAX_ENTITY_EFFECTS,
+};
+pub use world_layer::{
+    Highlight, WorldDraw, WorldLine, WorldTriangle, MAX_HIGHLIGHTS, MAX_WORLD_LAYERS,
+    MAX_WORLD_LINES, MAX_WORLD_TRIANGLES,
 };

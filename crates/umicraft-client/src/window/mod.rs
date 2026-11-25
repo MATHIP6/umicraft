@@ -246,6 +246,8 @@ struct App {
     /// Whether the game thread was told that a camera layer moved the camera away
     /// from the player, so it draws the body (ADR-0096).
     camera_detached: bool,
+    /// What the external mods' world layers drew this frame (API 1.4).
+    mod_world: crate::mods::world_draw::ModWorldFrame,
     /// The threads still dropping stopped sessions; joined at exit before the
     /// mods shut down, because their game threads may still dispatch.
     releasing: Vec<std::thread::JoinHandle<()>>,

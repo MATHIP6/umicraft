@@ -14,7 +14,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use umicraft_modapi_sys::{UMI_ATTACH_HUD_WIDGET, UMI_ATTACH_POST_PASS};
+use umicraft_modapi_sys::{UMI_ATTACH_HUD_WIDGET, UMI_ATTACH_POST_PASS, UMI_ATTACH_WORLD_LAYER};
 
 use super::settings::{SettingSpec, SettingSpecKind};
 use super::validate::{check_key, check_len, check_text};
@@ -124,6 +124,8 @@ pub(crate) enum Attach {
     Widget,
     /// A post-process pass, applied only while the module is on.
     PostPass,
+    /// A world layer, drawn only while the module is on (API 1.4).
+    WorldLayer,
 }
 
 impl Attach {
@@ -132,6 +134,7 @@ impl Attach {
         match kind {
             UMI_ATTACH_HUD_WIDGET => Ok(Self::Widget),
             UMI_ATTACH_POST_PASS => Ok(Self::PostPass),
+            UMI_ATTACH_WORLD_LAYER => Ok(Self::WorldLayer),
             _ => Err(DeclareError::Invalid {
                 what: "module attachment",
                 why: "unknown kind",

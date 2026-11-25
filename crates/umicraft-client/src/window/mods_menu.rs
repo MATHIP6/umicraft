@@ -224,7 +224,8 @@ impl App {
 
     /// Sends this frame's `Frame` event, with the camera the frame is drawn with,
     /// then lets the external mods draw their widgets (once per frame, whether the
-    /// HUD or the HUD editor shows them). Called once the camera is final, so a
+    /// HUD or the HUD editor shows them) and, in a world, their world layers (API
+    /// 1.4). Called once the camera is final, so a
     /// widget placing an annotation with the projection of `Frame` draws it where
     /// the world shows the point (API 1.1, ADR-0094).
     ///
@@ -234,19 +235,25 @@ impl App {
     /// for this frame.
     pub(super) fn publish_frame(&mut self, (width, height): (u32, u32)) {
         let camera = frame_camera(&self.camera, (width, height));
+        let in_world = self.world.is_some();
         let Self {
             mods,
             render_bus,
             external_mods,
             session,
             entity_snapshot,
+            mod_world,
             ..
         } = self;
+        mod_world.draw.clear();
         with_entity_snapshot(entity_snapshot.snapshot(), || {
             mods.dispatch_frame(camera, render_bus);
             if session.is_some() {
                 if let Some(host) = external_mods.as_ref().and_then(ExternalMods::host) {
                     host.draw_widgets();
+                    if in_world {
+                        host.draw_world_layers(&mut mod_world.draw);
+                    }
                 }
             }
         });

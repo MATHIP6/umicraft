@@ -225,6 +225,7 @@ impl App {
             frame_look: (0.0, 0.0),
             camera_capture: false,
             camera_detached: false,
+            mod_world: Default::default(),
             releasing: Vec::new(),
             post_frames: Vec::new(),
             options,

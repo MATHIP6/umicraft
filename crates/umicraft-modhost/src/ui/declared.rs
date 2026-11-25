@@ -10,9 +10,11 @@ use super::validate::check_room;
 use super::{MAX_CATEGORIES, MAX_COMMANDS, MAX_KEYS, MAX_MODULES, MAX_SETTINGS, MAX_WIDGETS};
 use crate::error::DeclareError;
 use crate::post_pass::{PostPassSlot, MAX_POST_PASSES};
+use crate::world_layer::{WorldLayerSlot, MAX_WORLD_LAYERS};
 
 /// Everything a mod declared: settings, widgets, key bindings, command names,
-/// post-process passes, and its categories and modules (API 1.2).
+/// post-process passes, its categories and modules (API 1.2) and its world layers
+/// (API 1.4).
 ///
 /// Built while `umi_mod_init` runs, then frozen: after that only the atomics and
 /// mutexes inside the slots change, never the lists themselves.
@@ -25,6 +27,7 @@ pub(crate) struct Declared {
     post_passes: Vec<PostPassSlot>,
     categories: Vec<CategorySlot>,
     modules: Vec<ModuleSlot>,
+    world_layers: Vec<WorldLayerSlot>,
 }
 
 fn unknown(what: &'static str) -> DeclareError {
@@ -52,6 +55,7 @@ impl Declared {
             post_passes: Vec::new(),
             categories: Vec::new(),
             modules: Vec::new(),
+            world_layers: Vec::new(),
         }
     }
 
@@ -125,6 +129,12 @@ impl Declared {
                 .find(|p| p.key() == key)
                 .ok_or_else(|| unknown("post pass"))?
                 .attach(index),
+            Attach::WorldLayer => self
+                .world_layers
+                .iter_mut()
+                .find(|l| l.key() == key)
+                .ok_or_else(|| unknown("world layer"))?
+                .attach(index),
         };
         if attached {
             Ok(())
@@ -186,6 +196,20 @@ impl Declared {
         }
         self.post_passes.push(pass);
         Ok(())
+    }
+
+    /// Adds a world layer (API 1.4).
+    pub(crate) fn add_world_layer(&mut self, layer: WorldLayerSlot) -> Result<(), DeclareError> {
+        check_room("world layers", self.world_layers.len(), MAX_WORLD_LAYERS)?;
+        if self.world_layers.iter().any(|l| l.key() == layer.key()) {
+            return Err(duplicate("world layer key", layer.key()));
+        }
+        self.world_layers.push(layer);
+        Ok(())
+    }
+
+    pub(crate) fn world_layers(&self) -> &[WorldLayerSlot] {
+        &self.world_layers
     }
 
     /// Adds a key binding.

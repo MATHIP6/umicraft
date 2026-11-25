@@ -15,4 +15,5 @@ pub(crate) mod hud_editor;
 pub(crate) mod icons;
 pub(crate) mod menu;
 pub(crate) mod runtime;
+pub(crate) mod world_draw;
 pub(crate) mod zoom;

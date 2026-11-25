@@ -11,13 +11,13 @@ use core::ptr::NonNull;
 use umicraft_modapi_sys::{
     UmiBytes, UmiCameraCx, UmiCameraInput, UmiEntity, UmiEventHeader, UmiHost, UmiHudCx,
     UmiModHandle, UmiPhysicsCx, UmiPhysicsInput, UmiPlayerPhysics, UmiRenderCamera, UmiStatus,
-    UmiStr, UMI_EVENT_CANCELLABLE, UMI_EVENT_CANCELLED,
+    UmiStr, UmiWorldCx, UMI_EVENT_CANCELLABLE, UMI_EVENT_CANCELLED,
 };
 
 use crate::camera::CameraHandler;
 use crate::event::{Control, Event};
 use crate::private::guarded;
-use crate::{host, Camera, CameraInput, Entity, Hud, Input, ModError, Physics};
+use crate::{host, Camera, CameraInput, Entity, Hud, Input, ModError, Physics, WorldCx};
 
 /// A mod handle that can be shared across threads.
 #[derive(Debug, Clone, Copy)]
@@ -45,6 +45,9 @@ pub(crate) type Handler<E> = Box<dyn FnMut(&mut E, &mut Control) + Send>;
 
 /// The boxed closure type behind a HUD widget's `user` pointer.
 pub(crate) type DrawHandler = Box<dyn FnMut(&mut Hud<'_>) + Send>;
+
+/// The boxed closure type behind a world layer's `user` pointer (API 1.4).
+pub(crate) type WorldDrawHandler = Box<dyn FnMut(&mut WorldCx<'_>) + Send>;
 
 /// The boxed closure type behind a command's `user` pointer.
 pub(crate) type CommandHandler = Box<dyn FnMut(&str) -> Result<(), ModError> + Send>;
@@ -194,6 +197,26 @@ pub(crate) extern "C" fn draw_trampoline(hud: *mut UmiHudCx, user: *mut c_void) 
         }
         with_user(user, |draw: &mut DrawHandler| {
             draw(&mut Hud::new(hud, host));
+            UmiStatus::OK
+        })
+        .unwrap_or(UmiStatus::INVALID_ARGUMENT)
+    })
+}
+
+/// The draw callback of every world layer (API 1.4).
+pub(crate) extern "C" fn world_draw_trampoline(
+    world: *mut UmiWorldCx,
+    user: *mut c_void,
+) -> UmiStatus {
+    guarded(|| {
+        let Some((host, _)) = host::current() else {
+            return UmiStatus::UNSUPPORTED;
+        };
+        if world.is_null() {
+            return UmiStatus::INVALID_ARGUMENT;
+        }
+        with_user(user, |draw: &mut WorldDrawHandler| {
+            draw(&mut WorldCx::new(world, host));
             UmiStatus::OK
         })
         .unwrap_or(UmiStatus::INVALID_ARGUMENT)

@@ -343,6 +343,9 @@ impl App {
             });
         renderer.set_selection_outline(self.world.as_ref().map_or(&[], WorldView::selection));
         renderer.set_debug_lines(&self.debug_lines());
+        let gui_scale = umicraft_render::gui_scale(width, height) as f32;
+        self.mod_world
+            .upload(self.camera.render_origin(), gui_scale, renderer);
         // The mods menu blurs the game behind it to keep the focus on itself.
         let blur = mods_menu::background_blur(self.screen, &self.menu);
         renderer.set_background_blur(blur);

@@ -14,6 +14,7 @@ use super::Renderer;
 use crate::border::BorderView;
 use crate::clouds::CloudMode;
 use crate::environment::RenderEnvironment;
+use crate::mod_world::{ModWorldLine, ModWorldTriangle};
 use crate::motion_blur::MotionBlurSettings;
 use crate::nametag::Nametag;
 use crate::outline::{DebugLine, OutlineBox};
@@ -178,6 +179,15 @@ impl Renderer {
     pub fn set_debug_lines(&mut self, lines: &[DebugLine]) {
         self.debug_lines
             .set_lines(&self.queue, lines, (self.width, self.height));
+    }
+
+    /// Sets the lines and filled shapes the mods draw in the world for the
+    /// following frames (API 1.4); empty slices hide them. Positions are relative
+    /// to the render origin. They are drawn after the translucent terrain and
+    /// before the hand, either hidden by the world or through it.
+    pub fn set_mod_world(&mut self, lines: &[ModWorldLine], triangles: &[ModWorldTriangle]) {
+        self.mod_world
+            .set(&self.queue, lines, triangles, (self.width, self.height));
     }
 
     /// Switches the motion blur of the world on (`Some`) or off (`None`), or

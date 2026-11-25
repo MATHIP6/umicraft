@@ -31,6 +31,7 @@ pub(crate) use physics::testing as physics_testing;
 pub(crate) use physics::PHYSICS_ACTIVE;
 pub(crate) use service::{with_service_cx, StatePtr};
 pub(crate) use world::{lend_snapshot, lend_world};
+pub(crate) use world_layer::with_world_cx;
 
 use core::ffi::c_void;
 use std::panic::{catch_unwind, AssertUnwindSafe};

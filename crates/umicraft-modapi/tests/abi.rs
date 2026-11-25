@@ -13,7 +13,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use umicraft_modapi::{
-    umicraft_mod, Anchor, Block, ButtonPressed, Chat, ChatReceived, ChatSend, Connected,
+    umicraft_mod, Anchor, Block, ButtonPressed, Chat, ChatReceived, ChatSend, Connected, Depth,
     Disconnected, Frame, GameMode, InitCx, KeyPressed, Mod, ModError, Module, ModuleSpec,
     ModuleToggled, PacketReceived, PacketSend, Packets, Physics, Placement, PostPass, PostTick,
     PreTick, ScreenClosed, ScreenOpened, Setting, World,
@@ -53,6 +53,8 @@ static VALUES: Mutex<Option<HashMap<String, UmiSettingValue>>> = Mutex::new(None
 static WIDGETS: Mutex<Vec<Widget>> = Mutex::new(Vec::new());
 /// Every `hud_*` call the fake host received, as text.
 static HUD_CALLS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// The world layers the mod registered, as `(key, draw, user)`.
+static WORLD_LAYERS: Mutex<Vec<(String, UmiWorldDrawFn, usize)>> = Mutex::new(Vec::new());
 static KEYS: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static COMMANDS: Mutex<Vec<Command>> = Mutex::new(Vec::new());
 static CHAT: Mutex<Vec<String>> = Mutex::new(Vec::new());
@@ -208,6 +210,25 @@ fn register_ui(cx: &mut InitCx<'_>) -> Result<(), ModError> {
             hud.ring(5.0, 5.0, 4.0, 0xFF_0000, 0.5, 1.5);
         });
         hud.polygon(&[[0.0, 0.0], [4.0, 0.0], [0.0, 4.0]], 0x12_3456, 1.0);
+    })?;
+    cx.world_layer("marks", |frame| {
+        frame.line(
+            [0.0, 64.0, 0.0],
+            [1.0, 65.0, 1.0],
+            0xFF_0000,
+            1.0,
+            2.0,
+            Depth::Tested,
+        );
+        frame.outline_box([0.0; 3], [1.0; 3], 0x00_FF00, 0.5, Depth::ThroughWalls);
+        frame.filled_box([0.0; 3], [1.0; 3], 0x00_FF00, 0.25, Depth::Tested);
+        frame.polygon(
+            &[[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]],
+            0x00_00FF,
+            1.0,
+            Depth::Tested,
+        );
+        frame.highlight(42, 0xFF_FFFF, 1.0, Depth::ThroughWalls);
     })?;
     cx.key("greet", "Greet", "KeyH")?;
     cx.observe::<KeyPressed>(0, |e| see(format!("key={}", e.key())))?;
@@ -905,65 +926,76 @@ extern "C" fn fake_hud_clip_pop(_hud: *mut UmiHudCx) -> UmiStatus {
 
 extern "C" fn fake_register_world_layer(
     _me: UmiModHandle,
-    _key: UmiStr,
-    _draw: Option<UmiWorldDrawFn>,
-    _user: *mut c_void,
+    key: UmiStr,
+    draw: Option<UmiWorldDrawFn>,
+    user: *mut c_void,
 ) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    WORLD_LAYERS.lock().unwrap().push((
+        text_of(key),
+        draw.expect("trampoline is never null"),
+        user as usize,
+    ));
+    UmiStatus::OK
 }
 
 #[allow(clippy::too_many_arguments)]
 extern "C" fn fake_world_line(
     _world: *mut UmiWorldCx,
-    _x1: f64,
-    _y1: f64,
-    _z1: f64,
-    _x2: f64,
-    _y2: f64,
-    _z2: f64,
-    _color: u32,
-    _alpha: f32,
-    _thickness: f32,
-    _flags: u32,
+    x1: f64,
+    y1: f64,
+    z1: f64,
+    x2: f64,
+    y2: f64,
+    z2: f64,
+    color: u32,
+    alpha: f32,
+    thickness: f32,
+    flags: u32,
 ) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    hud_call(format!(
+        "wline {x1} {y1} {z1} {x2} {y2} {z2} {color:06x} {alpha} {thickness} {flags}"
+    ))
 }
 
 #[allow(clippy::too_many_arguments)]
 extern "C" fn fake_world_box(
     _world: *mut UmiWorldCx,
-    _min_x: f64,
-    _min_y: f64,
-    _min_z: f64,
-    _max_x: f64,
-    _max_y: f64,
-    _max_z: f64,
-    _color: u32,
-    _alpha: f32,
-    _flags: u32,
+    min_x: f64,
+    min_y: f64,
+    min_z: f64,
+    max_x: f64,
+    max_y: f64,
+    max_z: f64,
+    color: u32,
+    alpha: f32,
+    flags: u32,
 ) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    hud_call(format!(
+        "wbox {min_x} {min_y} {min_z} {max_x} {max_y} {max_z} {color:06x} {alpha} {flags}"
+    ))
 }
 
 extern "C" fn fake_world_polygon(
     _world: *mut UmiWorldCx,
-    _points: *const f64,
-    _count: usize,
-    _color: u32,
-    _alpha: f32,
-    _flags: u32,
+    points: *const f64,
+    count: usize,
+    color: u32,
+    alpha: f32,
+    flags: u32,
 ) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    // SAFETY: the module under test passes `count` points of three doubles.
+    let doubles = unsafe { std::slice::from_raw_parts(points, 3 * count) };
+    hud_call(format!("wpolygon {doubles:?} {color:06x} {alpha} {flags}"))
 }
 
 extern "C" fn fake_world_highlight(
     _world: *mut UmiWorldCx,
-    _entity: i32,
-    _color: u32,
-    _alpha: f32,
-    _flags: u32,
+    entity: i32,
+    color: u32,
+    alpha: f32,
+    flags: u32,
 ) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+    hud_call(format!("whighlight {entity} {color:06x} {alpha} {flags}"))
 }
 
 extern "C" fn fake_register_camera(
@@ -1082,6 +1114,7 @@ fn fresh() -> MutexGuard<'static, ()> {
         list.lock().unwrap().clear();
     }
     WIDGETS.lock().unwrap().clear();
+    WORLD_LAYERS.lock().unwrap().clear();
     COMMANDS.lock().unwrap().clear();
     LAYERS.lock().unwrap().clear();
     NEXT_CALLS.store(0, SeqCst);
@@ -1737,6 +1770,62 @@ fn every_hud_primitive_reaches_the_host() {
             "pop",
             "polygon [0.0, 0.0, 4.0, 0.0, 0.0, 4.0] 123456 1",
         ]
+    );
+}
+
+#[test]
+fn every_world_primitive_reaches_the_host() {
+    let _guard = fresh();
+    init_ok();
+    let (key, draw, user) = WORLD_LAYERS.lock().unwrap()[0].clone();
+    assert_eq!(key, "marks");
+    let mut fake_cx = 0_u8;
+    assert_eq!(
+        draw(std::ptr::from_mut(&mut fake_cx).cast(), user as *mut c_void),
+        UmiStatus::OK
+    );
+    assert_eq!(
+        *HUD_CALLS.lock().unwrap(),
+        [
+            "wline 0 64 0 1 65 1 ff0000 1 2 0",
+            "wbox 0 0 0 1 1 1 00ff00 0.5 1",
+            "wbox 0 0 0 1 1 1 00ff00 0.25 2",
+            "wpolygon [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0] 0000ff 1 0",
+            "whighlight 42 ffffff 1 1",
+        ]
+    );
+    assert_eq!(
+        draw(std::ptr::null_mut(), user as *mut c_void),
+        UmiStatus::INVALID_ARGUMENT
+    );
+}
+
+#[test]
+fn the_local_player_is_read_with_its_team() {
+    let _guard = fresh();
+    init_ok();
+    let seen = World
+        .local_player(|me| {
+            (
+                me.id(),
+                me.name().to_owned(),
+                me.team().to_owned(),
+                me.display_name().to_owned(),
+                me.team_color(),
+                me.held_item(),
+            )
+        })
+        .unwrap();
+    assert_eq!(
+        seen,
+        (
+            1,
+            "Me".to_owned(),
+            "blue".to_owned(),
+            "\u{a7}9Me".to_owned(),
+            Some(0x5555ff),
+            None
+        )
     );
 }
 

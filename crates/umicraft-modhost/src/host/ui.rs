@@ -48,6 +48,20 @@ impl ModHost {
         }
     }
 
+    /// Runs the world layers of every enabled mod, in load order, into `out`,
+    /// which is cleared first (API 1.4).
+    ///
+    /// Render thread, once per frame in a world, after the camera layers. Budgeted
+    /// like the widgets; the caps of each mod are in [`WorldDraw`]'s module.
+    ///
+    /// [`WorldDraw`]: crate::WorldDraw
+    pub fn draw_world_layers(&self, out: &mut crate::WorldDraw) {
+        out.clear();
+        for loaded in &self.mods {
+            loaded.context.draw_world_layers(out);
+        }
+    }
+
     /// Lends each widget of each enabled mod, as drawn by the last
     /// [`draw_widgets`](Self::draw_widgets), to `visit`.
     ///

@@ -35,6 +35,7 @@ pub mod hud_hearts;
 mod items;
 mod lightmap;
 mod mipmap;
+mod mod_world;
 mod motion_blur;
 mod nametag;
 mod outline;
@@ -75,6 +76,7 @@ pub use hud_hearts::{HeartsTint, HeartsView};
 pub use items::{
     IconProvider, NoIcons, ICON_ATLAS_SIZE, ICON_CELL_SIZE, PORTRAIT_KEY, PORTRAIT_SIZE,
 };
+pub use mod_world::{ModWorldLine, ModWorldTriangle, MAX_MOD_LINES, MAX_MOD_TRIANGLES};
 pub use motion_blur::{MotionBlurSettings, MotionBlurVersion};
 pub use nametag::Nametag;
 pub use outline::{edge_vertices, DebugLine, OutlineBox, MAX_DEBUG_LINES, OUTLINE_GROWTH};

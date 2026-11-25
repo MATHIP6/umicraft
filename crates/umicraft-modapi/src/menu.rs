@@ -19,7 +19,7 @@
 
 use umicraft_modapi_sys::{
     UmiModuleDef, UmiSettingDef, UmiSettingKind, UMI_ATTACH_HUD_WIDGET, UMI_ATTACH_POST_PASS,
-    UMI_MODULE_DEFAULT_ON,
+    UMI_ATTACH_WORLD_LAYER, UMI_MODULE_DEFAULT_ON,
 };
 
 use crate::host::{self, utf8};
@@ -306,6 +306,14 @@ impl<'c, 'a> Card<'c, 'a> {
     /// As [`attach_widget`](Self::attach_widget).
     pub fn attach_post_pass(&mut self, pass: &PostPass) -> Result<(), ModError> {
         self.attach(UMI_ATTACH_POST_PASS, pass.key())
+    }
+
+    /// Draws the world layer `key` only while this card's module is on (API 1.4).
+    ///
+    /// # Errors
+    /// As [`attach_widget`](Self::attach_widget).
+    pub fn attach_world_layer(&mut self, key: &str) -> Result<(), ModError> {
+        self.attach(UMI_ATTACH_WORLD_LAYER, key)
     }
 
     fn attach(&mut self, kind: u32, key: &str) -> Result<(), ModError> {

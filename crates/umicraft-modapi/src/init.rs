@@ -10,13 +10,15 @@ use crate::camera::CameraHandler;
 use crate::event::{Control, Event};
 use crate::ffi::{
     camera_trampoline, command_trampoline, draw_trampoline, physics_trampoline, trampoline,
-    CommandHandler, DrawHandler, Handler, OwnedUser, PhysicsHandler,
+    world_draw_trampoline, CommandHandler, DrawHandler, Handler, OwnedUser, PhysicsHandler,
+    WorldDrawHandler,
 };
 use crate::host::utf8;
 use crate::menu::Card;
 use crate::post::key_too_long;
 use crate::{
     Camera, Chat, Hud, Logger, ModError, Packets, Physics, Placement, PostPass, Setting, World,
+    WorldCx,
 };
 
 /// A mod: built once by the host, told when it is shut down.
@@ -225,6 +227,39 @@ impl<'a> InitCx<'a> {
                 Some(draw_trampoline),
                 user,
             )
+        })
+    }
+
+    /// Declares a world layer (API 1.4): `draw` runs on the render thread once per
+    /// frame in a world, after the camera layers, and adds lines, boxes, polygons
+    /// and entity marks in world coordinates. It may read
+    /// [`World::snapshot`](crate::World::snapshot). At most 4 layers per mod.
+    ///
+    /// ```ignore
+    /// let world = cx.world();
+    /// cx.world_layer("boxes", move |frame| {
+    ///     let _ = world.snapshot(|entity| {
+    ///         let [x, y, z] = entity.render_position();
+    ///         let half = f64::from(entity.width()) / 2.0;
+    ///         let top = y + f64::from(entity.height());
+    ///         frame.outline_box([x - half, y, z - half], [x + half, top, z + half], 0xFFFFFF, 1.0, Depth::Tested);
+    ///         true
+    ///     });
+    /// })?;
+    /// ```
+    ///
+    /// # Errors
+    /// [`ModError::HostRefused`] for an invalid or duplicate `key`, or past 4
+    /// layers.
+    pub fn world_layer(
+        &mut self,
+        key: &str,
+        draw: impl FnMut(&mut WorldCx<'_>) + Send + 'static,
+    ) -> Result<(), ModError> {
+        let draw: WorldDrawHandler = Box::new(draw);
+        let (host, me) = (self.host, self.me);
+        self.keep(draw, |user| {
+            (host.register_world_layer)(me, utf8(key), Some(world_draw_trampoline), user)
         })
     }
 

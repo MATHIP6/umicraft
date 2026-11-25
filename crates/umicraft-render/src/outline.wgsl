@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
-// Wireframe lines (selection outline, debug boxes): each edge is an instance of
-// a quad that is widened in screen space, because wgpu only draws one-pixel
-// lines. The colour comes with the edge and is alpha-blended by the pipeline.
+// Wireframe lines (selection outline, debug boxes, the lines of mods): each edge
+// is an instance of a quad that is widened in screen space, because wgpu only
+// draws one-pixel lines. The colour and the width in pixels come with the edge;
+// the colour is alpha-blended by the pipeline.
 
 struct Camera {
     view_proj: mat4x4<f32>,
@@ -21,7 +22,7 @@ struct Camera {
 };
 
 struct Screen {
-    // x, y: viewport size in pixels; z: line width in pixels.
+    // x, y: viewport size in pixels.
     values: vec4<f32>,
 };
 
@@ -44,6 +45,7 @@ fn vs_main(
     @location(0) start: vec3<f32>,
     @location(1) end: vec3<f32>,
     @location(2) color: vec4<f32>,
+    @location(3) width: f32,
 ) -> VertexOut {
     var a = camera.view_proj * vec4<f32>(start - camera.origin, 1.0);
     var b = camera.view_proj * vec4<f32>(end - camera.origin, 1.0);
@@ -71,7 +73,7 @@ fn vs_main(
     let at_end = corner == 2u || corner == 3u || corner == 5u;
     let side = select(1.0, -1.0, corner == 0u || corner == 2u || corner == 3u);
     let base = select(pa, pb, at_end);
-    let offset = normal * side * screen.values.z / viewport;
+    let offset = normal * side * width / viewport;
     return VertexOut(vec4<f32>(base.xy + offset, max(base.z - DEPTH_BIAS, 0.0), 1.0), color);
 }
 

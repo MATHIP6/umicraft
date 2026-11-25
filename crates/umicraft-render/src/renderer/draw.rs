@@ -148,6 +148,11 @@ impl Renderer {
             self.outline.draw(&mut pass, &self.camera_bind_group);
             self.debug_lines.draw(&mut pass, &self.camera_bind_group);
         }
+
+        // The mods' world geometry, over the finished world and under the hand
+        // (API 1.4).
+        self.mod_world
+            .draw(&mut pass, &self.local_camera_bind_group);
         self.stamp(&mut pass, 4);
 
         // The hand is part of the picture that is filtered or blurred: it trails
