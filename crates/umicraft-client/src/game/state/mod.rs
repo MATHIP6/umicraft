@@ -70,6 +70,9 @@ pub(super) struct Game {
     pub(super) status: String,
     /// Why the session ended, once the network thread said so.
     pub(super) end: Option<ConnectionEnd>,
+    /// What the player did in a screen (clicks, chat, a respawn) since the
+    /// last tick; the next tick handles it (`super::game_loop::is_screen_action`).
+    pub(super) screen_actions: Vec<super::messages::GameEvent>,
     /// The entity id of the local player.
     pub(super) entity_id: i32,
     /// The gamemode of the local player.
@@ -185,6 +188,7 @@ impl Game {
             dirty: BTreeSet::new(),
             status: "CONNECTING".to_string(),
             end: None,
+            screen_actions: Vec::new(),
             entity_id: 0,
             gamemode: GameMode::Survival,
             account_skin: None,

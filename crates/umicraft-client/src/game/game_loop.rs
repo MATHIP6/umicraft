@@ -85,16 +85,25 @@ pub(super) fn run(
         // answered faster than the frame rate. The window reports the frame
         // duration; events wait for the next slot, and a slot takes every queued
         // event (up to the pass limit), like the scheduled-task queue.
-        let period = Duration::from_micros(u64::from(frame_micros.load(Ordering::Relaxed)));
+        //
+        // Never longer than a tick, and always before a tick: the ticks run
+        // on their own clock here, not in the frame loop as in vanilla, so a
+        // slow frame (a stutter of 200 ms) held the knockback and the
+        // teleports of the server while four ticks went out from the old
+        // state. Servers read that as ignored knockback and pulled the
+        // player back.
+        let period =
+            Duration::from_micros(u64::from(frame_micros.load(Ordering::Relaxed))).min(TICK);
         let pacing = !period.is_zero();
         let mut events_processed = 0;
-        if !pacing || Instant::now() >= next_drain {
+        let now = Instant::now();
+        if !pacing || now >= next_drain || now >= next_tick {
             while events_processed < MAX_EVENTS_PER_PASS {
                 let Some(event) = deferred.pop_front().or_else(|| events.try_recv().ok()) else {
                     break;
                 };
                 events_processed += 1;
-                if handle_event(&mut game, event, &mut queue, &frames) {
+                if dispatch(&mut game, event, &mut queue, &frames) {
                     ended = game.end.take();
                     break;
                 }
@@ -165,7 +174,7 @@ pub(super) fn run(
                         deferred.push_back(event);
                     }
                     Ok(event) => {
-                        if handle_event(&mut game, event, &mut queue, &frames) {
+                        if dispatch(&mut game, event, &mut queue, &frames) {
                             ended = game.end.take();
                         }
                         if pacing {
@@ -215,6 +224,49 @@ fn take_input(game: &mut Game, update: InputUpdate, queue: &mut CommandQueue) {
     if (game.yaw, game.pitch) != before {
         publish_look(game);
     }
+}
+
+/// Whether `event` is something the player did in a screen: a click in an
+/// inventory, a chat line, a sign, a book, the respawn button.
+///
+/// The vanilla client handles the screens inside `Minecraft.runTick`
+/// (`GuiScreen.handleInput`), before the player's update sends the movement
+/// packet of the tick, so their packets always come before it. Sending a
+/// `Click Window` as soon as the click arrived put it after the movement
+/// packet; GrimAC reads a click after the movement and before the next
+/// transaction reply as a click outside the tick (`Post`, "click window").
+pub(super) fn is_screen_action(event: &GameEvent) -> bool {
+    matches!(
+        event,
+        GameEvent::Chat(_)
+            | GameEvent::TabComplete(_)
+            | GameEvent::CloseInventory
+            | GameEvent::Inventory(_)
+            | GameEvent::SignEdited { .. }
+            | GameEvent::BookEdited(_)
+            | GameEvent::Container(_)
+            | GameEvent::Creative(_)
+            | GameEvent::RequestStats
+            | GameEvent::InventoryOpened
+            | GameEvent::Respawn
+    )
+}
+
+/// Takes one message of the inbox: a screen action waits for the next tick
+/// ([`is_screen_action`]), everything else is handled now.
+///
+/// Returns `true` when the session must end.
+pub(super) fn dispatch(
+    game: &mut Game,
+    event: GameEvent,
+    queue: &mut CommandQueue,
+    frames: &SyncSender<RenderEvent>,
+) -> bool {
+    if is_screen_action(&event) {
+        game.screen_actions.push(event);
+        return false;
+    }
+    handle_event(game, event, queue, frames)
 }
 
 /// Handles one message of the inbox.
