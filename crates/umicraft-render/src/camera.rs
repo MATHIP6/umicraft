@@ -8,6 +8,16 @@ use glam::{DVec3, Mat4, Vec3, Vec4};
 const DEFAULT_FOV: f32 = 70.0_f32 * std::f32::consts::PI / 180.0;
 pub(crate) const NEAR: f32 = 0.1;
 pub(crate) const FAR: f32 = 512.0;
+/// How far behind the eye the first-person camera sits: MCP
+/// `EntityRenderer.orientCamera` calls `translate(0, 0, -0.1)` before turning
+/// the view when `thirdPersonView` is 0.
+const FIRST_PERSON_PULLBACK: f32 = 0.1;
+
+/// The field of view inside water, as a share of the one outside: MCP
+/// `EntityRenderer.getFOVModifier` multiplies by `60 / 70` when the block at
+/// the viewpoint is water, for the world and the hand alike.
+pub const UNDERWATER_FOV_SCALE: f32 = 60.0 / 70.0;
+
 /// The near plane of the hand projection (MCP `EntityRenderer.java:1236`).
 const HAND_NEAR: f32 = 0.05;
 /// The field of view of the hand: fixed, whatever the "FOV" option says
@@ -42,6 +52,12 @@ pub struct Camera {
     fov_modifier: f32,
     /// The view bobbing, applied in camera space after the view rotation.
     view_bob: Mat4,
+    /// Whether the camera is the first-person one, pulled back by
+    /// [`FIRST_PERSON_PULLBACK`].
+    first_person: bool,
+    /// The factor of the medium the camera is in ([`UNDERWATER_FOV_SCALE`]
+    /// in water, `1.0` elsewhere), on the world and the hand.
+    medium_fov_scale: f32,
 }
 
 impl Default for Camera {
@@ -55,6 +71,8 @@ impl Default for Camera {
             aspect: 16.0 / 9.0,
             fov_modifier: 1.0,
             view_bob: Mat4::IDENTITY,
+            first_person: false,
+            medium_fov_scale: 1.0,
         }
     }
 }
@@ -146,6 +164,17 @@ impl Camera {
         self.view_bob = view_bob;
     }
 
+    /// Sets whether the camera is the first-person one (pulled back by 0.1
+    /// block, as `orientCamera` does) and whether it is under water.
+    pub fn set_viewpoint(&mut self, first_person: bool, underwater: bool) {
+        self.first_person = first_person;
+        self.medium_fov_scale = if underwater {
+            UNDERWATER_FOV_SCALE
+        } else {
+            1.0
+        };
+    }
+
     /// Updates the aspect ratio (viewport width / height).
     pub fn set_aspect(&mut self, width: u32, height: u32) {
         self.aspect = width.max(1) as f32 / height.max(1) as f32;
@@ -169,7 +198,7 @@ impl Camera {
     /// times the factor of sprinting or flying.
     #[must_use]
     pub(crate) fn effective_fov(&self) -> f32 {
-        self.fov_y * self.fov_modifier
+        self.fov_y * self.fov_modifier * self.medium_fov_scale
     }
 
     /// The vertical field of view, in degrees.
@@ -242,7 +271,7 @@ impl Camera {
     #[must_use]
     pub fn hand_projection(&self) -> Mat4 {
         let projection = glam::camera::rh::proj::directx::perspective(
-            HAND_FOV,
+            HAND_FOV * self.medium_fov_scale,
             self.aspect,
             HAND_NEAR,
             HAND_FAR,
@@ -299,11 +328,17 @@ impl Camera {
     /// [`Camera::view_projection_from`] with the far plane at `far` blocks.
     fn view_projection_to(&self, origin: DVec3, far: f32) -> Mat4 {
         // WebGPU NDC is Y-up with Z in 0..1, i.e. the DirectX convention.
+        let pullback = if self.first_person {
+            Mat4::from_translation(Vec3::new(0.0, 0.0, -FIRST_PERSON_PULLBACK))
+        } else {
+            Mat4::IDENTITY
+        };
         let view = self.view_bob
+            * pullback
             * self.view_rotation()
             * Mat4::from_translation(-(self.eye - origin).as_vec3());
         let projection = glam::camera::rh::proj::directx::perspective(
-            self.fov_y * self.fov_modifier,
+            self.effective_fov(),
             self.aspect,
             NEAR,
             far,
@@ -654,6 +689,29 @@ impl Frustum {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_first_person_camera_sits_a_tenth_behind_the_eye() {
+        // Yaw 0 looks toward -Z: a point 2 blocks ahead of the eye is 2.1
+        // blocks from a first-person camera, as `orientCamera` pulls it back.
+        let mut camera = Camera::new(Vec3::ZERO, 0.0, 0.0);
+        let ahead = glam::Vec4::new(0.0, 0.0, -2.0, 1.0);
+        let depth = |camera: &Camera| (camera.view_projection() * ahead).w;
+        assert!((depth(&camera) - 2.0).abs() < 1e-5);
+        camera.set_viewpoint(true, false);
+        assert!((depth(&camera) - 2.1).abs() < 1e-5);
+    }
+
+    #[test]
+    fn water_narrows_the_world_and_the_hand_to_sixty_seventieths() {
+        let mut camera = Camera::new(Vec3::ZERO, 0.0, 0.0);
+        let (world, hand) = (camera.effective_fov(), camera.hand_projection());
+        camera.set_viewpoint(true, true);
+        assert!((camera.effective_fov() - world * 60.0 / 70.0).abs() < 1e-6);
+        assert_ne!(camera.hand_projection(), hand);
+        camera.set_viewpoint(true, false);
+        assert_eq!(camera.hand_projection(), hand);
+    }
 
     #[test]
     fn frustum_keeps_boxes_ahead_and_drops_boxes_behind() {

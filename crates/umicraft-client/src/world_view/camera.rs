@@ -6,7 +6,7 @@
 use std::time::Instant;
 
 use umicraft_game::hand::HandPose;
-use umicraft_render::{Camera, RenderEnvironment};
+use umicraft_render::{Camera, FogMedium, RenderEnvironment};
 
 use super::WorldView;
 use crate::game::camera_angles;
@@ -48,6 +48,10 @@ impl WorldView {
             1.0
         };
         camera.set_view_effects(fov_modifier, bob);
+        // `orientCamera` pulls the first-person camera 0.1 block behind the
+        // eye, and `getFOVModifier` narrows the view to 60/70 in water.
+        let first_person = state.position.distance(state.eye) <= THIRD_PERSON_MIN_ORBIT;
+        camera.set_viewpoint(first_person, self.view.fog.medium == FogMedium::Water);
     }
 
     /// Immediately applies relative yaw and pitch deltas (in radians) to the active camera.
