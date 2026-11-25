@@ -18,6 +18,7 @@ mod post;
 mod service;
 mod ui;
 mod world;
+mod world_layer;
 
 #[cfg(test)]
 pub(crate) use camera::testing as camera_testing;
@@ -186,6 +187,16 @@ pub fn host_table() -> UmiHost {
         module_attach: menu::host_module_attach,
         module_enabled: menu::host_module_enabled,
         camera_capture: camera::host_camera_capture,
+        world_local_player: world::host_world_local_player,
+        hud_circle: hud::host_hud_circle,
+        hud_polygon: hud::host_hud_polygon,
+        hud_clip_push: hud::host_hud_clip_push,
+        hud_clip_pop: hud::host_hud_clip_pop,
+        register_world_layer: world_layer::host_register_world_layer,
+        world_line: world_layer::host_world_line,
+        world_box: world_layer::host_world_box,
+        world_polygon: world_layer::host_world_polygon,
+        world_highlight: world_layer::host_world_highlight,
     }
 }
 

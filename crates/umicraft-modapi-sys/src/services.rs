@@ -165,7 +165,57 @@ pub struct UmiEntity {
     /// Where the frame being drawn shows the entity (interpolated); equal to
     /// `position` in a game-thread query. Added in API 1.1.
     pub render_position: [f64; 3],
+    /// Ticks left of the hurt flash, 10 down to 0. Added in API 1.4: check
+    /// `size`.
+    pub hurt_time: u32,
+    /// Ticks into the death fall, 0 while alive. Added in API 1.4.
+    pub death_time: u32,
+    /// Item id in the main hand, -1 when empty. Added in API 1.4.
+    pub held_item: i32,
+    /// Damage (metadata) of the held item. Added in API 1.4.
+    pub held_damage: i32,
+    /// A player's team prefix, name and suffix with their `§` codes, else the
+    /// name tag; empty when there is none. Added in API 1.4.
+    pub display_name: UmiStr,
+    /// Team colour as `0xRRGGBB`: the team's colour, else the last colour code
+    /// of its prefix, else [`UMI_NO_COLOR`]. Added in API 1.4.
+    pub team_color: u32,
+    /// Latency the tab list shows, in milliseconds; -1 when the entity is not
+    /// listed. Added in API 1.4.
+    pub ping: i32,
+    /// Version nibble of the entity's UUID (4 for an online player, 3 for an
+    /// offline one, 2 for many server-side NPCs), 0 when unknown. Added in
+    /// API 1.4.
+    pub uuid_version: u32,
+    /// Number of used entries of `effects`. Added in API 1.4.
+    pub effect_count: u32,
+    /// Potion effects the server told the client about, in id order. Added in
+    /// API 1.4.
+    pub effects: [UmiEffect; UMI_MAX_ENTITY_EFFECTS],
 }
+
+/// One potion effect of an entity (API 1.4).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct UmiEffect {
+    /// 1.8 potion id (1 speed to 23 saturation).
+    pub id: u8,
+    /// Level minus one (0 for level I).
+    pub amplifier: u8,
+    /// Bit set of `UMI_EFFECT_*`.
+    pub flags: u8,
+    /// Zero.
+    pub reserved: u8,
+    /// Ticks left as the server sent them (32767 shows as `**:**`).
+    pub duration: i32,
+}
+
+/// Most effects one [`UmiEntity`] carries (API 1.4).
+pub const UMI_MAX_ENTITY_EFFECTS: usize = 8;
+/// [`UmiEffect::flags`]: the server hides the effect's particles.
+pub const UMI_EFFECT_HIDE_PARTICLES: u8 = 1;
+/// [`UmiEntity::team_color`] of an entity with no team colour.
+pub const UMI_NO_COLOR: u32 = 0xFFFF_FFFF;
 
 /// [`UmiEntity::flags`]: the entity burns.
 pub const UMI_ENTITY_ON_FIRE: u32 = 1;
@@ -179,6 +229,15 @@ pub const UMI_ENTITY_USING_ITEM: u32 = 8;
 pub const UMI_ENTITY_INVISIBLE: u32 = 16;
 /// [`UmiEntity::flags`]: a living entity; the health fields are meaningful.
 pub const UMI_ENTITY_LIVING: u32 = 32;
+/// [`UmiEntity::flags`]: a player in spectator mode. Added in API 1.4.
+pub const UMI_ENTITY_SPECTATOR: u32 = 64;
+/// [`UmiEntity::flags`]: a player the tab list shows. Added in API 1.4.
+pub const UMI_ENTITY_IN_TAB_LIST: u32 = 128;
+/// [`UmiEntity::flags`]: a block-free line runs from the local player's eye to
+/// the entity, tested once per tick. Added in API 1.4.
+pub const UMI_ENTITY_VISIBLE: u32 = 256;
+/// [`UmiEntity::flags`]: on the local player's scoreboard team. Added in API 1.4.
+pub const UMI_ENTITY_TEAMMATE: u32 = 512;
 
 /// Receives one entity; any status but `OK` stops the visit.
 pub type UmiEntityVisitFn = extern "C" fn(entity: *const UmiEntity, user: *mut c_void) -> UmiStatus;

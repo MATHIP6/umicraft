@@ -203,7 +203,7 @@ impl WorldView {
         builder: &mut SnapshotBuilder,
     ) {
         let alpha = f64::from(self.view.partial_tick(now));
-        builder.refresh(&self.mod_entities, eye, alpha);
+        builder.refresh(&self.mod_entities, self.mod_local.as_ref(), eye, alpha);
     }
 
     /// The body of the local player at the newest tick, once a frame arrived.

@@ -15,7 +15,7 @@
 use core::ops::Range;
 
 use crate::ffi;
-use crate::world::EntityView;
+use crate::world::{EntityTexts, EntityView};
 
 /// The most entities a snapshot holds (ADR-0094).
 pub const MAX_SNAPSHOT_ENTITIES: usize = 256;
@@ -23,26 +23,13 @@ pub const MAX_SNAPSHOT_ENTITIES: usize = 256;
 /// A byte range of the snapshot's text.
 type Span = Range<u32>;
 
-/// One entity of the snapshot: the numbers of an [`EntityView`] and where its
-/// strings are in the shared text.
+/// One entity of the snapshot: the numbers of an [`EntityView`] (its strings
+/// empty) and where its strings are in the shared text.
 #[derive(Debug, Clone, PartialEq)]
 struct Row {
-    id: i32,
-    kind: Span,
-    position: [f64; 3],
-    yaw: f32,
-    pitch: f32,
-    name: Span,
-    health: f32,
-    max_health: f32,
-    armor: f32,
-    team: Span,
-    width: f32,
-    height: f32,
-    velocity: [f64; 3],
-    flags: u32,
-    is_player: bool,
-    render_position: [f64; 3],
+    facts: EntityView<'static>,
+    /// `kind`, `name`, `team`, `display_name`.
+    texts: [Span; 4],
 }
 
 /// An owned, reusable list of at most [`MAX_SNAPSHOT_ENTITIES`] entities.
@@ -54,6 +41,8 @@ struct Row {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct EntitySnapshot {
     rows: Vec<Row>,
+    /// The local player (API 1.4), kept apart: the list never holds it.
+    local: Option<Row>,
     text: String,
     available: bool,
 }
@@ -69,6 +58,7 @@ impl EntitySnapshot {
     /// have no entity in range. Keeps the allocated capacity.
     pub fn begin(&mut self) {
         self.rows.clear();
+        self.local = None;
         self.text.clear();
         self.available = true;
     }
@@ -112,36 +102,48 @@ impl EntitySnapshot {
         if self.is_full() {
             return false;
         }
-        let rollback = self.text.len();
-        let Some([kind, name, team]) = self.append_all([view.kind, view.name, view.team]) else {
-            self.text.truncate(rollback);
+        let Some(row) = self.row(view) else {
             return false;
         };
-        self.rows.push(Row {
-            id: view.id,
-            kind,
-            position: view.position,
-            yaw: view.yaw,
-            pitch: view.pitch,
-            name,
-            health: view.health,
-            max_health: view.max_health,
-            armor: view.armor,
-            team,
-            width: view.width,
-            height: view.height,
-            velocity: view.velocity,
-            flags: view.flags,
-            is_player: view.is_player,
-            render_position: view.render_position,
-        });
+        self.rows.push(row);
         true
     }
 
-    /// Appends the three strings of an entity and returns where each landed.
-    fn append_all(&mut self, texts: [&str; 3]) -> Option<[Span; 3]> {
-        let [kind, name, team] = texts;
-        Some([self.append(kind)?, self.append(name)?, self.append(team)?])
+    /// Copies the local player's `view` into the snapshot (API 1.4), replacing the
+    /// previous one. Returns `false`, copying nothing, when the text would outgrow
+    /// what a span can address.
+    pub fn set_local(&mut self, view: &EntityView<'_>) -> bool {
+        self.local = self.row(view);
+        self.local.is_some()
+    }
+
+    /// The local player, when the client gave one since [`begin`](Self::begin).
+    #[must_use]
+    pub fn local(&self) -> Option<EntityView<'_>> {
+        self.local.as_ref().map(|row| self.view(row))
+    }
+
+    /// The row of `view`, its strings appended to the text; nothing is appended
+    /// when one does not fit.
+    fn row(&mut self, view: &EntityView<'_>) -> Option<Row> {
+        let rollback = self.text.len();
+        let texts = view.texts();
+        let spans = (|| {
+            Some([
+                self.append(texts.kind)?,
+                self.append(texts.name)?,
+                self.append(texts.team)?,
+                self.append(texts.display_name)?,
+            ])
+        })();
+        let Some(texts) = spans else {
+            self.text.truncate(rollback);
+            return None;
+        };
+        Some(Row {
+            facts: view.with_text(EntityTexts::default()),
+            texts,
+        })
     }
 
     /// Appends `text` and returns where it landed, `None` past `u32::MAX` bytes.
@@ -169,24 +171,13 @@ impl EntitySnapshot {
                 .get(span.start as usize..span.end as usize)
                 .unwrap_or_default()
         };
-        EntityView {
-            id: row.id,
-            kind: text(&row.kind),
-            position: row.position,
-            yaw: row.yaw,
-            pitch: row.pitch,
-            name: text(&row.name),
-            health: row.health,
-            max_health: row.max_health,
-            armor: row.armor,
-            team: text(&row.team),
-            width: row.width,
-            height: row.height,
-            velocity: row.velocity,
-            flags: row.flags,
-            is_player: row.is_player,
-            render_position: row.render_position,
-        }
+        let [kind, name, team, display_name] = &row.texts;
+        row.facts.with_text(EntityTexts {
+            kind: text(kind),
+            name: text(name),
+            team: text(team),
+            display_name: text(display_name),
+        })
     }
 }
 
@@ -213,6 +204,7 @@ pub fn with_entity_snapshot<R>(snapshot: &EntitySnapshot, f: impl FnOnce() -> R)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::world::{Effect, HeldItem};
 
     fn view(id: i32, name: &'static str) -> EntityView<'static> {
         EntityView {
@@ -232,7 +224,35 @@ mod tests {
             flags: 33,
             is_player: false,
             render_position: [f64::from(id) + 0.5, 64.0, 0.0],
+            hurt_time: 4,
+            held_item: Some(HeldItem { id: 276, damage: 0 }),
+            display_name: "\u{a7}c[R] Ann",
+            team_color: Some(0xff5555),
+            ping: Some(42),
+            uuid_version: 4,
+            effects: [Effect {
+                id: 1,
+                amplifier: 1,
+                hide_particles: false,
+                duration: 600,
+            }]
+            .into_iter()
+            .collect(),
+            ..EntityView::default()
         }
+    }
+
+    #[test]
+    fn the_local_player_is_kept_apart_from_the_list() {
+        let mut snapshot = EntitySnapshot::new();
+        snapshot.begin();
+        assert_eq!(snapshot.local(), None);
+        assert!(snapshot.set_local(&view(7, "Me")));
+        assert!(snapshot.push(&view(1, "Ann")));
+        assert_eq!(snapshot.local(), Some(view(7, "Me")));
+        assert_eq!(snapshot.len(), 1);
+        snapshot.begin();
+        assert_eq!(snapshot.local(), None, "begin forgets it");
     }
 
     #[test]

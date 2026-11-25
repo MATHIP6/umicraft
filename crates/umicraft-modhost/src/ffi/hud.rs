@@ -169,6 +169,42 @@ pub(super) extern "C" fn host_hud_segment(
     })
 }
 
+pub(super) extern "C" fn host_hud_circle(
+    _hud: *mut UmiHudCx,
+    _x: f32,
+    _y: f32,
+    _radius: f32,
+    _color: u32,
+    _alpha: f32,
+    _thickness: f32,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+pub(super) extern "C" fn host_hud_polygon(
+    _hud: *mut UmiHudCx,
+    _points: *const f32,
+    _count: usize,
+    _color: u32,
+    _alpha: f32,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+pub(super) extern "C" fn host_hud_clip_push(
+    _hud: *mut UmiHudCx,
+    _x: f32,
+    _y: f32,
+    _width: f32,
+    _height: f32,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+pub(super) extern "C" fn host_hud_clip_pop(_hud: *mut UmiHudCx) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
 pub(super) extern "C" fn host_hud_reserve(
     hud: *mut UmiHudCx,
     width: f32,

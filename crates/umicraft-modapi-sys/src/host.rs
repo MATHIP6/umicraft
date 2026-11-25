@@ -8,6 +8,7 @@ use crate::{
     UmiBytes, UmiCameraCx, UmiCameraFn, UmiCommandFn, UmiEntity, UmiEntityVisitFn, UmiEventHeader,
     UmiEventId, UmiHudCx, UmiHudDrawFn, UmiHudPlacement, UmiModHandle, UmiModuleDef, UmiPhysicsCx,
     UmiPhysicsFn, UmiServiceMode, UmiSettingDef, UmiSettingValue, UmiStatus, UmiStr, UmiVersion,
+    UmiWorldCx, UmiWorldDrawFn,
 };
 
 /// How a handler takes part in an event.
@@ -292,4 +293,96 @@ pub struct UmiHost {
     /// mod is switched off or fails), the player gets the input back. `DENIED`
     /// for a `cx` that is not the running camera layer's. Added in API 1.3.
     pub camera_capture: extern "C" fn(cx: *mut UmiCameraCx) -> UmiStatus,
+    /// Fills `out` with the local player, as `world_entities_snapshot` fills an
+    /// entity of the snapshot, with the same rules (render thread, inside one
+    /// of the mod's callbacks). The strings stay valid until the callback
+    /// returns. Added in API 1.4.
+    pub world_local_player: extern "C" fn(me: UmiModHandle, out: *mut UmiEntity) -> UmiStatus,
+    /// Adds a circle centred on `(x, y)` to the widget being drawn: filled when
+    /// `thickness <= 0`, else a ring that many GUI pixels wide (at most 8).
+    /// Added in API 1.4.
+    pub hud_circle: extern "C" fn(
+        hud: *mut UmiHudCx,
+        x: f32,
+        y: f32,
+        radius: f32,
+        color: u32,
+        alpha: f32,
+        thickness: f32,
+    ) -> UmiStatus,
+    /// Adds a filled convex polygon of `count` points (3 to 64) given as
+    /// `x0, y0, x1, y1, …` in widget pixels. Added in API 1.4.
+    pub hud_polygon: extern "C" fn(
+        hud: *mut UmiHudCx,
+        points: *const f32,
+        count: usize,
+        color: u32,
+        alpha: f32,
+    ) -> UmiStatus,
+    /// Clips the free items added next (cells, labels, rectangles, segments,
+    /// circles, polygons; not the stacked lines) to the rectangle, within the
+    /// enclosing clip. `DENIED` past 8 nested clips. Added in API 1.4.
+    pub hud_clip_push:
+        extern "C" fn(hud: *mut UmiHudCx, x: f32, y: f32, width: f32, height: f32) -> UmiStatus,
+    /// Ends the innermost clip; `INVALID_ARGUMENT` when none is open. Clips
+    /// still open when the draw returns are closed. Added in API 1.4.
+    pub hud_clip_pop: extern "C" fn(hud: *mut UmiHudCx) -> UmiStatus,
+    /// Declares a world layer `key` (during `umi_mod_init` only), drawn by
+    /// `draw` each frame in a world while the mod is enabled. `DENIED` past 4
+    /// layers, `CONFLICT` for a key already used. Added in API 1.4.
+    pub register_world_layer: extern "C" fn(
+        me: UmiModHandle,
+        key: UmiStr,
+        draw: Option<UmiWorldDrawFn>,
+        user: *mut c_void,
+    ) -> UmiStatus,
+    /// Adds a line between two world points; `thickness` in GUI pixels
+    /// (0.05 to 8), `flags`: `UMI_WORLD_THROUGH_WALLS`. Added in API 1.4.
+    pub world_line: extern "C" fn(
+        world: *mut UmiWorldCx,
+        x1: f64,
+        y1: f64,
+        z1: f64,
+        x2: f64,
+        y2: f64,
+        z2: f64,
+        color: u32,
+        alpha: f32,
+        thickness: f32,
+        flags: u32,
+    ) -> UmiStatus,
+    /// Adds the box between two corners: its 12 edges, or its 6 faces with
+    /// `UMI_WORLD_FILL`. Added in API 1.4.
+    pub world_box: extern "C" fn(
+        world: *mut UmiWorldCx,
+        min_x: f64,
+        min_y: f64,
+        min_z: f64,
+        max_x: f64,
+        max_y: f64,
+        max_z: f64,
+        color: u32,
+        alpha: f32,
+        flags: u32,
+    ) -> UmiStatus,
+    /// Adds a filled convex polygon of `count` world points (3 to 64) given as
+    /// `x0, y0, z0, x1, …`. Added in API 1.4.
+    pub world_polygon: extern "C" fn(
+        world: *mut UmiWorldCx,
+        points: *const f64,
+        count: usize,
+        color: u32,
+        alpha: f32,
+        flags: u32,
+    ) -> UmiStatus,
+    /// Marks the entity `entity` (a server id) for the entity mask of the post
+    /// passes, with a colour and an opacity; `UMI_WORLD_THROUGH_WALLS` keeps
+    /// the parts behind blocks. Added in API 1.4.
+    pub world_highlight: extern "C" fn(
+        world: *mut UmiWorldCx,
+        entity: i32,
+        color: u32,
+        alpha: f32,
+        flags: u32,
+    ) -> UmiStatus,
 }

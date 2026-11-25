@@ -33,6 +33,31 @@
 
 use std::time::Duration;
 
+/// The [`mod_world::GameWorld`] of a `Game`, borrowing its fields one by one so the
+/// caller can still use the others (the event bus, the player state) inside the
+/// lent closure. `eye = …` gives the eye when the player state is borrowed.
+macro_rules! game_world {
+    ($game:expr) => {
+        game_world!(
+            $game,
+            eye = $game
+                .state
+                .as_ref()
+                .map(|state| state.player().eye_position())
+        )
+    };
+    ($game:expr, eye = $eye:expr) => {
+        $crate::game::mod_world::GameWorld {
+            world: $game.world.as_ref(),
+            entities: &$game.entities,
+            social: &$game.social,
+            hud: &$game.hud_view,
+            own_name: &$game.own_name,
+            eye: $eye,
+        }
+    };
+}
+
 mod abilities;
 mod actions;
 mod body;

@@ -216,6 +216,9 @@ pub struct Frame {
     /// What the external mods may read about each entity, for the render-thread
     /// snapshot (ADR-0094); empty when no external mod is loaded.
     pub(crate) mod_entities: Arc<[crate::mods::entity_facts::ModEntity]>,
+    /// The local player as the external mods see it (API 1.4); `None` when no
+    /// external mod is loaded.
+    pub(crate) mod_local: Option<crate::mods::entity_facts::ModEntity>,
 }
 
 /// The statistics the debug overlay shows.

@@ -7,8 +7,10 @@ use std::cell::Cell;
 use std::marker::PhantomData;
 
 use umicraft_modapi_sys::{
-    UmiEntity, UmiStatus, UmiStr, UMI_ENTITY_INVISIBLE, UMI_ENTITY_LIVING, UMI_ENTITY_ON_FIRE,
-    UMI_ENTITY_SNEAKING, UMI_ENTITY_SPRINTING, UMI_ENTITY_USING_ITEM,
+    UmiEffect, UmiEntity, UmiStatus, UmiStr, UMI_EFFECT_HIDE_PARTICLES, UMI_ENTITY_INVISIBLE,
+    UMI_ENTITY_IN_TAB_LIST, UMI_ENTITY_LIVING, UMI_ENTITY_ON_FIRE, UMI_ENTITY_SNEAKING,
+    UMI_ENTITY_SPECTATOR, UMI_ENTITY_SPRINTING, UMI_ENTITY_TEAMMATE, UMI_ENTITY_USING_ITEM,
+    UMI_ENTITY_VISIBLE, UMI_MAX_ENTITY_EFFECTS, UMI_NO_COLOR,
 };
 
 use crate::ffi::{entity_trampoline, str_of, Visit};
@@ -164,9 +166,107 @@ impl Entity<'_> {
         self.raw.render_position
     }
 
+    /// Ticks left of the hurt flash: 10 right after a hit, then down to 0
+    /// (vanilla `hurtTime`). API 1.4.
+    pub fn hurt_time(&self) -> u32 {
+        self.raw.hurt_time
+    }
+
+    /// Whether the entity flashes red from a recent hit. API 1.4.
+    pub fn is_hurt(&self) -> bool {
+        self.raw.hurt_time > 0
+    }
+
+    /// Ticks into the death fall, 0 while alive (vanilla `deathTime`). API 1.4.
+    pub fn death_time(&self) -> u32 {
+        self.raw.death_time
+    }
+
+    /// The item in the main hand as `(id, damage)`, `None` when empty. API 1.4.
+    pub fn held_item(&self) -> Option<(i32, i32)> {
+        (self.raw.held_item >= 0).then_some((self.raw.held_item, self.raw.held_damage))
+    }
+
+    /// A player's team prefix, name and suffix with their `§` colour codes, else
+    /// the name tag; empty when there is none. API 1.4.
+    pub fn display_name(&self) -> &str {
+        str_of(&self.raw.display_name)
+    }
+
+    /// The team colour as `0xRRGGBB`: the team's colour, else the last colour
+    /// code of its prefix; `None` when there is none. API 1.4.
+    pub fn team_color(&self) -> Option<u32> {
+        (self.raw.team_color != UMI_NO_COLOR).then_some(self.raw.team_color)
+    }
+
+    /// The latency the tab list shows, in milliseconds; `None` for an entity the
+    /// tab list does not show. API 1.4.
+    pub fn ping(&self) -> Option<i32> {
+        (self.raw.ping >= 0).then_some(self.raw.ping)
+    }
+
+    /// The version nibble of the UUID: 4 for an online-mode player, 3 for an
+    /// offline-mode one, 2 for many server-made NPCs; 0 when unknown. API 1.4.
+    pub fn uuid_version(&self) -> u32 {
+        self.raw.uuid_version
+    }
+
+    /// The potion effects the server told the client about, at most 8, in id
+    /// order. API 1.4.
+    pub fn effects(&self) -> impl ExactSizeIterator<Item = Effect> + '_ {
+        let count = (self.raw.effect_count as usize).min(UMI_MAX_ENTITY_EFFECTS);
+        self.raw.effects[..count].iter().map(|raw| Effect {
+            id: raw.id,
+            amplifier: raw.amplifier,
+            hide_particles: raw.flags & UMI_EFFECT_HIDE_PARTICLES != 0,
+            duration: raw.duration,
+        })
+    }
+
+    /// The effect with the 1.8 potion `id`, if the entity has it. API 1.4.
+    pub fn effect(&self, id: u8) -> Option<Effect> {
+        self.effects().find(|effect| effect.id == id)
+    }
+
+    /// Whether the entity is a player in spectator mode. API 1.4.
+    pub fn spectator(&self) -> bool {
+        self.has(UMI_ENTITY_SPECTATOR)
+    }
+
+    /// Whether the tab list shows the entity. Players missing from it are often
+    /// server-made NPCs; the client does not decide. API 1.4.
+    pub fn in_tab_list(&self) -> bool {
+        self.has(UMI_ENTITY_IN_TAB_LIST)
+    }
+
+    /// Whether a block-free line runs from the local player's eye to the
+    /// entity's box, tested once per tick, up to 128 blocks. It is the player's
+    /// eye, not a mod camera's. API 1.4.
+    pub fn visible(&self) -> bool {
+        self.has(UMI_ENTITY_VISIBLE)
+    }
+
+    /// Whether the entity is on the local player's scoreboard team. API 1.4.
+    pub fn teammate(&self) -> bool {
+        self.has(UMI_ENTITY_TEAMMATE)
+    }
+
     fn has(&self, flag: u32) -> bool {
         self.raw.flags & flag != 0
     }
+}
+
+/// One potion effect of an [`Entity`] (API 1.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Effect {
+    /// The 1.8 potion id (1 speed, 5 strength, 14 invisibility, …).
+    pub id: u8,
+    /// Level minus one: 0 for level I.
+    pub amplifier: u8,
+    /// Whether the server hides the effect's particles.
+    pub hide_particles: bool,
+    /// Ticks left as the server sent them (32767 shows as `**:**`).
+    pub duration: i32,
 }
 
 /// Read-only world queries.
@@ -273,6 +373,27 @@ impl World {
     }
 }
 
+impl World {
+    /// Calls `f` with the local player as the snapshot sees it (API 1.4): its
+    /// team, display name, effects, held item, health… The same rules as
+    /// [`snapshot`](Self::snapshot): render-thread callbacks only, strings valid
+    /// inside `f`.
+    ///
+    /// ```ignore
+    /// let my_team = world.local_player(|me| me.team().to_owned())?;
+    /// ```
+    ///
+    /// # Errors
+    /// As [`snapshot`](Self::snapshot); [`ModError::Unavailable`] also before the
+    /// client knows the local player.
+    pub fn local_player<R>(&self, f: impl FnOnce(&Entity<'_>) -> R) -> Result<R, ModError> {
+        let mut raw = blank_entity();
+        host::call(|host, me| (host.world_local_player)(me, &raw mut raw))
+            .and_then(ModError::check)?;
+        Ok(f(&Entity::new(raw)))
+    }
+}
+
 /// How many rows [`World::snapshot`] asks for: the host's bound (ADR-0094).
 const SNAPSHOT_CAPACITY: usize = 256;
 
@@ -303,5 +424,72 @@ fn blank_entity() -> UmiEntity {
         flags: 0,
         is_player: 0,
         render_position: [0.0; 3],
+        hurt_time: 0,
+        death_time: 0,
+        held_item: -1,
+        held_damage: 0,
+        display_name: UmiStr::EMPTY,
+        team_color: UMI_NO_COLOR,
+        ping: -1,
+        uuid_version: 0,
+        effect_count: 0,
+        effects: [UmiEffect::default(); UMI_MAX_ENTITY_EFFECTS],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_blank_row_reads_as_nothing_known() {
+        let entity = Entity::new(blank_entity());
+        assert_eq!(entity.held_item(), None);
+        assert_eq!((entity.team_color(), entity.ping()), (None, None));
+        assert_eq!(entity.effects().len(), 0);
+        assert!(!entity.is_hurt() && !entity.visible() && !entity.teammate());
+    }
+
+    #[test]
+    fn the_1_4_accessors_read_the_row() {
+        let mut raw = blank_entity();
+        raw.hurt_time = 9;
+        raw.held_item = 276;
+        raw.held_damage = 2;
+        raw.team_color = 0x55ff55;
+        raw.ping = 0;
+        raw.flags = UMI_ENTITY_VISIBLE | UMI_ENTITY_TEAMMATE | UMI_ENTITY_IN_TAB_LIST;
+        raw.effect_count = 2;
+        raw.effects[0] = UmiEffect {
+            id: 1,
+            amplifier: 1,
+            flags: UMI_EFFECT_HIDE_PARTICLES,
+            reserved: 0,
+            duration: 40,
+        };
+        raw.effects[1].id = 14;
+        let entity = Entity::new(raw);
+        assert!(entity.is_hurt() && entity.hurt_time() == 9);
+        assert_eq!(entity.held_item(), Some((276, 2)));
+        assert_eq!(
+            (entity.team_color(), entity.ping()),
+            (Some(0x55ff55), Some(0))
+        );
+        assert!(entity.visible() && entity.teammate() && entity.in_tab_list());
+        assert!(!entity.spectator());
+        let speed = entity.effect(1).expect("speed");
+        assert_eq!(
+            (speed.amplifier, speed.hide_particles, speed.duration),
+            (1, true, 40)
+        );
+        assert_eq!(entity.effect(14).map(|e| e.duration), Some(0));
+        assert_eq!(entity.effect(5), None);
+    }
+
+    #[test]
+    fn an_effect_count_past_the_array_is_cut() {
+        let mut raw = blank_entity();
+        raw.effect_count = 99;
+        assert_eq!(Entity::new(raw).effects().len(), UMI_MAX_ENTITY_EFFECTS);
     }
 }

@@ -179,6 +179,7 @@ fn frame(position: glam::Vec3, tick_time: Instant, world_time: i64) -> Box<Frame
         overlays: crate::scene::overlay_state::OverlayInputs::default(),
         debug: Arc::default(),
         mod_entities: Arc::default(),
+        mod_local: None,
         signs: Arc::default(),
     })
 }

@@ -121,6 +121,7 @@ impl ModHost {
             &manifest.load,
             Arc::clone(&self.shared),
         );
+        context.set_api_version(module);
         let status = (exports.init)(&*self.table, handle_of(&context));
         context.finish_init(status.is_ok());
         self.mods.push(LoadedMod {

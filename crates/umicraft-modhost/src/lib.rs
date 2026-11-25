@@ -94,4 +94,7 @@ pub use ui::settings::{SettingSpec, SettingSpecKind};
 pub use ui::shared::HostShared;
 pub use ui::view::{KeyBinding, ModView, ModuleView, SettingView, WidgetView};
 pub use worker::QUEUE_CAPACITY;
-pub use world::{with_world, EntityView, WorldQuery};
+pub use world::{
+    with_world, Effect, EntityEffects, EntityTexts, EntityView, HeldItem, WorldQuery,
+    MAX_ENTITY_EFFECTS,
+};

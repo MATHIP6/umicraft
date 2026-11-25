@@ -143,3 +143,6 @@ pub const UMI_ATTACH_HUD_WIDGET: u32 = 1;
 /// `UmiHost::module_attach` kind: a post-process pass, applied only while the
 /// module is on.
 pub const UMI_ATTACH_POST_PASS: u32 = 2;
+/// `UmiHost::module_attach` kind: a world layer, drawn only while the module is
+/// on. Added in API 1.4.
+pub const UMI_ATTACH_WORLD_LAYER: u32 = 3;

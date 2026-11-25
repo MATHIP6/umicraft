@@ -107,7 +107,7 @@ pub use packets::Packets;
 pub use physics::{GameMode, Input, Physics, PlayerState};
 pub use post::PostPass;
 pub use setting::Setting;
-pub use world::{Block, Entity, World};
+pub use world::{Block, Effect, Entity, World};
 
 /// Exports `umi_mod_api_version`, `umi_mod_init` and `umi_mod_shutdown` for a
 /// type implementing [`Mod`]; use it once per mod library.

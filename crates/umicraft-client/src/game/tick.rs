@@ -189,28 +189,23 @@ pub(super) fn tick(
         .vehicle
         .and_then(|vehicle| game.entities.rider_feet(EntityId(vehicle)));
     gather_solid_entities(game);
+    let eye = game.eye();
     if let (Some(state), Some(world)) = (game.state.as_mut(), game.world.as_ref()) {
         match seat {
             Some(feet) => state.ride(feet),
             // The mods' physics layers may query the world (F3.6).
-            None => lend(
-                Some(world),
-                &game.entities,
-                &game.social.scoreboard,
-                &game.hud_view,
-                || {
-                    state.tick(
-                        &intent,
-                        &WithMovingBlocks {
-                            world: &WithEntities {
-                                world,
-                                boxes: &game.solid_entities,
-                            },
-                            moving: game.server.moving_blocks(),
+            None => lend(&game_world!(game, eye = eye), || {
+                state.tick(
+                    &intent,
+                    &WithMovingBlocks {
+                        world: &WithEntities {
+                            world,
+                            boxes: &game.solid_entities,
                         },
-                    )
-                },
-            ),
+                        moving: game.server.moving_blocks(),
+                    },
+                )
+            }),
         }
     }
     if let (Some(run), Some(state)) = (game.e1.as_mut(), game.state.as_ref()) {

@@ -24,8 +24,85 @@ pub trait WorldQuery {
     fn visit_entities(&self, visit: &mut dyn FnMut(&EntityView<'_>) -> bool);
 }
 
+/// Most potion effects an [`EntityView`] carries (API 1.4).
+pub const MAX_ENTITY_EFFECTS: usize = umicraft_modapi_sys::UMI_MAX_ENTITY_EFFECTS;
+
+/// One potion effect of an entity (API 1.4).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Effect {
+    /// 1.8 potion id.
+    pub id: u8,
+    /// Level minus one.
+    pub amplifier: u8,
+    /// Whether the server hides its particles.
+    pub hide_particles: bool,
+    /// Ticks left as the server sent them.
+    pub duration: i32,
+}
+
+/// The potion effects of an entity, at most [`MAX_ENTITY_EFFECTS`], kept inline so
+/// a view stays `Copy`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EntityEffects {
+    list: [Effect; MAX_ENTITY_EFFECTS],
+    len: u8,
+}
+
+impl EntityEffects {
+    /// Adds `effect`; returns `false`, adding nothing, once full.
+    pub fn push(&mut self, effect: Effect) -> bool {
+        let Some(slot) = self.list.get_mut(usize::from(self.len)) else {
+            return false;
+        };
+        *slot = effect;
+        self.len += 1;
+        true
+    }
+
+    /// The effects pushed so far.
+    #[must_use]
+    pub fn as_slice(&self) -> &[Effect] {
+        &self.list[..usize::from(self.len)]
+    }
+}
+
+impl FromIterator<Effect> for EntityEffects {
+    /// The first [`MAX_ENTITY_EFFECTS`] effects of `iter`.
+    fn from_iter<I: IntoIterator<Item = Effect>>(iter: I) -> Self {
+        let mut effects = Self::default();
+        for effect in iter {
+            if !effects.push(effect) {
+                break;
+            }
+        }
+        effects
+    }
+}
+
+/// The item an entity holds (API 1.4).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HeldItem {
+    /// Numeric item id.
+    pub id: i32,
+    /// Damage or metadata value.
+    pub damage: i32,
+}
+
+/// The strings of an [`EntityView`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct EntityTexts<'a> {
+    /// See [`EntityView::kind`].
+    pub kind: &'a str,
+    /// See [`EntityView::name`].
+    pub name: &'a str,
+    /// See [`EntityView::team`].
+    pub team: &'a str,
+    /// See [`EntityView::display_name`].
+    pub display_name: &'a str,
+}
+
 /// One entity as a mod sees it; the strings are only valid during the visit.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct EntityView<'a> {
     /// The server's entity id.
     pub id: i32,
@@ -61,30 +138,65 @@ pub struct EntityView<'a> {
     /// Where the frame being drawn shows the entity; equal to `position` in a
     /// game-thread query.
     pub render_position: [f64; 3],
+    /// Ticks left of the hurt flash (API 1.4).
+    pub hurt_time: u32,
+    /// Ticks into the death fall, `0` while alive (API 1.4).
+    pub death_time: u32,
+    /// The item in the main hand (API 1.4).
+    pub held_item: Option<HeldItem>,
+    /// Team prefix, name and suffix of a player, else the name tag (API 1.4).
+    pub display_name: &'a str,
+    /// Team colour as `0xRRGGBB` (API 1.4).
+    pub team_color: Option<u32>,
+    /// Tab-list latency in milliseconds, `None` when not listed (API 1.4).
+    pub ping: Option<i32>,
+    /// Version nibble of the UUID, `0` when unknown (API 1.4).
+    pub uuid_version: u8,
+    /// Potion effects (API 1.4).
+    pub effects: EntityEffects,
 }
 
-impl EntityView<'_> {
+impl<'a> EntityView<'a> {
+    /// The strings of the view.
+    #[must_use]
+    pub fn texts(&self) -> EntityTexts<'a> {
+        EntityTexts {
+            kind: self.kind,
+            name: self.name,
+            team: self.team,
+            display_name: self.display_name,
+        }
+    }
+
     /// The same facts with other strings, so a view can be kept without the text it
     /// was made with, or lent again with text of another lifetime.
     #[must_use]
-    pub fn with_text<'b>(&self, kind: &'b str, name: &'b str, team: &'b str) -> EntityView<'b> {
+    pub fn with_text<'b>(&self, texts: EntityTexts<'b>) -> EntityView<'b> {
         EntityView {
             id: self.id,
-            kind,
+            kind: texts.kind,
             position: self.position,
             yaw: self.yaw,
             pitch: self.pitch,
-            name,
+            name: texts.name,
             health: self.health,
             max_health: self.max_health,
             armor: self.armor,
-            team,
+            team: texts.team,
             width: self.width,
             height: self.height,
             velocity: self.velocity,
             flags: self.flags,
             is_player: self.is_player,
             render_position: self.render_position,
+            hurt_time: self.hurt_time,
+            death_time: self.death_time,
+            held_item: self.held_item,
+            display_name: texts.display_name,
+            team_color: self.team_color,
+            ping: self.ping,
+            uuid_version: self.uuid_version,
+            effects: self.effects,
         }
     }
 }

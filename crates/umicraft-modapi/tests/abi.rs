@@ -635,6 +635,7 @@ extern "C" fn fake_world_entities(
             flags: 0,
             is_player: 0,
             render_position: [f64::from(id), 64.0, -1.5],
+            ..entity_1_4_tail()
         };
         let status = visit(&entity, user);
         if status != UmiStatus::OK {
@@ -756,6 +757,40 @@ extern "C" fn fake_module_enabled(_me: UmiModHandle, module: UmiStr, out: *mut u
     UmiStatus::OK
 }
 
+/// The fields API 1.4 appended to `UmiEntity`, as a host fills them for an
+/// entity it knows nothing more about.
+fn entity_1_4_tail() -> UmiEntity {
+    UmiEntity {
+        size: 0,
+        id: 0,
+        kind: UmiStr::EMPTY,
+        position: [0.0; 3],
+        yaw: 0.0,
+        pitch: 0.0,
+        name: UmiStr::EMPTY,
+        health: 0.0,
+        max_health: 0.0,
+        armor: 0.0,
+        team: UmiStr::EMPTY,
+        width: 0.0,
+        height: 0.0,
+        velocity: [0.0; 3],
+        flags: 0,
+        is_player: 0,
+        render_position: [0.0; 3],
+        hurt_time: 0,
+        death_time: 0,
+        held_item: -1,
+        held_damage: 0,
+        display_name: UmiStr::EMPTY,
+        team_color: UMI_NO_COLOR,
+        ping: -1,
+        uuid_version: 0,
+        effect_count: 0,
+        effects: [UmiEffect::default(); UMI_MAX_ENTITY_EFFECTS],
+    }
+}
+
 fn host() -> UmiHost {
     UmiHost {
         size: size_of::<UmiHost>(),
@@ -793,7 +828,133 @@ fn host() -> UmiHost {
         register_button: fake_register_button,
         module_attach: fake_module_attach,
         module_enabled: fake_module_enabled,
+        world_local_player: fake_world_local_player,
+        hud_circle: fake_hud_circle,
+        hud_polygon: fake_hud_polygon,
+        hud_clip_push: fake_hud_clip_push,
+        hud_clip_pop: fake_hud_clip_pop,
+        register_world_layer: fake_register_world_layer,
+        world_line: fake_world_line,
+        world_box: fake_world_box,
+        world_polygon: fake_world_polygon,
+        world_highlight: fake_world_highlight,
     }
+}
+
+/// The local player: entity 1, named `Me`, on team `blue`.
+extern "C" fn fake_world_local_player(_me: UmiModHandle, out: *mut UmiEntity) -> UmiStatus {
+    let entity = UmiEntity {
+        size: size_of::<UmiEntity>() as u32,
+        id: 1,
+        kind: text("player"),
+        name: text("Me"),
+        team: text("blue"),
+        display_name: text("\u{a7}9Me"),
+        team_color: 0x5555ff,
+        ..entity_1_4_tail()
+    };
+    // SAFETY: the module under test passes a writable entity.
+    unsafe { out.write(entity) };
+    UmiStatus::OK
+}
+
+extern "C" fn fake_hud_circle(
+    _hud: *mut UmiHudCx,
+    _x: f32,
+    _y: f32,
+    _radius: f32,
+    _color: u32,
+    _alpha: f32,
+    _thickness: f32,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+extern "C" fn fake_hud_polygon(
+    _hud: *mut UmiHudCx,
+    _points: *const f32,
+    _count: usize,
+    _color: u32,
+    _alpha: f32,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+extern "C" fn fake_hud_clip_push(
+    _hud: *mut UmiHudCx,
+    _x: f32,
+    _y: f32,
+    _width: f32,
+    _height: f32,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+extern "C" fn fake_hud_clip_pop(_hud: *mut UmiHudCx) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+extern "C" fn fake_register_world_layer(
+    _me: UmiModHandle,
+    _key: UmiStr,
+    _draw: Option<UmiWorldDrawFn>,
+    _user: *mut c_void,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+#[allow(clippy::too_many_arguments)]
+extern "C" fn fake_world_line(
+    _world: *mut UmiWorldCx,
+    _x1: f64,
+    _y1: f64,
+    _z1: f64,
+    _x2: f64,
+    _y2: f64,
+    _z2: f64,
+    _color: u32,
+    _alpha: f32,
+    _thickness: f32,
+    _flags: u32,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+#[allow(clippy::too_many_arguments)]
+extern "C" fn fake_world_box(
+    _world: *mut UmiWorldCx,
+    _min_x: f64,
+    _min_y: f64,
+    _min_z: f64,
+    _max_x: f64,
+    _max_y: f64,
+    _max_z: f64,
+    _color: u32,
+    _alpha: f32,
+    _flags: u32,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+extern "C" fn fake_world_polygon(
+    _world: *mut UmiWorldCx,
+    _points: *const f64,
+    _count: usize,
+    _color: u32,
+    _alpha: f32,
+    _flags: u32,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+extern "C" fn fake_world_highlight(
+    _world: *mut UmiWorldCx,
+    _entity: i32,
+    _color: u32,
+    _alpha: f32,
+    _flags: u32,
+) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
 }
 
 extern "C" fn fake_register_camera(
@@ -860,6 +1021,7 @@ extern "C" fn fake_world_entities_snapshot(
             },
             is_player: u8::from(kind == "player"),
             render_position: [f64::from(id) + 0.25, 64.0, 0.0],
+            ..entity_1_4_tail()
         };
         // SAFETY: the module under test passes room for `capacity` entities.
         unsafe { out.add(index).write(entity) };

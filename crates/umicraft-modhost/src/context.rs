@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 
 use umicraft_modapi_sys::{
     UmiCameraFn, UmiEventId, UmiHandlerFn, UmiLevel, UmiMode, UmiPhysicsFn, UmiServiceMode,
-    UmiStatus,
+    UmiStatus, UmiVersion, UMI_API_VERSION,
 };
 
 use crate::budget::{ModStats, Stats};
@@ -69,6 +69,10 @@ pub struct ModContext {
     worker: WorkerSlot,
     pub(crate) ui: UiState,
     pub(crate) shared: Arc<HostShared>,
+    /// The API version the library was built for; the host's own until the loader
+    /// records it. Decides the size of the structs the host writes into the mod's
+    /// arrays (API 1.4 grew `UmiEntity`).
+    api_version: OnceLock<UmiVersion>,
     /// This context as an `Arc`, for the command table's weak back-pointer.
     pub(crate) me: Weak<ModContext>,
 }
@@ -126,8 +130,21 @@ impl ModContext {
             worker: WorkerSlot::default(),
             ui: UiState::default(),
             shared,
+            api_version: OnceLock::new(),
             me: me.clone(),
         })
+    }
+
+    /// Records the API version the mod's library was built for, before its init.
+    /// Only the first call counts.
+    pub fn set_api_version(&self, version: UmiVersion) {
+        // A second call is a loader bug; the first version stays, so ignore it.
+        let _ = self.api_version.set(version);
+    }
+
+    /// The API version the mod was built for (the host's when never recorded).
+    pub fn api_version(&self) -> UmiVersion {
+        self.api_version.get().copied().unwrap_or(UMI_API_VERSION)
     }
 
     /// The mod this context belongs to.

@@ -20,6 +20,7 @@ use super::meta::EntityMeta;
 use super::mob_state::MobState;
 use super::profile::PlayerProfile;
 use super::snapshot::EntityFrameData;
+use crate::server::effects::Effects;
 
 /// Full mutable record of an entity owned by the game thread.
 #[derive(Debug, Clone, PartialEq)]
@@ -123,6 +124,10 @@ pub struct EntityRecord {
     pub health: Option<f32>,
     /// Remaining interpolation ticks for position/rotation smoothing (vanilla: 3).
     pub interpolation_steps: u8,
+    /// The potion effects the server sent for this entity (`Entity Effect`), which
+    /// a 1.8 server sends for every tracked living entity
+    /// (`EntityTrackerEntry.updatePlayerEntity`).
+    pub effects: Effects,
 }
 
 /// An entity flying to the one that picked it up: it covers the distance in
@@ -293,6 +298,7 @@ impl EntityRecord {
             flags: EntityFlags::default(),
             health: None,
             interpolation_steps: 0,
+            effects: Effects::default(),
         }
     }
 }

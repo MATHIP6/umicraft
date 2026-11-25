@@ -19,13 +19,14 @@ use umicraft_game::entity::shadow::shadow_entities;
 use umicraft_game::entity::{EntityId, EntityKind};
 use umicraft_game::view::Perspective;
 use umicraft_mesh::{BlockEntityKind, ChunkSnapshot};
+use umicraft_modhost::HeldItem;
 use umicraft_world::{BlockPos, LightLevel, World};
 
 use super::look::Look;
 use super::messages::{ChunkEvent, Frame, RenderEvent, TextScreenRequest};
 use super::state::Game;
 use super::view::{debug_world, player_view, sky_temperature};
-use crate::mods::entity_facts::{FactSources, ModEntity};
+use crate::mods::entity_facts::{LocalPlayer, ModEntity};
 use crate::pack_offer::ServerPackRequest;
 use crate::scene::fog::fog_context;
 
@@ -61,22 +62,41 @@ pub(super) fn publish_sounds(game: &mut Game, frames: &SyncSender<RenderEvent>) 
     }
 }
 
-/// The facts about every entity the external mods may read, taken at this tick;
-/// empty when no external mod is loaded. The render thread keeps the nearest 256
-/// from them (`SnapshotBuilder`).
-fn mod_entities(game: &Game) -> Arc<[ModEntity]> {
+/// The facts about every entity the external mods may read, taken at this tick,
+/// and those of the local player; empty when no external mod is loaded. The render
+/// thread keeps the nearest 256 from them (`SnapshotBuilder`).
+fn mod_entities(game: &Game) -> (Arc<[ModEntity]>, Option<ModEntity>) {
     if !game.entity_facts {
-        return Arc::default();
+        return (Arc::default(), None);
     }
-    let sources = FactSources {
-        scoreboard: &game.social.scoreboard,
-        hud: &game.hud_view,
-    };
-    game.entities
+    let world = game_world!(game);
+    let sources = world.sources();
+    let mut scratch = String::new();
+    let others = game
+        .entities
         .entities()
         .values()
-        .map(|record| ModEntity::of(record, &sources))
-        .collect()
+        .map(|record| ModEntity::of(record, &sources, &mut scratch))
+        .collect();
+    let local = LocalPlayer {
+        body: &game.body,
+        id: game.entity_id,
+        name: &game.own_name,
+        health: game.vitals.health,
+        effects: game.server.effects(),
+        held: game
+            .windows
+            .selected_item()
+            .filter(|stack| stack.item_id >= 0)
+            .map(|stack| HeldItem {
+                id: i32::from(stack.item_id),
+                damage: i32::from(stack.damage),
+            }),
+    };
+    (
+        others,
+        Some(ModEntity::local(&local, &sources, &mut scratch)),
+    )
 }
 
 /// Publishes the current player state as a frame.
@@ -145,6 +165,7 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
         shadow_entities(world, &mut entities, game.world_time);
         eye_light(world, view.position)
     });
+    let (mod_entities, mod_local) = mod_entities(game);
     let _ = frames.try_send(RenderEvent::Frame(Box::new(Frame {
         perspective: game.perspective,
         state: view,
@@ -185,7 +206,8 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
             .overlays
             .inputs(game.perspective == Perspective::FirstPerson),
         debug: Arc::new(debug_world(game)),
-        mod_entities: mod_entities(game),
+        mod_entities,
+        mod_local,
     })));
 }
 

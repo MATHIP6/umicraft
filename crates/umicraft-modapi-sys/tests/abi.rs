@@ -48,8 +48,8 @@ fn layouts_are_stable_on_64_bit() {
         assert_eq!((size, align, header, tick), (24, 8, 0, 16));
     }
 
-    // 184 in 1.0; appended functions grow it (1.1: 224, 1.2: 272, 1.3: 280).
-    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (280, 8));
+    // 184 in 1.0; appended functions grow it (1.1: 224, 1.2: 272, 1.3: 280, 1.4: 360).
+    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (360, 8));
     assert_eq!(offset_of!(UmiHost, size), 0);
     assert_eq!(offset_of!(UmiHost, version), 8);
     assert_eq!(offset_of!(UmiHost, log), 16);
@@ -226,7 +226,7 @@ fn service_and_world_layouts() {
     assert_eq!(offset_of!(UmiEntity, position), 24);
     assert_eq!(offset_of!(UmiEntity, yaw), 48);
     assert_eq!(offset_of!(UmiEntity, name), 56);
-    assert_eq!(size_of::<UmiEntity>(), 168); // 72 in 1.0
+    assert_eq!(size_of::<UmiEntity>(), 280); // 72 in 1.0, 168 in 1.1
     assert_eq!(offset_of!(UmiHost, register_physics), 136);
     assert_eq!(offset_of!(UmiHost, physics_next), 144);
     assert_eq!(offset_of!(UmiHost, world_block), 152);
@@ -378,7 +378,6 @@ fn a_1_2_host_loads_older_mods_and_a_1_1_host_refuses_1_2_mods() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn api_1_3_layouts() {
-    assert_eq!(UMI_API_VERSION, UmiVersion { major: 1, minor: 3 });
     assert_eq!(offset_of!(UmiHost, camera_capture), 272);
 }
 
@@ -388,5 +387,58 @@ fn a_1_3_host_loads_older_mods_and_a_1_2_host_refuses_1_3_mods() {
     assert!(UMI_API_VERSION.accepts(v(1, 2)));
     assert!(UMI_API_VERSION.accepts(v(1, 3)));
     assert!(!v(1, 2).accepts(v(1, 3)));
-    assert!(!UMI_API_VERSION.accepts(v(1, 4)));
+}
+
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn api_1_4_layouts() {
+    assert_eq!(UMI_API_VERSION, UmiVersion { major: 1, minor: 4 });
+    for (offset, expected) in [
+        (offset_of!(UmiHost, world_local_player), 280),
+        (offset_of!(UmiHost, hud_circle), 288),
+        (offset_of!(UmiHost, hud_polygon), 296),
+        (offset_of!(UmiHost, hud_clip_push), 304),
+        (offset_of!(UmiHost, hud_clip_pop), 312),
+        (offset_of!(UmiHost, register_world_layer), 320),
+        (offset_of!(UmiHost, world_line), 328),
+        (offset_of!(UmiHost, world_box), 336),
+        (offset_of!(UmiHost, world_polygon), 344),
+        (offset_of!(UmiHost, world_highlight), 352),
+        (offset_of!(UmiEntity, hurt_time), 168),
+        (offset_of!(UmiEntity, death_time), 172),
+        (offset_of!(UmiEntity, held_item), 176),
+        (offset_of!(UmiEntity, held_damage), 180),
+        (offset_of!(UmiEntity, display_name), 184),
+        (offset_of!(UmiEntity, team_color), 200),
+        (offset_of!(UmiEntity, ping), 204),
+        (offset_of!(UmiEntity, uuid_version), 208),
+        (offset_of!(UmiEntity, effect_count), 212),
+        (offset_of!(UmiEntity, effects), 216),
+    ] {
+        assert_eq!(offset, expected);
+    }
+    assert_eq!((size_of::<UmiEffect>(), align_of::<UmiEffect>()), (8, 4));
+    assert_eq!(offset_of!(UmiEffect, duration), 4);
+    assert_eq!(UMI_MAX_ENTITY_EFFECTS, 8);
+    assert_eq!(UMI_NO_COLOR, 0xFFFF_FFFF);
+    assert_eq!(
+        [
+            UMI_ENTITY_SPECTATOR,
+            UMI_ENTITY_IN_TAB_LIST,
+            UMI_ENTITY_VISIBLE,
+            UMI_ENTITY_TEAMMATE
+        ],
+        [64, 128, 256, 512]
+    );
+    assert_eq!((UMI_WORLD_THROUGH_WALLS, UMI_WORLD_FILL), (1, 2));
+    assert_eq!(UMI_ATTACH_WORLD_LAYER, 3);
+}
+
+#[test]
+fn a_1_4_host_loads_older_mods_and_a_1_3_host_refuses_1_4_mods() {
+    let v = |major, minor| UmiVersion { major, minor };
+    assert!(UMI_API_VERSION.accepts(v(1, 3)));
+    assert!(UMI_API_VERSION.accepts(v(1, 4)));
+    assert!(!v(1, 3).accepts(v(1, 4)));
+    assert!(!UMI_API_VERSION.accepts(v(1, 5)));
 }

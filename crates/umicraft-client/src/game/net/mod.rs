@@ -234,6 +234,16 @@ fn apply_net_event(
         PlayEvent::PluginMessage(packet) if packet.channel == payload::TRADE_LIST => {
             apply_trade_list(game, &packet.data, frames);
         }
+        PlayEvent::EntityEffect(packet) => {
+            // The local player's in the server state, every other entity's in the
+            // store (for the mods, API 1.4).
+            game.server.apply_entity_effect(&packet);
+            game.entities.apply_effect(&packet);
+        }
+        PlayEvent::RemoveEntityEffect(packet) => {
+            game.server.apply_remove_entity_effect(&packet);
+            game.entities.remove_effect(&packet);
+        }
         other => apply_server_state(&mut game.server, &other),
     }
 }
@@ -243,8 +253,6 @@ fn apply_net_event(
 /// here until their milestone (P5 entities, P8 particles, P11 audio).
 fn apply_server_state(server: &mut ServerState, event: &PlayEvent) {
     match event {
-        PlayEvent::EntityEffect(packet) => server.apply_entity_effect(packet),
-        PlayEvent::RemoveEntityEffect(packet) => server.apply_remove_entity_effect(packet),
         PlayEvent::EntityProperties(packet) => server.apply_entity_properties(packet),
         PlayEvent::ServerDifficulty(packet) => server.apply_difficulty(packet),
         PlayEvent::WorldBorder(packet) => server.apply_world_border(packet),

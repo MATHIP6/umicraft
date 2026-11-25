@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use glam::{DVec3, Vec3};
+use umicraft_protocol::packets::play::clientbound::{EntityEffect, RemoveEntityEffect};
 use umicraft_protocol::packets::play::Metadata;
 
 use crate::particles::MobBody;
@@ -431,6 +432,21 @@ impl EntityStore {
         }
     }
 
+    /// Adds the effect of an `Entity Effect` packet to its entity, merged like the
+    /// local player's ([`Effects::apply`](crate::server::effects::Effects::apply)). An unknown id is ignored.
+    pub fn apply_effect(&mut self, packet: &EntityEffect) {
+        if let Some(entity) = self.entities.get_mut(&EntityId(packet.entity_id)) {
+            entity.effects.apply(packet);
+        }
+    }
+
+    /// Removes the effect of a `Remove Entity Effect` packet from its entity.
+    pub fn remove_effect(&mut self, packet: &RemoveEntityEffect) {
+        if let Some(entity) = self.entities.get_mut(&EntityId(packet.entity_id)) {
+            entity.effects.remove(packet.effect_id);
+        }
+    }
+
     /// Gives every tracked player with `uuid` a profile (name, skin, cape).
     ///
     /// Used when a player spawns before or after its tab list entry.
@@ -591,6 +607,9 @@ impl EntityStore {
             entity.glide_to_target();
             entity.animate();
             entity.animation.tick();
+            // Durations count down on the client too
+            // (`EntityLivingBase.updatePotionEffects`).
+            entity.effects.tick();
             if let Variant::Creeper(creeper) = &entity.meta.variant {
                 // A lit creeper fuses whatever its state says.
                 let state = if creeper.ignited { 1 } else { creeper.state };
@@ -867,6 +886,33 @@ mod tests {
             count: 1,
             nbt: None,
         }
+    }
+
+    #[test]
+    fn effects_of_other_entities_are_kept_ticked_and_removed() {
+        let mut store = EntityStore::new();
+        spawn_object_at_origin(&mut store, 1, 2, 0);
+        let speed = EntityEffect {
+            entity_id: 1,
+            effect_id: 1,
+            amplifier: 1,
+            duration: 100,
+            hide_particles: 0,
+        };
+        store.apply_effect(&speed);
+        store.apply_effect(&EntityEffect {
+            entity_id: 42,
+            ..speed
+        });
+        store.tick();
+        let effects = &store.entities()[&EntityId(1)].effects;
+        let active = effects.get(1).expect("speed kept");
+        assert_eq!((active.amplifier, active.duration), (1, 99));
+        store.remove_effect(&RemoveEntityEffect {
+            entity_id: 1,
+            effect_id: 1,
+        });
+        assert!(store.entities()[&EntityId(1)].effects.is_empty());
     }
 
     #[test]

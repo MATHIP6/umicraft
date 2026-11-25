@@ -114,6 +114,8 @@ pub struct WorldView {
     entities: Arc<[EntityFrameData]>,
     /// What the external mods may read about each entity, from the latest frame.
     mod_entities: Arc<[ModEntity]>,
+    /// The local player as the external mods see it, from the latest frame.
+    mod_local: Option<ModEntity>,
     /// A text screen the game thread asked for, until the window takes it.
     text_request: Option<TextScreenRequest>,
     /// Resource pack offers the window has not taken yet, oldest first.
@@ -186,6 +188,7 @@ impl WorldView {
             frames: 0,
             entities: Arc::from([]),
             mod_entities: Arc::from([]),
+            mod_local: None,
             local_body: None,
             text_request: None,
             pack_requests: Vec::new(),
@@ -248,6 +251,7 @@ impl WorldView {
                 self.frames += 1;
                 self.entities = Arc::clone(&frame.entities);
                 self.mod_entities = Arc::clone(&frame.mod_entities);
+                self.mod_local.clone_from(&frame.mod_local);
                 self.local_body = Some(Arc::clone(&frame.local_body));
                 self.hand_light = frame.hand_light;
                 self.selection = Arc::clone(&frame.selection);
@@ -344,6 +348,7 @@ impl WorldView {
         self.block_entities.clear();
         self.entities = Arc::from([]);
         self.mod_entities = Arc::from([]);
+        self.mod_local = None;
         target.clear_meshes();
     }
 }

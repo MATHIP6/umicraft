@@ -11,7 +11,10 @@ use core::ffi::c_void;
 use std::cell::Cell;
 use std::thread::LocalKey;
 
-use umicraft_modapi_sys::{UmiEntity, UmiEntityVisitFn, UmiModHandle, UmiStatus, UmiStr};
+use umicraft_modapi_sys::{
+    UmiEffect, UmiEntity, UmiEntityVisitFn, UmiModHandle, UmiStatus, UmiStr, UmiVersion,
+    UMI_EFFECT_HIDE_PARTICLES, UMI_MAX_ENTITY_EFFECTS, UMI_NO_COLOR,
+};
 
 use super::guarded;
 use crate::context::ModContext;
@@ -165,19 +168,87 @@ pub(super) extern "C" fn host_world_entities_snapshot(
     if count.is_null() || (out.is_null() && capacity != 0) {
         return UmiStatus::INVALID_ARGUMENT;
     }
-    enabled_only(me, || {
+    guarded(me, |context: &ModContext| {
+        if !context.is_enabled() {
+            return UmiStatus::DENIED;
+        }
+        let row_size = entity_size_for(context.api_version());
         with_active_snapshot(|snapshot| {
             for (index, view) in snapshot.iter().take(capacity).enumerate() {
+                let mut entity = abi_entity(&view);
+                entity.size = row_size as u32;
                 // SAFETY: `out` is non-null here (a null one has capacity zero, so
                 // the loop does not run) and the ABI promises room for `capacity`
-                // entities; `index < capacity`.
-                unsafe { out.add(index).write(abi_entity(&view)) };
+                // entities of the struct the mod was built with, `row_size` bytes
+                // each; `index < capacity`, and `row_size` never exceeds the
+                // host's struct, so the source read stays inside `entity`.
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        core::ptr::from_ref(&entity).cast::<u8>(),
+                        out.cast::<u8>().add(index * row_size),
+                        row_size,
+                    );
+                }
             }
             // SAFETY: `count` is non-null and the ABI promises it is writable.
             unsafe { count.write(snapshot.len()) };
             UmiStatus::OK
         })
     })
+}
+
+/// Size of `UmiEntity` for a mod built against API 1.1 to 1.3, before 1.4 grew it.
+const ENTITY_SIZE_1_1: usize = 168;
+
+/// The size of the `UmiEntity` a mod built for `version` allocates: the array it
+/// hands to `world_entities_snapshot` has rows of this size, so writing the
+/// host's larger struct would run past each row.
+fn entity_size_for(version: UmiVersion) -> usize {
+    if version.major == 1 && version.minor < 4 {
+        ENTITY_SIZE_1_1
+    } else {
+        core::mem::size_of::<UmiEntity>()
+    }
+}
+
+/// Answers `world_local_player` from the lent snapshot (API 1.4); `UNAVAILABLE`
+/// when the client gave no local player (no world yet).
+pub(super) extern "C" fn host_world_local_player(
+    me: UmiModHandle,
+    out: *mut UmiEntity,
+) -> UmiStatus {
+    if out.is_null() {
+        return UmiStatus::INVALID_ARGUMENT;
+    }
+    enabled_only(me, || {
+        with_active_snapshot(|snapshot| match snapshot.local() {
+            Some(view) => {
+                // SAFETY: `out` is non-null and the ABI promises room for one entity.
+                unsafe { out.write(abi_entity(&view)) };
+                UmiStatus::OK
+            }
+            None => UmiStatus::UNAVAILABLE,
+        })
+    })
+}
+
+/// The ABI form of the effects of `view`, unused entries zeroed.
+fn abi_effects(view: &EntityView<'_>) -> [UmiEffect; UMI_MAX_ENTITY_EFFECTS] {
+    let mut out = [UmiEffect::default(); UMI_MAX_ENTITY_EFFECTS];
+    for (slot, effect) in out.iter_mut().zip(view.effects.as_slice()) {
+        *slot = UmiEffect {
+            id: effect.id,
+            amplifier: effect.amplifier,
+            flags: if effect.hide_particles {
+                UMI_EFFECT_HIDE_PARTICLES
+            } else {
+                0
+            },
+            reserved: 0,
+            duration: effect.duration,
+        };
+    }
+    out
 }
 
 /// Lends `view` to the ABI: the strings point into the view and live as long as it.
@@ -204,6 +275,16 @@ fn abi_entity(view: &EntityView<'_>) -> UmiEntity {
         flags: view.flags,
         is_player: u8::from(view.is_player),
         render_position: view.render_position,
+        hurt_time: view.hurt_time,
+        death_time: view.death_time,
+        held_item: view.held_item.map_or(-1, |item| item.id),
+        held_damage: view.held_item.map_or(0, |item| item.damage),
+        display_name: text(view.display_name),
+        team_color: view.team_color.unwrap_or(UMI_NO_COLOR),
+        ping: view.ping.unwrap_or(-1),
+        uuid_version: u32::from(view.uuid_version),
+        effect_count: view.effects.as_slice().len() as u32,
+        effects: abi_effects(view),
     }
 }
 
@@ -218,6 +299,7 @@ mod tests {
     use crate::snapshot::MAX_SNAPSHOT_ENTITIES;
     use crate::with_entity_snapshot;
     use crate::world::with_world;
+    use crate::world::{Effect, HeldItem};
 
     /// A world with one block, and entities `(id, kind, name)` at `x = id`.
     struct Fake {
@@ -259,6 +341,29 @@ mod tests {
             flags: UMI_ENTITY_LIVING | UMI_ENTITY_SNEAKING,
             is_player: kind == "player",
             render_position: [f64::from(id), 64.0, 0.5],
+            hurt_time: 7,
+            death_time: 0,
+            held_item: Some(HeldItem { id: 276, damage: 3 }),
+            display_name: "\u{a7}9Blue",
+            team_color: Some(0x5555ff),
+            ping: Some(35),
+            uuid_version: 2,
+            effects: [
+                Effect {
+                    id: 1,
+                    amplifier: 1,
+                    hide_particles: true,
+                    duration: 200,
+                },
+                Effect {
+                    id: 5,
+                    amplifier: 0,
+                    hide_particles: false,
+                    duration: 32767,
+                },
+            ]
+            .into_iter()
+            .collect(),
         }
     }
 
@@ -559,6 +664,100 @@ mod tests {
         assert_eq!(text(out[0].name), "Ann");
         assert_eq!(text(out[0].kind), "player");
         assert_eq!(text(out[2].team), "red");
+    }
+
+    /// Regression (API 1.4): a mod built for 1.1 to 1.3 hands rows of the old,
+    /// shorter `UmiEntity`; the host must not write the 1.4 struct over them.
+    #[test]
+    fn an_older_mod_gets_rows_of_its_own_size() {
+        let cx = enabled();
+        cx.set_api_version(UmiVersion { major: 1, minor: 3 });
+        let snapshot = snapshot_of(3);
+        // Room for two old rows and a guard after them.
+        let mut buffer = vec![0xAB_u8; 2 * ENTITY_SIZE_1_1 + 64];
+        let (status, count) = with_entity_snapshot(&snapshot, || {
+            read_snapshot(&cx, buffer.as_mut_ptr().cast(), 2)
+        });
+        assert_eq!((status, count), (UmiStatus::OK, 3));
+        assert!(
+            buffer[2 * ENTITY_SIZE_1_1..]
+                .iter()
+                .all(|&byte| byte == 0xAB),
+            "nothing written past the mod's rows"
+        );
+        let id_at = |row: usize| {
+            let at = row * ENTITY_SIZE_1_1 + core::mem::offset_of!(UmiEntity, id);
+            i32::from_ne_bytes(buffer[at..at + 4].try_into().unwrap())
+        };
+        let size_at = |row: usize| {
+            let at = row * ENTITY_SIZE_1_1;
+            u32::from_ne_bytes(buffer[at..at + 4].try_into().unwrap())
+        };
+        assert_eq!((id_at(0), id_at(1)), (0, 1));
+        assert_eq!(size_at(1), ENTITY_SIZE_1_1 as u32);
+        assert_eq!(
+            entity_size_for(UmiVersion { major: 1, minor: 4 }),
+            core::mem::size_of::<UmiEntity>()
+        );
+    }
+
+    #[test]
+    fn the_1_4_facts_reach_the_abi() {
+        let entity = abi_entity(&sample(3, "player", "Bob"));
+        let text = |s: UmiStr| String::from_utf8(bytes_of(s, 64).to_vec()).unwrap();
+        assert_eq!((entity.hurt_time, entity.death_time), (7, 0));
+        assert_eq!((entity.held_item, entity.held_damage), (276, 3));
+        assert_eq!(text(entity.display_name), "\u{a7}9Blue");
+        assert_eq!((entity.team_color, entity.ping), (0x5555ff, 35));
+        assert_eq!((entity.uuid_version, entity.effect_count), (2, 2));
+        assert_eq!(
+            entity.effects[0],
+            UmiEffect {
+                id: 1,
+                amplifier: 1,
+                flags: UMI_EFFECT_HIDE_PARTICLES,
+                reserved: 0,
+                duration: 200,
+            }
+        );
+        assert_eq!((entity.effects[1].id, entity.effects[1].flags), (5, 0));
+        assert_eq!(entity.effects[2], UmiEffect::default());
+    }
+
+    #[test]
+    fn missing_facts_have_their_documented_sentinels() {
+        let entity = abi_entity(&EntityView::default());
+        assert_eq!((entity.held_item, entity.held_damage), (-1, 0));
+        assert_eq!((entity.team_color, entity.ping), (UMI_NO_COLOR, -1));
+        assert_eq!((entity.uuid_version, entity.effect_count), (0, 0));
+    }
+
+    fn local_player(cx: &ModContext) -> (UmiStatus, UmiEntity) {
+        let mut out = blank();
+        out.id = -1;
+        let status = (host_table().world_local_player)(handle_of(cx), &mut out);
+        (status, out)
+    }
+
+    #[test]
+    fn the_local_player_comes_from_the_snapshot() {
+        let cx = enabled();
+        assert_eq!(local_player(&cx).0, UmiStatus::UNSUPPORTED);
+        let mut snapshot = snapshot_of(2);
+        let (status, out) = with_entity_snapshot(&snapshot, || local_player(&cx));
+        assert_eq!((status, out.id), (UmiStatus::UNAVAILABLE, -1));
+        snapshot.set_local(&sample(42, "player", "Me"));
+        let (status, out) = with_entity_snapshot(&snapshot, || local_player(&cx));
+        assert_eq!((status, out.id), (UmiStatus::OK, 42));
+        let text = |s: UmiStr| String::from_utf8(bytes_of(s, 64).to_vec()).unwrap();
+        assert_eq!(
+            (text(out.name), text(out.team)),
+            ("Me".to_owned(), "red".to_owned())
+        );
+        let status = with_entity_snapshot(&snapshot, || {
+            (host_table().world_local_player)(handle_of(&cx), core::ptr::null_mut())
+        });
+        assert_eq!(status, UmiStatus::INVALID_ARGUMENT);
     }
 
     #[test]

@@ -343,6 +343,7 @@ impl WorldQuery for FlatWorld {
             flags: UMI_ENTITY_LIVING,
             is_player: true,
             render_position: [3.0, 64.0, 4.0],
+            ..EntityView::default()
         });
     }
 }
@@ -525,6 +526,7 @@ fn listed(id: i32, kind: &'static str, name: &'static str, health: f32) -> Entit
         flags: if living { UMI_ENTITY_LIVING } else { 0 },
         is_player: kind == "player",
         render_position: [f64::from(id), 64.0, 0.0],
+        ..EntityView::default()
     }
 }
 

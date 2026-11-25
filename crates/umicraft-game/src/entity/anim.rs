@@ -241,6 +241,12 @@ impl Animation {
         (from + (to - from) * alpha) / f32::from(FUSE_TICKS - 2)
     }
 
+    /// Ticks into the death fall, `0` while alive (MCP `deathTime`).
+    #[must_use]
+    pub const fn death_time(&self) -> u8 {
+        self.death_time
+    }
+
     /// True once the death fall is over and the entity is removed.
     #[must_use]
     pub fn is_finished(&self) -> bool {
