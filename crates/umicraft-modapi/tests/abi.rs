@@ -13,10 +13,11 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use umicraft_modapi::{
-    umicraft_mod, Anchor, Block, ButtonPressed, Chat, ChatReceived, ChatSend, Connected, Depth,
-    Disconnected, Frame, GameMode, InitCx, KeyPressed, Mod, ModError, Module, ModuleSpec,
-    ModuleToggled, PacketReceived, PacketSend, Packets, Physics, Placement, PostPass, PostTick,
-    PreTick, ScreenClosed, ScreenOpened, Setting, World,
+    umicraft_mod, Anchor, Block, ButtonPressed, Chat, ChatReceived, ChatSend, Connected,
+    Controller, Depth, Disconnected, Frame, GameMode, InitCx, InputAction, KeyPressed, Mod,
+    ModError, Module, ModuleSpec, ModuleToggled, PacketReceived, PacketSend, Packets, Physics,
+    Placement, PlayerInput, Pointed, PostPass, PostTick, PreTick, ScreenClosed, ScreenOpened,
+    Setting, UseAction, World,
 };
 use umicraft_modapi_sys::*;
 
@@ -62,6 +63,10 @@ static CHAT: Mutex<Vec<String>> = Mutex::new(Vec::new());
 static INJECTED: Mutex<Vec<(u32, Vec<u8>)>> = Mutex::new(Vec::new());
 /// The status `packet_send` answers with.
 static PACKET_STATUS: Mutex<UmiStatus> = Mutex::new(UmiStatus::OK);
+/// Every input call (API 1.5) the fake host received, as text.
+static INPUT_CALLS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// The status the input functions answer with.
+static INPUT_STATUS: Mutex<UmiStatus> = Mutex::new(UmiStatus::OK);
 /// Post passes the fake host accepted, as `key:label:wgsl`.
 static POST_PASSES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 /// Every `post_set_param` call, as `key:index:x,y,z,w`.
@@ -84,6 +89,7 @@ struct Ui {
     unknown: Setting<u32>,
     chat: Chat,
     packets: Packets,
+    input: Controller,
     world: World,
     post: PostPass,
 }
@@ -169,6 +175,24 @@ fn register_view_handlers(cx: &mut InitCx<'_>) -> Result<(), ModError> {
             e.sprinting()
         ));
     })?;
+    cx.observe::<PlayerInput>(0, |e| {
+        see(format!(
+            "input={} tick={} held={}/{} presses={}/{} focus={} using={} swing={} item={:?} {:?} block={} {:?}",
+            e.now_ms(),
+            e.tick(),
+            e.attack_held(),
+            e.use_held(),
+            e.attack_presses(),
+            e.use_presses(),
+            e.game_focus(),
+            e.using_item(),
+            e.swing_progress(),
+            e.held_item(),
+            e.held_use_action(),
+            e.held_is_block(),
+            e.pointed(),
+        ));
+    })?;
     cx.observe::<ScreenOpened>(0, |e| see(format!("opened={}", e.name())))?;
     cx.observe::<ScreenClosed>(0, |e| see(format!("closed={}", e.name())))
 }
@@ -183,6 +207,7 @@ fn register_ui(cx: &mut InitCx<'_>) -> Result<(), ModError> {
         unknown: cx.color("other", "Other", 7)?,
         chat: cx.chat(),
         packets: cx.packets(),
+        input: cx.input(),
         world: cx.world(),
         post: cx.post_pass("tint", "Tint", "fn fs_main() {}")?,
     };
@@ -864,7 +889,6 @@ fn host() -> UmiHost {
         world_box: fake_world_box,
         world_polygon: fake_world_polygon,
         world_highlight: fake_world_highlight,
-        // The safe wrappers come with phase 1.5.5; until then the slots only fill the table.
         input_press: fake_input_press,
         input_clear_press: fake_input_clear_press,
         input_add_look: fake_input_add_look,
@@ -1002,16 +1026,21 @@ extern "C" fn fake_world_highlight(
     hud_call(format!("whighlight {entity} {color:06x} {alpha} {flags}"))
 }
 
-extern "C" fn fake_input_press(_me: UmiModHandle, _action: u32, _count: u32) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+fn input_call(call: String) -> UmiStatus {
+    INPUT_CALLS.lock().unwrap().push(call);
+    *INPUT_STATUS.lock().unwrap()
 }
 
-extern "C" fn fake_input_clear_press(_me: UmiModHandle, _action: u32) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+extern "C" fn fake_input_press(_me: UmiModHandle, action: u32, count: u32) -> UmiStatus {
+    input_call(format!("press {action} {count}"))
 }
 
-extern "C" fn fake_input_add_look(_me: UmiModHandle, _yaw: f32, _pitch: f32) -> UmiStatus {
-    UmiStatus::UNSUPPORTED
+extern "C" fn fake_input_clear_press(_me: UmiModHandle, action: u32) -> UmiStatus {
+    input_call(format!("clear {action}"))
+}
+
+extern "C" fn fake_input_add_look(_me: UmiModHandle, yaw: f32, pitch: f32) -> UmiStatus {
+    input_call(format!("look {yaw} {pitch}"))
 }
 
 extern "C" fn fake_register_camera(
@@ -1140,6 +1169,8 @@ fn fresh() -> MutexGuard<'static, ()> {
     }
     POST_REFUSALS.lock().unwrap().clear();
     *PACKET_STATUS.lock().unwrap() = UmiStatus::OK;
+    INPUT_CALLS.lock().unwrap().clear();
+    *INPUT_STATUS.lock().unwrap() = UmiStatus::OK;
     *SNAPSHOT_STATUS.lock().unwrap() = UmiStatus::OK;
     *VALUES.lock().unwrap() = Some(HashMap::new());
     *UI.lock().unwrap() = None;
@@ -1248,7 +1279,7 @@ fn init_registers_the_subscriptions_and_logs() {
     let _guard = fresh();
     init_ok();
     let subs = SUBS.lock().unwrap();
-    assert_eq!(subs.len(), 15);
+    assert_eq!(subs.len(), 16);
     assert_eq!(
         (subs[0].event, subs[0].mode, subs[0].priority),
         (UmiEventId::PRE_TICK, UmiMode::OBSERVE, 5)
@@ -1966,6 +1997,98 @@ fn packets_send_maps_host_statuses_to_errors() {
     }
 }
 
+#[test]
+fn controller_passes_actions_counts_and_degrees_to_the_host() {
+    let _guard = fresh();
+    init_ok();
+    let input = ui().input;
+    assert_eq!(input.press(InputAction::Attack, 2), Ok(()));
+    assert_eq!(input.clear_press(InputAction::Use), Ok(()));
+    assert_eq!(input.add_look(1.5, -3.0), Ok(()));
+    assert_eq!(
+        *INPUT_CALLS.lock().unwrap(),
+        ["press 0 2", "clear 1", "look 1.5 -3"]
+    );
+}
+
+#[test]
+fn controller_maps_host_statuses_to_errors() {
+    let _guard = fresh();
+    init_ok();
+    for (status, expected) in [
+        (UmiStatus::BUSY, ModError::Busy),
+        (UmiStatus::UNAVAILABLE, ModError::Unavailable),
+        (UmiStatus::DENIED, ModError::HostRefused(UmiStatus::DENIED)),
+    ] {
+        *INPUT_STATUS.lock().unwrap() = status;
+        assert_eq!(ui().input.press(InputAction::Use, 1), Err(expected));
+    }
+}
+
+fn input_payload(kind: u8) -> UmiInput {
+    UmiInput {
+        header: header(UmiEventId::INPUT, size_of::<UmiInput>(), 0),
+        attack_held: 1,
+        use_held: 0,
+        attack_presses: 2,
+        use_presses: 0,
+        now_ms: 5000,
+        tick: 77,
+        game_focus: 1,
+        using_item: 0,
+        held_use_action: UMI_USE_ACTION_BLOCK,
+        held_is_block: 0,
+        swing_progress: 0.5,
+        held_item: 276,
+        held_damage: 3,
+        pointed_kind: kind,
+        pointed_face: 1,
+        reserved: [0; 2],
+        pointed_entity: 9,
+        pointed_point: [1.0, 2.0, 3.0],
+        pointed_distance: 2.5,
+        pointed_block: 1 << 4,
+        pointed_block_pos: [1, 1, 3],
+    }
+}
+
+#[test]
+fn player_input_view_reads_every_field() {
+    let _guard = fresh();
+    init_ok();
+    let sub = sub_for(UmiEventId::INPUT);
+    for kind in [UMI_POINTED_MISS, UMI_POINTED_BLOCK, UMI_POINTED_ENTITY] {
+        assert_eq!(call(sub, &mut input_payload(kind)), UmiStatus::OK);
+    }
+    let start = "input=5000 tick=77 held=true/false presses=2/0 focus=true using=false swing=0.5 \
+                 item=Some((276, 3)) Block block=false";
+    assert_eq!(
+        seen(),
+        [
+            format!("{start} Miss"),
+            format!(
+                "{start} {:?}",
+                Pointed::Block {
+                    position: [1, 1, 3],
+                    face: 1,
+                    state: 16,
+                    point: [1.0, 2.0, 3.0],
+                    distance: 2.5,
+                }
+            ),
+            format!(
+                "{start} {:?}",
+                Pointed::Entity {
+                    id: 9,
+                    point: [1.0, 2.0, 3.0],
+                    distance: 2.5,
+                }
+            ),
+        ]
+    );
+    assert_eq!(format!("{:?}", UseAction::Block), "Block");
+}
+
 fn physics_state() -> UmiPlayerPhysics {
     UmiPlayerPhysics {
         size: size_of::<UmiPlayerPhysics>() as u32,
@@ -2186,7 +2309,10 @@ fn world_entities_stops_when_the_visitor_says_so_or_panics() {
 
 #[test]
 fn unavailable_has_a_message() {
-    assert_eq!(ModError::Unavailable.to_string(), "the chunk is not loaded");
+    assert_eq!(
+        ModError::Unavailable.to_string(),
+        "the host cannot answer now, try again later"
+    );
 }
 
 #[test]

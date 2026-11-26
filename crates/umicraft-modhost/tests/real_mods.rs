@@ -29,8 +29,9 @@ use umicraft_modapi_sys::{
 use umicraft_modhost::{
     discover, library_file_name, platform_dir, resolve, with_entity_snapshot, with_world,
     ApiVersion, Arch, Candidate, ChatSend, CommandOutcome, EntitySnapshot, EntityView, EventThread,
-    Frame, FrameCamera, FrameFacts, KeyPressed, LoadError, ModHost, ModId, Os, PacketReceived,
-    PostTick, PreTick, TrustList, WorldDraw, WorldQuery,
+    Frame, FrameCamera, FrameFacts, HandFacts, HeldItem, Input, InputFacts, KeyPressed, LoadError,
+    ModHost, ModId, Os, PacketReceived, PointedFacts, PostTick, PreTick, TrustList, UseKind,
+    WorldDraw, WorldQuery,
 };
 
 /// The directory holding the built example libraries (`<target>/<profile>`).
@@ -62,6 +63,8 @@ fn built_libraries() -> &'static Path {
                 "umicraft-example-free-cam",
                 "-p",
                 "umicraft-example-entity-glow",
+                "-p",
+                "umicraft-example-crosshair-info",
                 "--offline",
             ])
             .status()
@@ -913,5 +916,52 @@ fn entity_glow_marks_the_living_entities_near_the_player() {
     // Outside the snapshot scope there is no local player: nothing is marked.
     host.draw_world_layers(&mut draw);
     assert!(draw.is_empty());
+    host.shutdown_all();
+}
+
+/// The real `crosshair_info` (API 1.5): it receives `INPUT` only with its `input`
+/// permission, and its widget shows what the event's crosshair points at.
+#[test]
+fn crosshair_info_shows_the_pointed_block_and_the_held_item() {
+    let tmp = TempDir::new();
+    install(&tmp.0, "crosshair_info");
+    let candidates = discover(&tmp.0).into_iter().map(|d| Candidate {
+        manifest: d.manifest.unwrap(),
+        enabled: true,
+    });
+    let resolution = resolve(candidates, host_version());
+    let (mut host, failures) =
+        ModHost::load(&resolution, &tmp.0, &mut TrustList::default(), |_, _| true);
+    assert!(failures.is_empty(), "{failures:?}");
+    let mut render = EventBus::default();
+    host.install(&mut render, EventThread::Render);
+    assert!(render.has_subscribers::<Input>());
+
+    render.dispatch(&mut Input::new(InputFacts {
+        game_focus: true,
+        hand: HandFacts {
+            held: Some(HeldItem { id: 276, damage: 0 }),
+            held_use: UseKind::Block,
+            pointed: PointedFacts::Block {
+                position: [1, 63, -2],
+                face: 1,
+                state: 2 << 4,
+                point: [1.5, 64.0, -1.5],
+                distance: 2.0,
+            },
+            ..HandFacts::default()
+        },
+        ..InputFacts::default()
+    }));
+    host.draw_widgets();
+    let mut lines = Vec::new();
+    host.visit_widgets(|w| lines.extend(w.content.lines().iter().map(|l| l.text.clone())));
+    assert_eq!(
+        lines,
+        [
+            "Block 2:0 at 1 63 -2, top face, 2.0 m",
+            "Holding 276:0 (blocks)"
+        ]
+    );
     host.shutdown_all();
 }

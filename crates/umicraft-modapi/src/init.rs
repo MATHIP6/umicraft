@@ -17,8 +17,8 @@ use crate::host::utf8;
 use crate::menu::Card;
 use crate::post::key_too_long;
 use crate::{
-    Camera, Chat, Hud, Logger, ModError, Packets, Physics, Placement, PostPass, Setting, World,
-    WorldCx,
+    Camera, Chat, Controller, Hud, Logger, ModError, Packets, Physics, Placement, PostPass,
+    Setting, World, WorldCx,
 };
 
 /// A mod: built once by the host, told when it is shut down.
@@ -79,6 +79,13 @@ impl<'a> InitCx<'a> {
     /// needs `network_packets = true` in `mod.toml`.
     pub fn packets(&self) -> Packets {
         Packets
+    }
+
+    /// A handle for pressing the attack and use bindings and turning the look
+    /// (API 1.5), valid after `init` returns. Using it needs `input = true` in
+    /// `mod.toml`.
+    pub fn input(&self) -> Controller {
+        Controller
     }
 
     /// A handle for reading blocks and entities, valid after `init` returns.

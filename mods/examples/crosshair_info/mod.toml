@@ -1,0 +1,12 @@
+[mod]
+id = "crosshair_info"
+name = "Crosshair info"
+version = "0.1.0"
+authors = ["Umicraft contributors"]
+api_version = "1.5"
+license = "MIT"
+description = "Teaching example: a HUD line naming what the crosshair points at (block and face, or entity) and how far, plus the held item's use. Reads the INPUT event; never presses or turns."
+library = "crosshair_info"
+
+[permissions]
+input = true

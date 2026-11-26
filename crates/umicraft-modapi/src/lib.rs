@@ -19,9 +19,17 @@
 //! | [`PacketReceived`], [`PacketSend`] | network | yes | no |
 //! | [`Frame`] | render | no | no |
 //! | [`ModuleToggled`], [`ButtonPressed`] | render | no | no |
+//! | [`PlayerInput`] | render | no | no |
 //!
 //! The packet events and [`InitCx::packets`] need `network_packets = true` in
 //! the mod's `mod.toml`; without it the host answers `DENIED`.
+//!
+//! # Attack and use input (API 1.5)
+//!
+//! With `input = true` in `mod.toml`, [`PlayerInput`] tells each frame whether
+//! the attack and use bindings are held, the hand and what the crosshair points
+//! at ([`Pointed`]); [`InitCx::input`] gives [`Controller`] to press those bindings
+//! and turn the look through the client's own input path.
 //!
 //! # Settings, HUD, keys and commands
 //!
@@ -80,6 +88,7 @@ mod ffi;
 mod host;
 mod hud;
 mod init;
+mod input;
 mod key;
 mod logger;
 mod menu;
@@ -98,11 +107,12 @@ pub use draw3d::{Depth, WorldCx};
 pub use error::ModError;
 pub use event::{
     ButtonPressed, ChatPosition, ChatReceived, ChatSend, Connected, Control, Disconnected, Event,
-    Frame, KeyPressed, ModuleToggled, PacketReceived, PacketSend, PostTick, PreRender, PreTick,
-    ScreenClosed, ScreenOpened,
+    Frame, KeyPressed, ModuleToggled, PacketReceived, PacketSend, PlayerInput, PostTick, PreRender,
+    PreTick, ScreenClosed, ScreenOpened,
 };
 pub use hud::{Anchor, Hud, Placement};
 pub use init::{InitCx, Mod};
+pub use input::{Controller, InputAction, Pointed, UseAction, MAX_PRESSES};
 pub use logger::Logger;
 pub use menu::{Card, Category, Module, ModuleSpec};
 pub use packets::Packets;

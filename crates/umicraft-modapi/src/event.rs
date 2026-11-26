@@ -4,8 +4,8 @@
 
 use umicraft_modapi_sys::{
     UmiButtonPressed, UmiChatReceived, UmiChatSend, UmiConnected, UmiDisconnected, UmiEventHeader,
-    UmiEventId, UmiFrame, UmiKeyPressed, UmiModuleToggled, UmiPacket, UmiPostTick, UmiPreRender,
-    UmiPreTick, UmiScreen, UMI_CHAT_POSITION_ACTION_BAR, UMI_CHAT_POSITION_CHAT,
+    UmiEventId, UmiFrame, UmiInput, UmiKeyPressed, UmiModuleToggled, UmiPacket, UmiPostTick,
+    UmiPreRender, UmiPreTick, UmiScreen, UMI_CHAT_POSITION_ACTION_BAR, UMI_CHAT_POSITION_CHAT,
     UMI_CHAT_POSITION_SYSTEM,
 };
 
@@ -59,7 +59,7 @@ macro_rules! view {
         $(#[$doc])*
         #[repr(transparent)]
         #[derive(Debug)]
-        pub struct $view($raw);
+        pub struct $view(pub(crate) $raw);
 
         impl sealed::Sealed for $view {}
 
@@ -167,6 +167,17 @@ view!(
     Frame,
     UmiFrame,
     UmiEventId::FRAME
+);
+
+view!(
+    /// The attack and use bindings, the hand and what the crosshair points at
+    /// (API 1.5). Render thread, once per frame in a world, right after
+    /// [`Frame`]; read-only and not cancellable. Needs `input = true` in
+    /// `mod.toml`. The only key state a mod sees: whether the attack and use
+    /// bindings are held and their pending presses, never another key (ADR-0098).
+    PlayerInput,
+    UmiInput,
+    UmiEventId::INPUT
 );
 
 view!(

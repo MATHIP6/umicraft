@@ -1,0 +1,18 @@
+[package]
+name = "umicraft-example-crosshair-info"
+description = "Example Umicraft mod: what the crosshair points at, from the INPUT event (API 1.5)."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "crosshair_info"
+crate-type = ["cdylib"]
+
+[dependencies]
+umicraft-modapi.workspace = true
+
+[lints]
+workspace = true

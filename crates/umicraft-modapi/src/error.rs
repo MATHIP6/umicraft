@@ -16,11 +16,13 @@ pub enum ModError {
     HostRefused(UmiStatus),
     /// The host's bounded queue is full (`UmiStatus::BUSY`): the request is
     /// valid and may succeed if retried later. Only
-    /// [`Packets::send`](crate::Packets::send) can fail this way.
+    /// [`Packets::send`](crate::Packets::send) and [`Controller`](crate::Controller)
+    /// can fail this way.
     Busy,
-    /// The chunk asked about is not loaded (`UmiStatus::UNAVAILABLE`). Only
-    /// [`World::block`](crate::World::block) can fail this way; the answer may
-    /// change once the chunk arrives.
+    /// The host cannot answer now (`UmiStatus::UNAVAILABLE`):
+    /// [`World::block`](crate::World::block) asked about a chunk that is not
+    /// loaded, or [`Controller`](crate::Controller) was used while the game does not
+    /// own the input. The answer may change later.
     Unavailable,
     /// A mod-defined failure, typically from [`Mod::init`](crate::Mod::init).
     Message(String),
@@ -57,7 +59,7 @@ impl fmt::Display for ModError {
                 write!(f, "host refused the request (status {})", status.0)
             }
             Self::Busy => f.write_str("the host is busy, try again later"),
-            Self::Unavailable => f.write_str("the chunk is not loaded"),
+            Self::Unavailable => f.write_str("the host cannot answer now, try again later"),
             Self::Message(text) => f.write_str(text),
         }
     }
