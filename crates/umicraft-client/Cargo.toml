@@ -43,6 +43,14 @@ wgpu = "30.0.1"
 winit = "0.30.8"
 discord-rich-presence = "1.1.0"
 
+# The 1 ms timer period (`timer_resolution`) and the thread priorities
+# (`thread_priority`); both are no-ops elsewhere.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Media",
+    "Win32_System_Threading",
+] }
+
 # Only the Windows and macOS branch of `process_memory::read` uses it; Linux reads `/proc`.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 memory-stats = "1.2.0"

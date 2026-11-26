@@ -45,6 +45,8 @@ pub(crate) mod servers;
 pub mod setup_cli;
 #[cfg(test)]
 mod test_support;
+pub mod thread_priority;
+pub mod timer_resolution;
 pub mod window;
 pub mod world_view;
 

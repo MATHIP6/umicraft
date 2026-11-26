@@ -79,11 +79,16 @@ impl Renderer {
             sky: 1,
             ..DrawCallStats::default()
         };
-        self.sky.draw(&mut pass);
         self.panorama.draw(&mut pass);
         self.stamp(&mut pass, 1);
 
         draw_stats.opaque += self.draw_opaque_terrain(&mut pass);
+        // The sky lies on the far plane (`sky.wgsl`) and tests the depth with
+        // less-equal: drawn after the opaque terrain, its layers only shade
+        // the pixels no block covers. Drawn first, every layer of the dome,
+        // the sunrise, the stars and a pack's custom sky filled the whole
+        // screen, a quarter of the frame on an integrated GPU.
+        self.sky.draw(&mut pass);
         self.stamp(&mut pass, 2);
 
         draw_stats.entities += self.draw_entity_batches(&mut pass);

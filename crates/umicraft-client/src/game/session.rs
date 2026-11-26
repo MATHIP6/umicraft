@@ -211,6 +211,10 @@ fn spawn_game_thread(
 ) -> Result<JoinHandle<()>, ClientError> {
     std::thread::Builder::new()
         .name("umicraft-game".to_string())
-        .spawn(move || run(channels, stop, own_name, account_skin))
+        .spawn(move || {
+            // The ticks must start on time (`thread_priority`).
+            crate::thread_priority::set_current(crate::thread_priority::Priority::AboveNormal);
+            run(channels, stop, own_name, account_skin);
+        })
         .map_err(|error| ClientError::Worker(format!("spawn game thread: {error}")))
 }

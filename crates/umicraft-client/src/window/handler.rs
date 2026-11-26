@@ -65,18 +65,36 @@ impl ApplicationHandler for App {
                 );
                 wgpu::Backends::all()
             }
+            // Direct3D 12 on Windows: the Vulkan driver of Intel's integrated
+            // GPUs crashes the process (igvk64.dll) and loses the device on
+            // some machines. Every backend when no Direct3D 12 adapter answers,
+            // and elsewhere.
+            None if cfg!(windows) => {
+                tracing::info!("Graphics backend selection: DirectX 12 (Windows default)");
+                wgpu::Backends::DX12
+            }
             None => {
                 tracing::info!("Graphics backend selection: auto (all backends enabled)");
                 wgpu::Backends::all()
             }
         };
+        let windows_default = self.args.backend.is_none() && cfg!(windows);
 
-        let mut descriptor = wgpu::InstanceDescriptor::new_with_display_handle_from_env(Box::new(
-            event_loop.owned_display_handle(),
-        ));
-        descriptor.backends = backends;
-        let instance = wgpu::Instance::new(descriptor);
-        let mut renderer = match Renderer::new_windowed(instance, window.clone()) {
+        let instance_for = |backends: wgpu::Backends| {
+            let mut descriptor = wgpu::InstanceDescriptor::new_with_display_handle_from_env(
+                Box::new(event_loop.owned_display_handle()),
+            );
+            descriptor.backends = backends;
+            wgpu::Instance::new(descriptor)
+        };
+        let created = match Renderer::new_windowed(instance_for(backends), window.clone()) {
+            Err(error) if windows_default => {
+                tracing::warn!(%error, "Direct3D 12 failed; trying every backend");
+                Renderer::new_windowed(instance_for(wgpu::Backends::all()), window.clone())
+            }
+            created => created,
+        };
+        let mut renderer = match created {
             Ok(renderer) => renderer,
             Err(error) => {
                 self.exit_error = Some(error.to_string());

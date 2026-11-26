@@ -3,6 +3,7 @@
 //! What the game thread publishes to the render thread. Every send is a
 //! `try_send`: the game thread never waits for the window.
 
+use std::collections::BTreeSet;
 use std::sync::mpsc::{self, SyncSender};
 use std::sync::Arc;
 use std::time::Instant;
@@ -20,7 +21,7 @@ use umicraft_game::entity::{EntityId, EntityKind};
 use umicraft_game::sound::looping::{minecart_loops, LoopingSound};
 use umicraft_game::view::Perspective;
 use umicraft_mesh::{BlockEntityKind, ChunkSnapshot};
-use umicraft_world::{BlockPos, LightLevel, World};
+use umicraft_world::{BlockPos, ChunkPos, LightLevel, World};
 
 use super::look::Look;
 use super::messages::{ChunkEvent, Frame, RenderEvent, TextScreenRequest};
@@ -226,7 +227,13 @@ pub(super) fn publish_text_screens(game: &mut Game, frames: &SyncSender<RenderEv
 }
 
 /// Sends the snapshots of the chunks whose geometry changed, or eviction
-/// events for unloaded chunks.
+/// events for unloaded chunks, nearest to the player first.
+///
+/// The channel holds a few dozen chunks; when the server sends a whole
+/// view distance at once (joining, a respawn, a new map), the chunks that
+/// do not fit wait for the next call. Sent in coordinate order, the ones
+/// around the player could wait behind far ones and the world stayed empty
+/// where the player stood.
 pub(super) fn publish_chunks(game: &mut Game, chunks: &SyncSender<ChunkEvent>) {
     if game.dirty.is_empty() {
         return;
@@ -235,22 +242,35 @@ pub(super) fn publish_chunks(game: &mut Game, chunks: &SyncSender<ChunkEvent>) {
         game.dirty.clear();
         return;
     };
-    let mut full = false;
-    game.dirty.retain(|&pos| {
-        if full {
-            return true;
-        }
+    let centre = game.state.as_ref().map_or((0, 0), |state| {
+        let position = state.position();
+        (
+            (position.x.floor() as i32) >> 4,
+            (position.z.floor() as i32) >> 4,
+        )
+    });
+    for pos in nearest_first(&game.dirty, centre) {
         let snapshot = world
             .chunk(pos)
             .map(|_| ChunkSnapshot::from_world(world, pos));
         match chunks.try_send(ChunkEvent { pos, snapshot }) {
-            Ok(()) => false,
-            Err(mpsc::TrySendError::Full(_)) | Err(mpsc::TrySendError::Disconnected(_)) => {
-                full = true;
-                true
+            Ok(()) => {
+                game.dirty.remove(&pos);
             }
+            Err(mpsc::TrySendError::Full(_)) | Err(mpsc::TrySendError::Disconnected(_)) => break,
         }
+    }
+}
+
+/// `dirty` ordered by distance from the chunk `centre`, nearest first.
+fn nearest_first(dirty: &BTreeSet<ChunkPos>, centre: (i32, i32)) -> Vec<ChunkPos> {
+    let mut order: Vec<ChunkPos> = dirty.iter().copied().collect();
+    order.sort_by_key(|pos| {
+        let dx = i64::from(pos.x - centre.0);
+        let dz = i64::from(pos.z - centre.1);
+        dx * dx + dz * dz
     });
+    order
 }
 
 /// Publishes the inventory state to the render thread.
@@ -274,4 +294,22 @@ pub(super) fn publish_status(game: &mut Game, frames: &SyncSender<RenderEvent>) 
     game.status_data.status = game.status.clone();
     game.status_data.chunks = game.world.as_ref().map_or(0, World::chunk_count);
     let _ = frames.try_send(RenderEvent::Status(Box::new(game.status_data.clone())));
+}
+
+#[cfg(test)]
+mod chunk_order_tests {
+    use super::*;
+
+    #[test]
+    fn the_chunks_around_the_player_are_published_first() {
+        let dirty: BTreeSet<ChunkPos> = [(-9, 0), (5, 5), (0, 1), (100, 100), (4, 4)]
+            .into_iter()
+            .map(|(x, z)| ChunkPos::new(x, z))
+            .collect();
+        let order: Vec<(i32, i32)> = nearest_first(&dirty, (4, 4))
+            .into_iter()
+            .map(|pos| (pos.x, pos.z))
+            .collect();
+        assert_eq!(order, [(4, 4), (5, 5), (0, 1), (-9, 0), (100, 100)]);
+    }
 }
