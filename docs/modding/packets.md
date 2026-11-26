@@ -45,12 +45,18 @@ an injection never reaches another server. The 1.8 servers count a player's pack
 (PandaSpigot kicks above 500 in seven seconds): a mod that injects in a loop gets the
 player kicked.
 
+An injected `Animation` + `Use Entity` pair skips what the client does around a click
+(the miss delay, the item in use, the local swing and break, the packet order of a
+tick). To click as the player does, press the binding instead with the `input`
+permission (`input_press`, API 1.5, see `input.md`).
+
 ## Server-compatible mode
 
 The switch at the top of the External category of the mods menu (saved as
 `multiplayer.mod_server_compat` in `options.toml`) keeps every mod that declares
 `network_packets` or `movement` off, so the client behaves like an unmodified one on
 a server with an anti-cheat. Such mods carry an "Alters packets/movement" mark on their
-card in every mode. The mode is a switch, not a per-server setting.
+card in every mode. The mode is a switch, not a per-server setting. It does not hold
+off a mod that only declares `input` (API 1.5, ADR-0098), which carries its own badge.
 
 See `mods/examples/packet_logger`.

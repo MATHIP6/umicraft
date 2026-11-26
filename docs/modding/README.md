@@ -1,8 +1,8 @@
 # Writing mods for Umicraft
 
 Guide and index of the modding API (ADR-0086, ADR-0087, spec §8). The API is
-version **1.4** (1.0 frozen in F3.9, 1.1 appended in ADR-0094, 1.2 in ADR-0095, 1.3 in
-ADR-0096, 1.4 in ADR-0097): a
+version **1.5** (1.0 frozen in F3.9, 1.1 appended in ADR-0094, 1.2 in ADR-0095, 1.3 in
+ADR-0096, 1.4 in ADR-0097, 1.5 in ADR-0098): a
 mod built for 1.y loads on every client offering 1.x with x ≥ y, and nothing a 1.0
 mod uses is ever removed or moved within major 1. API 1.1 added the camera of `FRAME`
 and `world_to_screen`, screen widgets with outlines and segments, entity facts and the
@@ -13,7 +13,9 @@ menu. API 1.3 lets a camera layer capture the movement keys and the mouse look, 
 free camera. API 1.4 adds combat, team and tab-list facts of every entity and of the
 local player, a line-of-sight flag, HUD circles, polygons and clipping, world layers
 that draw in the world (depth-tested or through walls), and the entity mask post
-passes read to outline or make glow the entities a mod marks.
+passes read to outline or make glow the entities a mod marks. API 1.5 adds the
+`INPUT` event (the attack and use bindings, the hand and what the crosshair points at)
+and presses of those bindings and look turns through the client's own input path.
 
 ## What a mod is
 
@@ -21,7 +23,7 @@ A mod is a native dynamic library (`.so`, `.dll`, `.dylib`) plus a `mod.toml`
 manifest. It talks to the client through a versioned C ABI, so it can be written in
 Rust (the `umicraft-modapi` crate) or in any language that speaks C. It runs inside
 the client process with your user's full rights: **it is not sandboxed**. The
-declared permissions are shown to the player and the host enforces only the two
+declared permissions are shown to the player and the host enforces only those
 that gate API calls (below). Install only mods you trust.
 
 ## Getting started
@@ -53,7 +55,7 @@ Unknown keys are errors, so a typo is reported instead of ignored.
 | `name` | string | required | Display name, not empty. |
 | `version` | string | required | The mod's own semantic version. |
 | `authors` | array of strings | required | Author names (may be empty). |
-| `api_version` | string | required | `major.minor`, e.g. `"1.4"`: the same major as the client and a minor no higher than the client's. (Before 1.0 the minor had to match exactly.) |
+| `api_version` | string | required | `major.minor`, e.g. `"1.5"`: the same major as the client and a minor no higher than the client's. (Before 1.0 the minor had to match exactly.) |
 | `license` | string | none | SPDX expression. |
 | `description` | string | none | One line for the mods menu. |
 | `library` | string | the id | Library file stem under `bin/<os>-<arch>/`; letters, digits, `_`, `-`. |
@@ -84,13 +86,15 @@ A service id matches `^[a-z][a-z0-9_.]{0,63}$`. The services are `player_physics
 | `network_packets` | Gates the packet events (`PACKET_RECEIVED`, `PACKET_SEND`) and packet injection. Without it the host answers `DENIED`. |
 | `movement` | Gates `player_physics` (wrapping or replacing it). |
 | `camera` | Gates `render_camera` (API 1.1). Not held off by server-compatible mode: it changes what is drawn, not what the server sees. |
+| `input` | Gates the `INPUT` event and the input functions (API 1.5, [input.md](input.md)). Not held off by server-compatible mode (ADR-0098): its clicks and turns follow every rule of the player's own. Shown as an "attack & use input" badge. |
 | `filesystem` | Shown to the player only ("files"). |
 | `network_http` | Shown to the player only ("http"). |
 
 In server-compatible mode (`multiplayer.mod_server_compat`, one client switch) the
 host holds off every mod that declares `network_packets` or `movement`, so players
 can follow a server's rules. The mods menu marks those with an "alters
-packets/movement" badge.
+packets/movement" badge. An `input` mod is not held off; its own badge lets the player
+turn it off by hand.
 
 ## Lifecycle
 
@@ -118,7 +122,7 @@ Handlers run on the thread that owns the event and must be quick.
 | Thread | What runs there | Budget |
 |---|---|---|
 | game | `PRE_TICK`, `POST_TICK`, `CHAT_*` intercepts, commands, physics layers; the world queries answer only here | 1 ms per call |
-| render | `CONNECTED`, screen and key events, `FRAME`, `PRE_RENDER`, camera layers, HUD widget draws | 1 ms per call; 0.5 ms for a widget's draw function |
+| render | `CONNECTED`, screen and key events, `FRAME`, `INPUT`, `PRE_RENDER`, camera layers, HUD widget draws | 1 ms per call; 0.5 ms for a widget's draw function |
 | network | packet intercepts | 1 ms per call |
 | worker | one per mod: every `observe` handler | none; its queue holds 256 events |
 
@@ -135,6 +139,8 @@ dropped and counted, never waited for. Counters feed the F3 profiler.
 - [packets.md](packets.md): raw packet events and injection (needs `network_packets`).
 - [world.md](world.md): block and entity queries, the facts of an entity and of the
   local player, the `player_physics` layer.
+- [input.md](input.md): the attack and use bindings, the crosshair, presses and look
+  turns (needs `input`, API 1.5).
 - [draw.md](draw.md): world layers, lines, boxes and polygons in the world (API 1.4).
 - [post.md](post.md): WGSL post-process passes over the picture of the world, the scene
   depth and the entity mask.

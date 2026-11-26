@@ -11,9 +11,9 @@ version = "0.1.0"
 # Who wrote it, as plain names.
 authors = ["Your name"]
 # The mod API this library was built for. A client of the same major and an
-# equal or newer minor loads it: "1.0" loads on a 1.0, 1.1 or 1.2 client, not on
+# equal or newer minor loads it: "1.0" loads on a 1.0, 1.1 or 1.5 client, not on
 # a 2.0 client or on a 1.0 client when you wrote "1.1".
-api_version = "1.4"
+api_version = "1.5"
 # Optional: an SPDX license expression.
 license = "MIT"
 # Optional: one line shown in the mods menu.
@@ -46,6 +46,9 @@ network_packets = false
 movement = false
 # Wrap or replace the render camera (`render_camera`). Changes only what is drawn.
 camera = false
+# Read the attack and use bindings and the crosshair (`INPUT`), press those
+# bindings and turn the look (API 1.5). Not held off by server-compatible mode.
+input = false
 # Shown to the player as "uses files". Not enforced: native code can open files anyway.
 filesystem = false
 # Shown to the player as "uses http". Not enforced.

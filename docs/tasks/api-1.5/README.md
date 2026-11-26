@@ -1,6 +1,6 @@
 # API 1.5 — the attack and use input
 
-Status: **in progress** (2026-11-26). Design: ADR-0098. Base: API 1.4 (ADR-0097).
+Status: **done** (2026-11-26). Design: ADR-0098. Base: API 1.4 (ADR-0097).
 
 | # | Phase | Acceptance | State |
 |---|---|---|---|
@@ -9,7 +9,7 @@ Status: **in progress** (2026-11-26). Design: ADR-0098. Base: API 1.4 (ADR-0097)
 | 1.5.2 | `umicraft-modapi-sys`: types below, `UMI_API_VERSION = 1.5`, host functions appended | layout tests; a 1.5 mod is refused by a 1.4 host | done |
 | 1.5.3 | `umicraft-modhost`: `input` permission, `INPUT` event, host functions and the input queue | refusal, queue order and capacity tests | done |
 | 1.5.4 | Client: tick facts, the event each frame, the queue applied to the presses and the look | facts tests; injected press and look reach the game thread | done |
-| 1.5.5 | `umicraft-modapi` wrappers, docs, header, badge | fmt, clippy `-D warnings`, workspace tests | |
+| 1.5.5 | `umicraft-modapi` wrappers (`PlayerInput`, `Controller`), example `crosshair_info`, docs, template on 1.5 | fmt, clippy `-D warnings`, workspace tests | done |
 
 ## Frozen interface (spec §14 rule 11)
 

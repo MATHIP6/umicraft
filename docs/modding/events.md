@@ -1,6 +1,6 @@
 # Mod events
 
-Events a native mod can subscribe to (API 1.2, ADR-0086, ADR-0094, ADR-0095). Handlers run on the thread
+Events a native mod can subscribe to (API 1.5, ADR-0086, ADR-0094, ADR-0095, ADR-0098). Handlers run on the thread
 shown below; an event nobody subscribes to costs nothing.
 
 | Event | Id | Thread | Payload | Cancellable | Mutable | Fires |
@@ -43,6 +43,7 @@ in every perspective and under a camera mod. A widget fed by a
 | `PRE_RENDER` | 13 | render | `camera`: eye, yaw, pitch, effective `fov_y`, aspect, view bob | no | no | Once per drawn frame in a world, after the `render_camera` layers, before the camera reaches the GPU and before `FRAME` (API 1.1, `camera.md`) |
 | `MODULE_TOGGLED` | 14 | render | `module: str`, `enabled: u8` | no | no | When the player switches one of the mod's modules in the mods menu; only that mod receives it. Not sent when the saved state is applied at start: read `module_enabled` (see `ui.md`). API 1.2 |
 | `BUTTON_PRESSED` | 15 | render | `module: str` (empty for the mod's own card), `key: str` | no | no | When the player clicks one of the mod's buttons in the mods menu; only that mod receives it (see `ui.md`). API 1.2 |
+| `INPUT` | 16 | render | the attack and use bindings (held, pending presses), the game focus, the hand (swing, item in use, held item and its use) and what the crosshair points at | no | no | Once per drawn frame in a world, right after `FRAME`. Needs `input` (see `input.md`). API 1.5 |
 
 Every string and byte view is borrowed for the duration of the call: copy it to keep it.
 
