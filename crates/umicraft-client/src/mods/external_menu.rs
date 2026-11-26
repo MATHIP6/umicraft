@@ -553,6 +553,7 @@ fn permission_words(permissions: Permissions, lang: &Lang) -> Vec<&str> {
         (permissions.filesystem, "umicraft.mods.external.perm.files"),
         (permissions.network_http, "umicraft.mods.external.perm.http"),
         (permissions.camera, "umicraft.mods.external.perm.camera"),
+        (permissions.input, "umicraft.mods.external.perm.input"),
     ]
     .into_iter()
     .filter(|(declared, _)| *declared)

@@ -23,6 +23,13 @@ impl WorldView {
         &self.hud
     }
 
+    /// The hand and the crosshair at the newest tick, for the `INPUT` mod event;
+    /// `None` when no external mod is loaded or before the first frame.
+    #[must_use]
+    pub fn mod_hand(&self) -> Option<umicraft_modhost::HandFacts> {
+        self.mod_hand
+    }
+
     /// The newest inventory/container state the game thread published.
     #[must_use]
     pub fn window_view(&self) -> &WindowView {

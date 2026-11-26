@@ -325,6 +325,16 @@ fn only_the_declared_permissions_are_listed() {
 }
 
 #[test]
+fn the_input_permission_has_its_badge() {
+    let lang = english();
+    let input = Permissions {
+        input: true,
+        ..Permissions::default()
+    };
+    assert_eq!(permission_words(input, &lang), ["attack & use input"]);
+}
+
+#[test]
 fn a_failure_reason_comes_after_the_details() {
     let lang = english();
     let text = details(

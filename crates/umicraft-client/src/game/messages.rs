@@ -219,6 +219,9 @@ pub struct Frame {
     /// The local player as the external mods see it (API 1.4); `None` when no
     /// external mod is loaded.
     pub(crate) mod_local: Option<crate::mods::entity_facts::ModEntity>,
+    /// The hand and the crosshair for the `INPUT` event (API 1.5); `None` when no
+    /// external mod is loaded.
+    pub(crate) mod_hand: Option<umicraft_modhost::HandFacts>,
 }
 
 /// The statistics the debug overlay shows.

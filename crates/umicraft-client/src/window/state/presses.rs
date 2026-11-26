@@ -26,4 +26,7 @@ pub(in crate::window) struct PendingPresses {
     pub(in crate::window) screenshot: bool,
     /// The player pressed "Respawn" and waits for the server.
     pub(in crate::window) respawn: bool,
+    /// The look the mods asked for with `input_add_look` (API 1.5), in degrees
+    /// (yaw, pitch), added to the mouse look of the next update.
+    pub(in crate::window) mod_look: (f32, f32),
 }

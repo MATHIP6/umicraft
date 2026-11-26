@@ -134,7 +134,7 @@ pub const MAX_PITCH: f32 = 90.0;
 
 /// The degrees one unit of mouse turn moves the look (MCP `Entity.setAngles`:
 /// `(double)yaw * 0.15D`).
-const TURN_DEGREES: f64 = 0.15;
+pub const TURN_DEGREES: f64 = 0.15;
 
 /// Turns a look by a mouse turn, the way `Entity.setAngles` does.
 ///

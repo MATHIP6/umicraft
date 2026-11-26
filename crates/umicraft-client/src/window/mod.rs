@@ -64,6 +64,7 @@ mod inventory_control;
 mod keyboard;
 mod menu_screens;
 mod mod_events;
+mod mod_input;
 mod mod_post;
 mod mods_menu;
 mod options_control;

@@ -15,8 +15,8 @@ use umicraft_core::events::EventBus;
 use umicraft_modapi_sys::UMI_API_VERSION;
 use umicraft_modhost::{
     discover, resolve, ApiVersion, Arming, CameraChain, Candidate, CommandTable, CrashSentinel,
-    Discovered, EventThread, LoadError, LoadFailure, ModHost, ModId, PacketOutbox, Permissions,
-    PhysicsChain, SentinelGuard, TrustList,
+    Discovered, EventThread, InputRequest, LoadError, LoadFailure, ModHost, ModId, PacketOutbox,
+    Permissions, PhysicsChain, SentinelGuard, TrustList,
 };
 
 use super::external_config;
@@ -259,6 +259,28 @@ impl ExternalMods {
     /// or when no mod registered one (API 1.1).
     pub(crate) fn camera(&self) -> Option<CameraChain> {
         self.host.as_ref().and_then(ModHost::camera)
+    }
+
+    /// Tells the mods whether the game owns the input (API 1.5): while it does not,
+    /// their input requests are refused.
+    pub(crate) fn set_game_focus(&self, on: bool) {
+        if let Some(host) = &self.host {
+            host.set_game_focus(on);
+        }
+    }
+
+    /// Hands the input requests the mods queued to `apply`, oldest first.
+    pub(crate) fn drain_input(&self, apply: impl FnMut(InputRequest)) {
+        if let Some(host) = &self.host {
+            host.input_queue().drain(apply);
+        }
+    }
+
+    /// Drops the input requests the mods queued: the game lost the input first.
+    pub(crate) fn clear_input(&self) {
+        if let Some(host) = &self.host {
+            host.input_queue().clear();
+        }
     }
 
     /// Turns the server-compatible mode on or off: while on, the mods that alter

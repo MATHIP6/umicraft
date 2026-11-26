@@ -83,7 +83,7 @@ pub enum PointedFacts {
 /// What the game thread knows of the hand at its last tick.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct HandFacts {
-    /// Game ticks since the join.
+    /// Game ticks since the session started.
     pub tick: u64,
     /// The arm swing, 0 to 1.
     pub swing_progress: f32,

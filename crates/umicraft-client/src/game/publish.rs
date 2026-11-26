@@ -208,6 +208,9 @@ pub(super) fn publish_frame(game: &Game, frames: &SyncSender<RenderEvent>, tick_
         debug: Arc::new(debug_world(game)),
         mod_entities,
         mod_local,
+        mod_hand: game
+            .entity_facts
+            .then(|| super::mod_input::hand_facts(game)),
     })));
 }
 

@@ -25,7 +25,7 @@ pub struct UmiInput {
     pub use_presses: u8,
     /// Monotonic time in milliseconds, the clock of `FRAME`.
     pub now_ms: u64,
-    /// Game ticks since the join.
+    /// Game ticks since the session started.
     pub tick: u64,
     /// 1 while the game owns the input: no screen open, mouse captured, in a world.
     pub game_focus: u8,

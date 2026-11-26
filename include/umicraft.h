@@ -1628,7 +1628,7 @@ typedef struct UmiInput {
    */
   uint64_t now_ms;
   /**
-   * Game ticks since the join.
+   * Game ticks since the session started.
    */
   uint64_t tick;
   /**

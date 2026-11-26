@@ -88,6 +88,7 @@ impl App {
     /// on the next frame.
     pub(super) fn publish_input(&mut self) {
         self.frame_look = (0.0, 0.0);
+        self.apply_mod_input();
         if self.session.is_none() {
             return;
         }
@@ -109,9 +110,15 @@ impl App {
         let pixels = self.input.mouse.whole();
         let zoom = self.zoom.look_factor(self.mods.zoom().as_ref());
         let turn = look_turn(pixels, &self.options.controls, zoom);
-        let player_turn = if captured { (0.0, 0.0) } else { turn };
+        let mouse_turn = if captured { (0.0, 0.0) } else { turn };
+        // The mods' look (API 1.5) turns the player even under a camera layer: it is
+        // asked for the player, not taken from the mouse.
+        let mod_look = self.presses.mod_look;
+        let mod_turn = super::mod_input::mod_look_turn(mod_look);
+        let player_turn = (mouse_turn.0 + mod_turn.0, mouse_turn.1 + mod_turn.1);
         let changed = state != self.input.last
             || pixels != (0, 0)
+            || mod_look != (0.0, 0.0)
             || self.presses.select_slot.is_some()
             || self.presses.hotbar_keys != [0; 9]
             || self.presses.attack_presses != 0
@@ -140,6 +147,11 @@ impl App {
             .as_ref()
             .is_some_and(|session| session.send_input(update));
         if sent {
+            if mod_look != (0.0, 0.0) {
+                if let Some(world) = self.world.as_mut() {
+                    world.apply_look_delta(mod_look.0.to_radians(), mod_look.1.to_radians());
+                }
+            }
             if pixels != (0, 0) {
                 if let Some(world) = self.world.as_mut() {
                     // The view of the window is in radians; the game thread
@@ -160,6 +172,7 @@ impl App {
             self.presses.pick_block = false;
             self.presses.drop_item = None;
             self.presses.toggle_perspective = false;
+            self.presses.mod_look = (0.0, 0.0);
         }
     }
 }

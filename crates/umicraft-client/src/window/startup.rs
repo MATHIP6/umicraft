@@ -260,6 +260,7 @@ impl App {
                 toggle_perspective: false,
                 screenshot: false,
                 respawn: false,
+                mod_look: (0.0, 0.0),
             },
             death_started: None,
             screen: Screen::Loading,

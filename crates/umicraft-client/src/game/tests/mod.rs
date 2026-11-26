@@ -69,6 +69,7 @@ mod hud;
 mod inventory_key;
 mod join;
 mod look;
+mod mod_input;
 mod movement;
 mod particles;
 mod signs;

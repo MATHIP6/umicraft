@@ -116,6 +116,8 @@ pub struct WorldView {
     mod_entities: Arc<[ModEntity]>,
     /// The local player as the external mods see it, from the latest frame.
     mod_local: Option<ModEntity>,
+    /// The hand and the crosshair for the `INPUT` mod event, from the latest frame.
+    mod_hand: Option<umicraft_modhost::HandFacts>,
     /// A text screen the game thread asked for, until the window takes it.
     text_request: Option<TextScreenRequest>,
     /// Resource pack offers the window has not taken yet, oldest first.
@@ -189,6 +191,7 @@ impl WorldView {
             entities: Arc::from([]),
             mod_entities: Arc::from([]),
             mod_local: None,
+            mod_hand: None,
             local_body: None,
             text_request: None,
             pack_requests: Vec::new(),
@@ -252,6 +255,7 @@ impl WorldView {
                 self.entities = Arc::clone(&frame.entities);
                 self.mod_entities = Arc::clone(&frame.mod_entities);
                 self.mod_local.clone_from(&frame.mod_local);
+                self.mod_hand = frame.mod_hand;
                 self.local_body = Some(Arc::clone(&frame.local_body));
                 self.hand_light = frame.hand_light;
                 self.selection = Arc::clone(&frame.selection);
@@ -349,6 +353,7 @@ impl WorldView {
         self.entities = Arc::from([]);
         self.mod_entities = Arc::from([]);
         self.mod_local = None;
+        self.mod_hand = None;
         target.clear_meshes();
     }
 }

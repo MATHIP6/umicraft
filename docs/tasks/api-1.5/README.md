@@ -8,7 +8,7 @@ Status: **in progress** (2026-11-26). Design: ADR-0098. Base: API 1.4 (ADR-0097)
 | 1.5.1 | ADR-0098 and this plan | ADR accepted | done |
 | 1.5.2 | `umicraft-modapi-sys`: types below, `UMI_API_VERSION = 1.5`, host functions appended | layout tests; a 1.5 mod is refused by a 1.4 host | done |
 | 1.5.3 | `umicraft-modhost`: `input` permission, `INPUT` event, host functions and the input queue | refusal, queue order and capacity tests | done |
-| 1.5.4 | Client: tick facts, the event each frame, the queue applied to the presses and the look | facts tests; injected press and look reach the game thread | |
+| 1.5.4 | Client: tick facts, the event each frame, the queue applied to the presses and the look | facts tests; injected press and look reach the game thread | done |
 | 1.5.5 | `umicraft-modapi` wrappers, docs, header, badge | fmt, clippy `-D warnings`, workspace tests | |
 
 ## Frozen interface (spec §14 rule 11)
@@ -36,7 +36,7 @@ pub struct UmiInput {
     pub attack_presses: u8,         // 14  presses not sent to the game yet
     pub use_presses: u8,            // 15
     pub now_ms: u64,                // 16  the clock of FRAME
-    pub tick: u64,                  // 24  game ticks since the join
+    pub tick: u64,                  // 24  game ticks since the session started
     pub game_focus: u8,             // 32  1: no screen, mouse captured, in a world
     pub using_item: u8,             // 33  an item is in use (eating, blocking, drawing)
     pub held_use_action: u8,        // 34  UMI_USE_ACTION_*

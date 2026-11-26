@@ -86,6 +86,7 @@ umicraft.mods.external.perm.movement=movement
 umicraft.mods.external.perm.files=files
 umicraft.mods.external.perm.http=http
 umicraft.mods.external.perm.camera=camera
+umicraft.mods.external.perm.input=attack & use input
 umicraft.mods.external.untrusted=Not trusted: #%s. Switch on to trust this file; it loads at the next start. Hash: %s
 umicraft.mods.external.trusted=Trusted: #%s. It loads at the next start.
 umicraft.mods.external.compat=Server-compatible mode

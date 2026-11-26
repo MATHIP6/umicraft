@@ -223,6 +223,7 @@ impl App {
     }
 
     /// Sends this frame's `Frame` event, with the camera the frame is drawn with,
+    /// and the `Input` event after it (API 1.5),
     /// then lets the external mods draw their widgets (once per frame, whether the
     /// HUD or the HUD editor shows them) and, in a world, their world layers (API
     /// 1.4). Called once the camera is final, so a
@@ -233,9 +234,10 @@ impl App {
     /// widget draws read the entities the frame draws (ADR-0094).
     /// The snapshot is the one [`place_mod_camera`](Self::place_mod_camera) built
     /// for this frame.
-    pub(super) fn publish_frame(&mut self, (width, height): (u32, u32)) {
+    pub(super) fn publish_frame(&mut self, (width, height): (u32, u32), now: Instant) {
         let camera = frame_camera(&self.camera, (width, height));
         let in_world = self.world.is_some();
+        let input = self.input_event(now);
         let Self {
             mods,
             render_bus,
@@ -248,6 +250,10 @@ impl App {
         mod_world.draw.clear();
         with_entity_snapshot(entity_snapshot.snapshot(), || {
             mods.dispatch_frame(camera, render_bus);
+            // After `FRAME`, as ADR-0098 promises (API 1.5).
+            if let Some(mut input) = input {
+                render_bus.dispatch(&mut input);
+            }
             if session.is_some() {
                 if let Some(host) = external_mods.as_ref().and_then(ExternalMods::host) {
                     host.draw_widgets();

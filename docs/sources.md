@@ -522,6 +522,8 @@ Reference: the behaviour of the Fabric mod "Capes" (LGPL-2.1, read only, no code
 | Date | Area | Source | Notes |
 |---|---|---|---|
 | 2026-11-26 | Presses within one tick | MCP `KeyBinding.onTick` (`++pressTime`), `KeyBinding.isPressed` (`--pressTime`), `Minecraft.runTick` (`while (keyBindAttack.isPressed()) clickMouse()`, same for `keyBindUseItem` / `rightClickMouse`; drained without a click while `thePlayer.isUsingItem()`) | Every press of a tick clicks, against the `objectMouseOver` of that tick; a miss sets `leftClickCounter = 10` outside creative, so the attack presses after it do nothing. |
+| 2026-11-26 | Swing progress of the `INPUT` event | MCP `EntityLivingBase.swingItem` (`swingProgressInt = -1`), `updateArmSwingProgress` (`++swingProgressInt`, `swingProgress = int / duration`) | The tick right after a swing still reads 0. |
+| 2026-11-26 | Pointed target of the `INPUT` event | MCP `EntityRenderer.getMouseOver` (`objectMouseOver`), `EnumFacing` indices (0 down … 5 east) | The client's own target pick (`combat::pointed`), once per game tick; the face uses the wire numbering of `Player Digging`. |
 
 ## Discord Rich Presence (ADR-0084)
 
