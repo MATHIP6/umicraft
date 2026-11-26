@@ -138,7 +138,7 @@ fn subscribe_accepts_the_thirteen_open_events_and_refuses_unknown_ids() {
         assert_eq!(subscribe(&cx, UmiEventId(id), Some(noop)), UmiStatus::OK);
     }
     assert_eq!(
-        subscribe(&cx, UmiEventId(16), Some(noop)),
+        subscribe(&cx, UmiEventId(17), Some(noop)),
         UmiStatus::INVALID_ARGUMENT
     );
     assert_eq!(cx.all_subscriptions().len(), 13);
@@ -158,6 +158,7 @@ const PACKETS: Permissions = Permissions {
     filesystem: false,
     network_http: false,
     camera: false,
+    input: false,
 };
 const MOVEMENT: Permissions = Permissions {
     network_packets: false,
@@ -165,7 +166,29 @@ const MOVEMENT: Permissions = Permissions {
     filesystem: false,
     network_http: false,
     camera: false,
+    input: false,
 };
+
+#[test]
+fn the_input_event_needs_the_input_permission() {
+    let plain = context();
+    assert_eq!(
+        subscribe(&plain, UmiEventId::INPUT, Some(noop)),
+        UmiStatus::DENIED
+    );
+    let permitted = ModContext::with_shared(
+        "aim".to_owned().try_into().unwrap(),
+        Permissions {
+            input: true,
+            ..Permissions::default()
+        },
+        Arc::default(),
+    );
+    assert_eq!(
+        subscribe(&permitted, UmiEventId::INPUT, Some(noop)),
+        UmiStatus::OK
+    );
+}
 
 #[test]
 fn packet_events_need_the_network_packets_permission() {

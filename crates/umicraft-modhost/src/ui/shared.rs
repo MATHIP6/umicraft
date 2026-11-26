@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT OR Apache-2.0
 
 //! State shared by every mod of a host: the command table, the chat outbox, the
-//! packet outbox and the server-compat switch.
+//! packet outbox, the input queue, the server-compat switch and the game focus.
 //!
 //! [`ModHost::load`](crate::ModHost::load) creates one [`HostShared`] and gives it to
 //! every [`ModContext`](crate::ModContext). The client takes the other ends: the
@@ -18,6 +18,7 @@ use umicraft_protocol::PlayServerbound;
 use super::commands::{CommandEntry, CommandTable};
 use super::{OUTBOX_CAPACITY, PACKET_OUTBOX_CAPACITY};
 use crate::error::DeclareError;
+use crate::input::{InputRequest, INPUT_QUEUE_CAPACITY};
 
 /// The command table, the chat outbox, the packet outbox and the server-compat
 /// switch of one host.
@@ -33,12 +34,16 @@ pub struct HostShared {
     packets: Sender<PlayServerbound>,
     packet_inbox: Receiver<PlayServerbound>,
     server_compat: AtomicBool,
+    input: Sender<InputRequest>,
+    input_inbox: Receiver<InputRequest>,
+    game_focus: AtomicBool,
 }
 
 impl Default for HostShared {
     fn default() -> Self {
         let (outbox, inbox) = bounded(OUTBOX_CAPACITY);
         let (packets, packet_inbox) = bounded(PACKET_OUTBOX_CAPACITY);
+        let (input, input_inbox) = bounded(INPUT_QUEUE_CAPACITY);
         Self {
             commands: Mutex::default(),
             outbox,
@@ -47,6 +52,9 @@ impl Default for HostShared {
             packets,
             packet_inbox,
             server_compat: AtomicBool::new(false),
+            input,
+            input_inbox,
+            game_focus: AtomicBool::new(false),
         }
     }
 }
@@ -102,6 +110,29 @@ impl HostShared {
         self.packets.try_send(packet).map_err(|error| match error {
             // Disconnected cannot happen while `packet_inbox` lives in this struct.
             TrySendError::Full(packet) | TrySendError::Disconnected(packet) => packet,
+        })
+    }
+
+    /// Whether the game owns the input: no screen open, mouse captured, in a world.
+    pub fn game_focus(&self) -> bool {
+        self.game_focus.load(Ordering::Acquire)
+    }
+
+    /// Records whether the game owns the input; the window sets it every frame.
+    pub fn set_game_focus(&self, on: bool) {
+        self.game_focus.store(on, Ordering::Release);
+    }
+
+    /// The receiving end of the input requests; all receivers share one queue.
+    pub(crate) fn input_inbox(&self) -> Receiver<InputRequest> {
+        self.input_inbox.clone()
+    }
+
+    /// Queues `request` without blocking; hands it back when the queue is full.
+    pub(crate) fn queue_input(&self, request: InputRequest) -> Result<(), InputRequest> {
+        self.input.try_send(request).map_err(|error| match error {
+            // Disconnected cannot happen while `input_inbox` lives in this struct.
+            TrySendError::Full(request) | TrySendError::Disconnected(request) => request,
         })
     }
 

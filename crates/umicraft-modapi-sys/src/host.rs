@@ -385,4 +385,19 @@ pub struct UmiHost {
         alpha: f32,
         flags: u32,
     ) -> UmiStatus,
+    /// Presses the attack or use binding (`UMI_INPUT_ACTION_*`) `count` times
+    /// (1 to `UMI_MAX_INPUT_PRESSES`), as the player clicking: the game thread
+    /// clicks once per press in its next tick. Any thread; `DENIED` without the
+    /// `input` permission or while the mod is not enabled, `UNAVAILABLE` while
+    /// the game does not own the input, `BUSY` when the queue is full. Added in
+    /// API 1.5.
+    pub input_press: extern "C" fn(me: UmiModHandle, action: u32, count: u32) -> UmiStatus,
+    /// Drops the presses of `action` not sent to the game thread yet, the
+    /// player's included, without a release. Same rules as `input_press`.
+    /// Added in API 1.5.
+    pub input_clear_press: extern "C" fn(me: UmiModHandle, action: u32) -> UmiStatus,
+    /// Turns the player's look by `yaw` and `pitch` degrees (positive turns
+    /// right and looks down), through the next input update, so the server
+    /// sees it. Each within ±180. Same rules as `input_press`. Added in API 1.5.
+    pub input_add_look: extern "C" fn(me: UmiModHandle, yaw: f32, pitch: f32) -> UmiStatus,
 }

@@ -864,6 +864,10 @@ fn host() -> UmiHost {
         world_box: fake_world_box,
         world_polygon: fake_world_polygon,
         world_highlight: fake_world_highlight,
+        // The safe wrappers come with phase 1.5.5; until then the slots only fill the table.
+        input_press: fake_input_press,
+        input_clear_press: fake_input_clear_press,
+        input_add_look: fake_input_add_look,
     }
 }
 
@@ -996,6 +1000,18 @@ extern "C" fn fake_world_highlight(
     flags: u32,
 ) -> UmiStatus {
     hud_call(format!("whighlight {entity} {color:06x} {alpha} {flags}"))
+}
+
+extern "C" fn fake_input_press(_me: UmiModHandle, _action: u32, _count: u32) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+extern "C" fn fake_input_clear_press(_me: UmiModHandle, _action: u32) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
+}
+
+extern "C" fn fake_input_add_look(_me: UmiModHandle, _yaw: f32, _pitch: f32) -> UmiStatus {
+    UmiStatus::UNSUPPORTED
 }
 
 extern "C" fn fake_register_camera(

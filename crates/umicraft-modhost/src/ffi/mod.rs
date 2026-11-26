@@ -11,6 +11,7 @@
 mod camera;
 mod event;
 mod hud;
+mod input;
 mod menu;
 mod packet;
 mod physics;
@@ -198,6 +199,9 @@ pub fn host_table() -> UmiHost {
         world_box: world_layer::host_world_box,
         world_polygon: world_layer::host_world_polygon,
         world_highlight: world_layer::host_world_highlight,
+        input_press: input::host_input_press,
+        input_clear_press: input::host_input_clear_press,
+        input_add_look: input::host_input_add_look,
     }
 }
 

@@ -48,8 +48,9 @@ fn layouts_are_stable_on_64_bit() {
         assert_eq!((size, align, header, tick), (24, 8, 0, 16));
     }
 
-    // 184 in 1.0; appended functions grow it (1.1: 224, 1.2: 272, 1.3: 280, 1.4: 360).
-    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (360, 8));
+    // 184 in 1.0; appended functions grow it (1.1: 224, 1.2: 272, 1.3: 280, 1.4: 360,
+    // 1.5: 384).
+    assert_eq!((size_of::<UmiHost>(), align_of::<UmiHost>()), (384, 8));
     assert_eq!(offset_of!(UmiHost, size), 0);
     assert_eq!(offset_of!(UmiHost, version), 8);
     assert_eq!(offset_of!(UmiHost, log), 16);
@@ -392,7 +393,6 @@ fn a_1_3_host_loads_older_mods_and_a_1_2_host_refuses_1_3_mods() {
 #[cfg(target_pointer_width = "64")]
 #[test]
 fn api_1_4_layouts() {
-    assert_eq!(UMI_API_VERSION, UmiVersion { major: 1, minor: 4 });
     for (offset, expected) in [
         (offset_of!(UmiHost, world_local_player), 280),
         (offset_of!(UmiHost, hud_circle), 288),
@@ -440,5 +440,74 @@ fn a_1_4_host_loads_older_mods_and_a_1_3_host_refuses_1_4_mods() {
     assert!(UMI_API_VERSION.accepts(v(1, 3)));
     assert!(UMI_API_VERSION.accepts(v(1, 4)));
     assert!(!v(1, 3).accepts(v(1, 4)));
-    assert!(!UMI_API_VERSION.accepts(v(1, 5)));
+    assert!(!v(1, 3).accepts(v(1, 5)));
+}
+
+/// API 1.5 (ADR-0098): three host functions appended and the `INPUT` payload.
+#[cfg(target_pointer_width = "64")]
+#[test]
+fn api_1_5_layouts() {
+    assert_eq!(UMI_API_VERSION, UmiVersion { major: 1, minor: 5 });
+    for (offset, expected) in [
+        (offset_of!(UmiHost, input_press), 360),
+        (offset_of!(UmiHost, input_clear_press), 368),
+        (offset_of!(UmiHost, input_add_look), 376),
+        (offset_of!(UmiInput, header), 0),
+        (offset_of!(UmiInput, attack_held), 12),
+        (offset_of!(UmiInput, use_held), 13),
+        (offset_of!(UmiInput, attack_presses), 14),
+        (offset_of!(UmiInput, use_presses), 15),
+        (offset_of!(UmiInput, now_ms), 16),
+        (offset_of!(UmiInput, tick), 24),
+        (offset_of!(UmiInput, game_focus), 32),
+        (offset_of!(UmiInput, using_item), 33),
+        (offset_of!(UmiInput, held_use_action), 34),
+        (offset_of!(UmiInput, held_is_block), 35),
+        (offset_of!(UmiInput, swing_progress), 36),
+        (offset_of!(UmiInput, held_item), 40),
+        (offset_of!(UmiInput, held_damage), 44),
+        (offset_of!(UmiInput, pointed_kind), 48),
+        (offset_of!(UmiInput, pointed_face), 49),
+        (offset_of!(UmiInput, reserved), 50),
+        (offset_of!(UmiInput, pointed_entity), 52),
+        (offset_of!(UmiInput, pointed_point), 56),
+        (offset_of!(UmiInput, pointed_distance), 80),
+        (offset_of!(UmiInput, pointed_block), 84),
+        (offset_of!(UmiInput, pointed_block_pos), 88),
+    ] {
+        assert_eq!(offset, expected);
+    }
+    assert_eq!((size_of::<UmiInput>(), align_of::<UmiInput>()), (104, 8));
+    assert_eq!(UmiEventId::INPUT, UmiEventId(16));
+    assert_eq!(
+        [UMI_POINTED_MISS, UMI_POINTED_BLOCK, UMI_POINTED_ENTITY],
+        [0, 1, 2]
+    );
+    assert_eq!(
+        [
+            UMI_USE_ACTION_NONE,
+            UMI_USE_ACTION_EAT,
+            UMI_USE_ACTION_DRINK,
+            UMI_USE_ACTION_BLOCK,
+            UMI_USE_ACTION_BOW
+        ],
+        [0, 1, 2, 3, 4]
+    );
+    assert_eq!(
+        (
+            UMI_INPUT_ACTION_ATTACK,
+            UMI_INPUT_ACTION_USE,
+            UMI_MAX_INPUT_PRESSES
+        ),
+        (0, 1, 8)
+    );
+}
+
+#[test]
+fn a_1_5_host_loads_older_mods_and_a_1_4_host_refuses_1_5_mods() {
+    let v = |major, minor| UmiVersion { major, minor };
+    assert!(UMI_API_VERSION.accepts(v(1, 4)));
+    assert!(UMI_API_VERSION.accepts(v(1, 5)));
+    assert!(!v(1, 4).accepts(v(1, 5)));
+    assert!(!UMI_API_VERSION.accepts(v(1, 6)));
 }

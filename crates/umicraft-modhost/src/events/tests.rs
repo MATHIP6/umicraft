@@ -19,6 +19,7 @@ fn events_are_send() {
     assert_send::<PacketReceived>();
     assert_send::<PacketSend>();
     assert_send::<Frame>();
+    assert_send::<Input>();
 }
 
 #[test]
@@ -120,10 +121,11 @@ fn table_matches_the_documented_threads_and_flags() {
 }
 
 #[test]
-fn known_ids_are_one_to_fifteen() {
-    // 13 is `PRE_RENDER` (API 1.1), 14 and 15 the menu events (API 1.2).
-    assert!((1..=15).all(|id| is_known(UmiEventId(id))));
-    assert!(!is_known(UmiEventId(0)) && !is_known(UmiEventId(16)));
+fn known_ids_are_one_to_sixteen() {
+    // 13 is `PRE_RENDER` (API 1.1), 14 and 15 the menu events (API 1.2), 16 `INPUT`
+    // (API 1.5).
+    assert!((1..=16).all(|id| is_known(UmiEventId(id))));
+    assert!(!is_known(UmiEventId(0)) && !is_known(UmiEventId(17)));
 }
 
 #[test]
@@ -266,4 +268,77 @@ fn frame_is_a_render_event_that_mods_cannot_cancel_or_change() {
     assert_eq!(Frame::THREAD, EventThread::Render);
     const { assert!(!Frame::CANCELLABLE && !Frame::MUTABLE) };
     assert_eq!(Frame::ID, UmiEventId::FRAME);
+}
+
+fn input_facts(pointed: PointedFacts) -> InputFacts {
+    InputFacts {
+        now_ms: 1234,
+        attack_held: true,
+        use_held: false,
+        attack_presses: 2,
+        use_presses: 0,
+        game_focus: true,
+        hand: HandFacts {
+            tick: 99,
+            swing_progress: 0.5,
+            using_item: false,
+            held: Some(crate::world::HeldItem { id: 276, damage: 0 }),
+            held_use: UseKind::Block,
+            held_is_block: false,
+            pointed,
+        },
+    }
+}
+
+#[test]
+fn input_round_trips_every_pointed_kind() {
+    for pointed in [
+        PointedFacts::Miss,
+        PointedFacts::Block {
+            position: [1, 64, -3],
+            face: 1,
+            state: 2 << 4,
+            point: [1.5, 65.0, -2.5],
+            distance: 2.25,
+        },
+        PointedFacts::Entity {
+            id: 42,
+            point: [0.0, 65.0, 3.0],
+            distance: 3.0,
+        },
+    ] {
+        let facts = input_facts(pointed);
+        assert_eq!(Input::new(facts).facts(), facts);
+    }
+}
+
+#[test]
+fn input_payload_uses_the_wire_values() {
+    use umicraft_modapi_sys::{UMI_POINTED_ENTITY, UMI_POINTED_MISS, UMI_USE_ACTION_BLOCK};
+    let miss = Input::new(input_facts(PointedFacts::Miss));
+    assert_eq!(miss.raw.pointed_kind, UMI_POINTED_MISS);
+    assert_eq!(miss.raw.pointed_entity, -1);
+    assert_eq!(miss.raw.held_use_action, UMI_USE_ACTION_BLOCK);
+    assert_eq!(miss.header().id, UmiEventId::INPUT);
+    assert_eq!(
+        miss.header().size as usize,
+        size_of::<umicraft_modapi_sys::UmiInput>()
+    );
+    let empty_hand = Input::new(InputFacts::default());
+    assert_eq!(empty_hand.raw.held_item, -1);
+    let hit = Input::new(input_facts(PointedFacts::Entity {
+        id: 7,
+        point: [0.0; 3],
+        distance: 1.0,
+    }));
+    assert_eq!(
+        (hit.raw.pointed_kind, hit.raw.pointed_entity),
+        (UMI_POINTED_ENTITY, 7)
+    );
+}
+
+#[test]
+fn input_is_a_render_event_that_mods_cannot_cancel_or_change() {
+    assert_eq!(Input::THREAD, EventThread::Render);
+    const { assert!(!Input::CANCELLABLE && !Input::MUTABLE) };
 }

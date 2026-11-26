@@ -9,6 +9,7 @@ use umicraft_builtin_mods::{HudPlacement, SettingValue};
 use super::ModHost;
 use crate::error::ConfigureError;
 use crate::events::{ButtonPressed, ModuleToggled};
+use crate::input::InputQueue;
 use crate::manifest::ModId;
 use crate::packets::PacketOutbox;
 use crate::ui::commands::CommandTable;
@@ -89,6 +90,18 @@ impl ModHost {
     /// The packets mods injected with `packet_send`, for the network thread to drain.
     pub fn packet_outbox(&self) -> PacketOutbox {
         PacketOutbox::new(self.shared.packet_inbox())
+    }
+
+    /// The input requests mods queued with `input_*`, for the window to apply
+    /// before each input update (API 1.5).
+    pub fn input_queue(&self) -> InputQueue {
+        InputQueue::new(self.shared.input_inbox())
+    }
+
+    /// Records whether the game owns the input (no screen open, mouse captured, in a
+    /// world); while it does not, the input functions answer `UNAVAILABLE`.
+    pub fn set_game_focus(&self, on: bool) {
+        self.shared.set_game_focus(on);
     }
 
     /// Turns server-compat mode on or off: while on, a mod that declared

@@ -62,6 +62,11 @@ impl UmiEventId {
     /// [`UmiButtonPressed`], render thread. Delivered only to the mod that
     /// declared the button. Not cancellable, not mutable. Added in API 1.2.
     pub const BUTTON_PRESSED: Self = Self(15);
+    /// The attack and use bindings, the hand and what the crosshair points at;
+    /// payload [`UmiInput`](crate::UmiInput), render thread, once per frame in a
+    /// world, after `FRAME`. Needs the `input` permission. Not cancellable, not
+    /// mutable. Added in API 1.5.
+    pub const INPUT: Self = Self(16);
 }
 
 /// `UmiEventHeader::flags` bit: a handler may cancel the event.

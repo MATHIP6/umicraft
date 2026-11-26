@@ -16,6 +16,7 @@ mod camera;
 mod events;
 mod exports;
 mod host;
+mod input;
 mod services;
 mod types;
 mod ui;
@@ -33,6 +34,11 @@ pub use exports::{
     UMI_MOD_INIT_SYMBOL, UMI_MOD_SHUTDOWN_SYMBOL,
 };
 pub use host::{UmiHandlerFn, UmiHost, UmiLevel, UmiMode};
+pub use input::{
+    UmiInput, UMI_INPUT_ACTION_ATTACK, UMI_INPUT_ACTION_USE, UMI_MAX_INPUT_PRESSES,
+    UMI_POINTED_BLOCK, UMI_POINTED_ENTITY, UMI_POINTED_MISS, UMI_USE_ACTION_BLOCK,
+    UMI_USE_ACTION_BOW, UMI_USE_ACTION_DRINK, UMI_USE_ACTION_EAT, UMI_USE_ACTION_NONE,
+};
 pub use services::{
     UmiEffect, UmiEntity, UmiEntityVisitFn, UmiPhysicsCx, UmiPhysicsFn, UmiPhysicsInput,
     UmiPlayerPhysics, UmiServiceMode, UMI_EFFECT_HIDE_PARTICLES, UMI_ENTITY_INVISIBLE,

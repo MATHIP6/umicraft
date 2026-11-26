@@ -45,6 +45,62 @@
 #define UMI_CHAT_POSITION_ACTION_BAR 2
 
 /**
+ * `UmiInput::pointed_kind`: nothing in reach (MCP `MovingObjectType.MISS`).
+ */
+#define UMI_POINTED_MISS 0
+
+/**
+ * `UmiInput::pointed_kind`: a block.
+ */
+#define UMI_POINTED_BLOCK 1
+
+/**
+ * `UmiInput::pointed_kind`: an entity.
+ */
+#define UMI_POINTED_ENTITY 2
+
+/**
+ * `UmiInput::held_use_action`: using the item does nothing lasting (MCP
+ * `EnumAction.NONE`).
+ */
+#define UMI_USE_ACTION_NONE 0
+
+/**
+ * `UmiInput::held_use_action`: the item is eaten.
+ */
+#define UMI_USE_ACTION_EAT 1
+
+/**
+ * `UmiInput::held_use_action`: the item is drunk.
+ */
+#define UMI_USE_ACTION_DRINK 2
+
+/**
+ * `UmiInput::held_use_action`: the item blocks (a sword).
+ */
+#define UMI_USE_ACTION_BLOCK 3
+
+/**
+ * `UmiInput::held_use_action`: the item is drawn (a bow).
+ */
+#define UMI_USE_ACTION_BOW 4
+
+/**
+ * `input_press` / `input_clear_press` action: the attack binding.
+ */
+#define UMI_INPUT_ACTION_ATTACK 0
+
+/**
+ * `input_press` / `input_clear_press` action: the use binding.
+ */
+#define UMI_INPUT_ACTION_USE 1
+
+/**
+ * Most presses one `input_press` call makes.
+ */
+#define UMI_MAX_INPUT_PRESSES 8
+
+/**
  * [`UmiPlayerPhysics::flags`]: the player stands on a block. Writable.
  */
 #define UMI_PHYSICS_ON_GROUND 1
@@ -329,6 +385,13 @@ typedef uint32_t UmiEventId;
  * declared the button. Not cancellable, not mutable. Added in API 1.2.
  */
 #define UmiEventId_BUTTON_PRESSED 15
+/**
+ * The attack and use bindings, the hand and what the crosshair points at;
+ * payload [`UmiInput`](crate::UmiInput), render thread, once per frame in a
+ * world, after `FRAME`. Needs the `input` permission. Not cancellable, not
+ * mutable. Added in API 1.5.
+ */
+#define UmiEventId_INPUT 16
 
 /**
  * First field of every event payload.
@@ -1503,6 +1566,27 @@ typedef struct UmiHost {
                                uint32_t color,
                                float alpha,
                                uint32_t flags);
+  /**
+   * Presses the attack or use binding (`UMI_INPUT_ACTION_*`) `count` times
+   * (1 to `UMI_MAX_INPUT_PRESSES`), as the player clicking: the game thread
+   * clicks once per press in its next tick. Any thread; `DENIED` without the
+   * `input` permission or while the mod is not enabled, `UNAVAILABLE` while
+   * the game does not own the input, `BUSY` when the queue is full. Added in
+   * API 1.5.
+   */
+  UmiStatus (*input_press)(UmiModHandle me, uint32_t action, uint32_t count);
+  /**
+   * Drops the presses of `action` not sent to the game thread yet, the
+   * player's included, without a release. Same rules as `input_press`.
+   * Added in API 1.5.
+   */
+  UmiStatus (*input_clear_press)(UmiModHandle me, uint32_t action);
+  /**
+   * Turns the player's look by `yaw` and `pitch` degrees (positive turns
+   * right and looks down), through the next input update, so the server
+   * sees it. Each within ±180. Same rules as `input_press`. Added in API 1.5.
+   */
+  UmiStatus (*input_add_look)(UmiModHandle me, float yaw, float pitch);
 } UmiHost;
 
 /**
@@ -1510,6 +1594,105 @@ typedef struct UmiHost {
  * functions. Called on the render thread, within a time budget.
  */
 typedef UmiStatus (*UmiHudDrawFn)(struct UmiHudCx *hud, void *user);
+
+/**
+ * Payload of [`UmiEventId::INPUT`](crate::UmiEventId::INPUT): the attack and use
+ * bindings, the hand and what the crosshair points at. Added in API 1.5.
+ *
+ * The hand and crosshair facts (`tick` to `pointed_block_pos`) are those of the
+ * last game tick; the bindings are those of this frame.
+ */
+typedef struct UmiInput {
+  /**
+   * Common header.
+   */
+  struct UmiEventHeader header;
+  /**
+   * 1 while the attack binding is held, whatever it is bound to.
+   */
+  uint8_t attack_held;
+  /**
+   * 1 while the use binding is held.
+   */
+  uint8_t use_held;
+  /**
+   * Attack presses not sent to the game thread yet (MCP `KeyBinding.pressTime`).
+   */
+  uint8_t attack_presses;
+  /**
+   * Use presses not sent to the game thread yet.
+   */
+  uint8_t use_presses;
+  /**
+   * Monotonic time in milliseconds, the clock of `FRAME`.
+   */
+  uint64_t now_ms;
+  /**
+   * Game ticks since the join.
+   */
+  uint64_t tick;
+  /**
+   * 1 while the game owns the input: no screen open, mouse captured, in a world.
+   */
+  uint8_t game_focus;
+  /**
+   * 1 while an item is in use (eating, drinking, blocking, drawing a bow).
+   */
+  uint8_t using_item;
+  /**
+   * What using the held item does, one of `UMI_USE_ACTION_*`.
+   */
+  uint8_t held_use_action;
+  /**
+   * 1 when the held item places a block.
+   */
+  uint8_t held_is_block;
+  /**
+   * The arm swing, 0 to 1, 0 when the arm is not swinging.
+   */
+  float swing_progress;
+  /**
+   * The held item id, -1 when the hand is empty.
+   */
+  int32_t held_item;
+  /**
+   * The held item's damage or metadata value.
+   */
+  int32_t held_damage;
+  /**
+   * What the crosshair points at, one of `UMI_POINTED_*`.
+   */
+  uint8_t pointed_kind;
+  /**
+   * The face of the pointed block: 0 down, 1 up, 2 north, 3 south, 4 west,
+   * 5 east; 0 unless `UMI_POINTED_BLOCK`.
+   */
+  uint8_t pointed_face;
+  /**
+   * Zero.
+   */
+  uint8_t reserved[2];
+  /**
+   * The pointed entity's server id, -1 unless `UMI_POINTED_ENTITY`.
+   */
+  int32_t pointed_entity;
+  /**
+   * Where the ray hits, in blocks; the end of the reach for a miss.
+   */
+  double pointed_point[3];
+  /**
+   * From the eye to `pointed_point`, in blocks; 0 for a miss.
+   */
+  float pointed_distance;
+  /**
+   * The pointed block as `id << 4 | metadata`, 0 unless `UMI_POINTED_BLOCK`.
+   */
+  uint32_t pointed_block;
+  /**
+   * The pointed block's position, zeros unless `UMI_POINTED_BLOCK`.
+   */
+  int32_t pointed_block_pos[3];
+} UmiInput;
 
 /**
  * Payload of [`UmiEventId::KEY_PRESSED`].
@@ -1749,8 +1932,10 @@ typedef UmiStatus (*UmiWorldDrawFn)(struct UmiWorldCx *world, void *user);
  * snapshot and metadata, writable flight and game mode, two HUD primitives and
  * the screen anchor (ADR-0094); 1.2 added categories, modules and buttons in the
  * mods menu (ADR-0095); 1.3 added `camera_capture`, for a free camera
- * (ADR-0096).
+ * (ADR-0096); 1.4 added the combat facts, world layers and the entity mask
+ * (ADR-0097); 1.5 added the `INPUT` event and the input host functions
+ * (ADR-0098).
  */
-#define UMI_API_VERSION (UmiVersion){ .major = 1, .minor = 4 }
+#define UMI_API_VERSION (UmiVersion){ .major = 1, .minor = 5 }
 
 #endif  /* UMICRAFT_H */

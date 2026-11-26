@@ -85,8 +85,10 @@ pub struct UmiVersion {
 /// snapshot and metadata, writable flight and game mode, two HUD primitives and
 /// the screen anchor (ADR-0094); 1.2 added categories, modules and buttons in the
 /// mods menu (ADR-0095); 1.3 added `camera_capture`, for a free camera
-/// (ADR-0096).
-pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 1, minor: 4 };
+/// (ADR-0096); 1.4 added the combat facts, world layers and the entity mask
+/// (ADR-0097); 1.5 added the `INPUT` event and the input host functions
+/// (ADR-0098).
+pub const UMI_API_VERSION: UmiVersion = UmiVersion { major: 1, minor: 5 };
 
 impl UmiVersion {
     /// Whether a host of version `self` can load a mod built for `mod_version`.

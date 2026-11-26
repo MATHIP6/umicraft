@@ -223,7 +223,7 @@ impl ModContext {
     ///
     /// Refuses with `INVALID_ARGUMENT` a null handler, an unknown event or an
     /// unknown mode, and with `DENIED` a packet event without the `network_packets`
-    /// permission or any call after `init` returned: the dispatcher reads the lists
+    /// permission, `INPUT` without the `input` permission, or any call after `init` returned: the dispatcher reads the lists
     /// without coordinating with late registrations.
     pub fn subscribe(
         &self,
@@ -239,6 +239,9 @@ impl ModContext {
             return UmiStatus::INVALID_ARGUMENT;
         };
         if is_packet_event(event) && !self.permissions.network_packets {
+            return UmiStatus::DENIED;
+        }
+        if event == UmiEventId::INPUT && !self.permissions.input {
             return UmiStatus::DENIED;
         }
         if self.init_done.load(Ordering::Acquire) {

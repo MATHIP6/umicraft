@@ -76,6 +76,10 @@ pub struct Permissions {
     /// May move the render camera (`render_camera`, API 1.1). Shown to the player
     /// only: it changes what is drawn, not what the server sees (ADR-0094).
     pub camera: bool,
+    /// May read the attack and use bindings and press them, and turn the player's
+    /// look (`INPUT`, `input_*`, API 1.5). Not held off by server-compat mode, by the
+    /// owner's choice (ADR-0098); the mods menu shows it.
+    pub input: bool,
     /// May access the filesystem beyond its own directory.
     pub filesystem: bool,
     /// May make HTTP requests.

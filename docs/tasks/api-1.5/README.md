@@ -6,8 +6,8 @@ Status: **in progress** (2026-11-26). Design: ADR-0098. Base: API 1.4 (ADR-0097)
 |---|---|---|---|
 | 1.5.0 | Presses counted, not flagged, from the window to the tick | regression test: two presses in one tick click twice | done |
 | 1.5.1 | ADR-0098 and this plan | ADR accepted | done |
-| 1.5.2 | `umicraft-modapi-sys`: types below, `UMI_API_VERSION = 1.5`, host functions appended | layout tests; a 1.5 mod is refused by a 1.4 host | |
-| 1.5.3 | `umicraft-modhost`: `input` permission, `INPUT` event, host functions and the input queue | refusal, queue order and capacity tests | |
+| 1.5.2 | `umicraft-modapi-sys`: types below, `UMI_API_VERSION = 1.5`, host functions appended | layout tests; a 1.5 mod is refused by a 1.4 host | done |
+| 1.5.3 | `umicraft-modhost`: `input` permission, `INPUT` event, host functions and the input queue | refusal, queue order and capacity tests | done |
 | 1.5.4 | Client: tick facts, the event each frame, the queue applied to the presses and the look | facts tests; injected press and look reach the game thread | |
 | 1.5.5 | `umicraft-modapi` wrappers, docs, header, badge | fmt, clippy `-D warnings`, workspace tests | |
 
@@ -74,8 +74,8 @@ input_add_look: extern "C" fn(me: UmiModHandle, yaw: f32, pitch: f32) -> UmiStat
 ```
 
 ```rust
-pub const UMI_INPUT_ATTACK: u32 = 0;
-pub const UMI_INPUT_USE: u32 = 1;
+pub const UMI_INPUT_ACTION_ATTACK: u32 = 0;
+pub const UMI_INPUT_ACTION_USE: u32 = 1;
 pub const UMI_MAX_INPUT_PRESSES: u32 = 8;   // per call
 ```
 

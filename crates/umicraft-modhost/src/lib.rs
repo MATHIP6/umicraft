@@ -41,6 +41,7 @@ pub mod events;
 mod ffi;
 mod hook;
 mod host;
+mod input;
 mod load;
 pub mod manifest;
 mod packets;
@@ -69,11 +70,13 @@ pub use error::{
 };
 pub use events::{
     ButtonPressed, ChatReceived, ChatSend, Connected, Disconnected, EventThread, Frame,
-    FrameCamera, FrameFacts, HostEvent, KeyPressed, ModuleToggled, PacketReceived, PacketSend,
-    PostTick, PreRender, PreTick, ScreenClosed, ScreenOpened,
+    FrameCamera, FrameFacts, HandFacts, HostEvent, Input, InputFacts, KeyPressed, ModuleToggled,
+    PacketReceived, PacketSend, PointedFacts, PostTick, PreRender, PreTick, ScreenClosed,
+    ScreenOpened, UseKind,
 };
 pub use ffi::{host_table, UserPtr};
 pub use host::ModHost;
+pub use input::{InputAction, InputQueue, InputRequest, INPUT_QUEUE_CAPACITY, MAX_LOOK_DELTA};
 pub use manifest::{
     library_file_name, platform_dir, ApiVersion, ApiVersionError, Arch, Load, Manifest, ModId, Os,
     Permissions, ServiceId, KNOWN_SERVICES, PLAYER_PHYSICS,
