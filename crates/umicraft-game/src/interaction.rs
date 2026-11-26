@@ -126,8 +126,9 @@ pub struct BreakProgress {
 pub struct AttackTick<'a, W: BlockSource + ?Sized> {
     /// The gamemode of the player.
     pub mode: GameMode,
-    /// Whether the button went down during this tick.
-    pub pressed: bool,
+    /// The presses of the button during this tick (MCP
+    /// `KeyBinding.pressTime`); each one clicks.
+    pub presses: u8,
     /// Whether the button is down.
     pub held: bool,
     /// The block under the crosshair.
@@ -195,10 +196,11 @@ impl Interaction {
         self.digging.as_ref().map(|digging| digging.block)
     }
 
-    /// Runs one tick of the attack button: the click, then the held button.
+    /// Runs one tick of the attack button: the clicks, then the held button.
     ///
-    /// MCP `Minecraft.runTick` counts `leftClickCounter` down, `clickMouse`
-    /// handles a press and `sendClickBlockToController` handles the held
+    /// MCP `Minecraft.runTick` counts `leftClickCounter` down, then calls
+    /// `clickMouse` once per press (`while (keyBindAttack.isPressed())`), which
+    /// does nothing while `leftClickCounter` runs (a miss starts it), and `sendClickBlockToController` handles the held
     /// button, which digs with `PlayerControllerMP.onPlayerDamageBlock` or
     /// aborts the dig. Every swing also sends `Animation`
     /// (`EntityPlayerSP.swingItem`).
@@ -209,8 +211,10 @@ impl Interaction {
             output: AttackOutput::default(),
         };
         run.interaction.click_delay = run.interaction.click_delay.saturating_sub(1);
-        if tick.pressed && run.interaction.click_delay == 0 {
-            run.click();
+        for _ in 0..tick.presses {
+            if run.interaction.click_delay == 0 {
+                run.click();
+            }
         }
         run.hold();
         run.output
@@ -610,7 +614,7 @@ mod tests {
         interaction.attack(&AttackTick {
             entity: None,
             mode,
-            pressed,
+            presses: u8::from(pressed),
             held,
             target,
             world,
@@ -875,7 +879,7 @@ mod tests {
         let output = interaction.attack(&AttackTick {
             entity: None,
             mode: GameMode::Creative,
-            pressed: true,
+            presses: 1,
             held: true,
             target: Some(stone()),
             world: &world,
@@ -956,7 +960,7 @@ mod tests {
         let output = interaction.attack(&AttackTick {
             entity: None,
             mode: GameMode::Survival,
-            pressed: false,
+            presses: 0,
             held: true,
             target: Some(stone()),
             world: &world,
@@ -1045,7 +1049,7 @@ mod tests {
                 interaction.attack(&AttackTick {
                     entity: None,
                     mode,
-                    pressed: index == 0,
+                    presses: u8::from(index == 0),
                     held: true,
                     target: Some(stone()),
                     world: &world,

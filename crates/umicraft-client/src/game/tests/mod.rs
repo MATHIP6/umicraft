@@ -145,7 +145,7 @@ fn game_on_floor_with(plant: BlockState) -> Game {
 
 /// Presses the use button once and runs the tick of the button.
 fn click_use(game: &mut Game, queue: &mut CommandQueue) {
-    game.controls.use_pressed = true;
+    game.controls.use_presses = 1;
     run_use(game, queue);
 }
 

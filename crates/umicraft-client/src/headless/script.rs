@@ -160,8 +160,8 @@ impl Script {
             look_pitch: delta,
             ..InputUpdate::default()
         };
-        let mut break_block = false;
-        let mut place_block = false;
+        let mut attack_presses = 0;
+        let mut use_presses = 0;
         match phase.step {
             ScriptStep::Idle => {}
             ScriptStep::Walk => update.state.forward = 1.0,
@@ -200,23 +200,23 @@ impl Script {
                 update.state.attack = true;
                 if !self.fired {
                     self.fired = true;
-                    break_block = true;
+                    attack_presses = 1;
                 }
             }
             ScriptStep::Place => {
                 if !self.fired {
                     self.fired = true;
-                    place_block = true;
+                    use_presses = 1;
                 }
             }
             ScriptStep::Strike => {
                 update.state.forward = 1.0;
                 update.state.sprint = true;
-                break_block = self.click_due(now);
+                attack_presses = u8::from(self.click_due(now));
             }
             ScriptStep::JumpStrike => {
                 update.state.forward = 1.0;
-                break_block = self.click_due(now);
+                attack_presses = u8::from(self.click_due(now));
                 if now.duration_since(self.last_jump) >= Duration::from_millis(500) {
                     self.last_jump = now;
                     update.state.jump = true;
@@ -238,8 +238,8 @@ impl Script {
                 }
             }
         }
-        update.break_block = break_block;
-        update.place_block = place_block;
+        update.attack_presses = attack_presses;
+        update.use_presses = use_presses;
         update
     }
 }
@@ -434,8 +434,8 @@ mod tests {
         let mut saw_place = false;
         for step in 0..200 {
             let update = script.update(start + Duration::from_millis(step * 100));
-            saw_break |= update.break_block;
-            saw_place |= update.place_block;
+            saw_break |= update.attack_presses > 0;
+            saw_place |= update.use_presses > 0;
         }
         assert!(saw_break, "the break phase must request a dig");
         assert!(saw_place, "the place phase must request a placement");
@@ -468,7 +468,8 @@ mod tests {
             .filter(|tick| {
                 script
                     .update(start + Duration::from_millis(tick * 50))
-                    .break_block
+                    .attack_presses
+                    > 0
             })
             .count();
         assert!((24..=26).contains(&clicks), "{clicks}");

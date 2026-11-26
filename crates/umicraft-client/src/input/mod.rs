@@ -84,10 +84,13 @@ pub struct InputUpdate {
     /// `KeyBinding.pressTime`): the game takes them one per key and tick, in
     /// the order of the keys, not of the presses.
     pub hotbar_keys: [u8; 9],
-    /// Whether the player started breaking the targeted block.
-    pub break_block: bool,
-    /// Whether the use (right) button went down since the last update.
-    pub place_block: bool,
+    /// The attack presses since the last update (MCP `KeyBinding.pressTime`):
+    /// the next tick clicks once for each, as `Minecraft.runTick` drains
+    /// `while (keyBindAttack.isPressed()) clickMouse()`.
+    pub attack_presses: u8,
+    /// The use presses since the last update; the next tick right-clicks once
+    /// for each (`while (keyBindUseItem.isPressed()) rightClickMouse()`).
+    pub use_presses: u8,
     /// Whether the pick block (middle) button went down.
     pub pick_block: bool,
     /// The drop the player asked for with the drop key, if any.
@@ -105,8 +108,8 @@ impl Default for InputUpdate {
             look_pitch: 0.0,
             select_slot: None,
             hotbar_keys: [0; 9],
-            break_block: false,
-            place_block: false,
+            attack_presses: 0,
+            use_presses: 0,
             pick_block: false,
             drop_item: None,
             toggle_perspective: false,

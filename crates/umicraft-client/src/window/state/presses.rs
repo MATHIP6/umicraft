@@ -10,9 +10,12 @@ pub(in crate::window) struct PendingPresses {
     pub(in crate::window) select_slot: Option<u8>,
     /// The digit key presses not sent yet (MCP `KeyBinding.pressTime`).
     pub(in crate::window) hotbar_keys: [u8; 9],
-    pub(in crate::window) break_block: bool,
-    /// The use button went down since the last input update.
-    pub(in crate::window) place_block: bool,
+    /// The attack presses since the last input update (MCP
+    /// `KeyBinding.pressTime` of `keyBindAttack`).
+    pub(in crate::window) attack_presses: u8,
+    /// The use presses since the last input update (`pressTime` of
+    /// `keyBindUseItem`).
+    pub(in crate::window) use_presses: u8,
     /// The pick block binding went down since the last input update.
     pub(in crate::window) pick_block: bool,
     /// The drop key was pressed since the last input update.

@@ -233,8 +233,8 @@ fn joining_another_server_starts_without_the_old_clicks_and_item_use() {
     let mut game = Game::new();
     let mut queue = CommandQueue::default();
     let (frames, _received) = mpsc::sync_channel(16);
-    game.controls.use_pressed = true;
-    game.controls.attack_pressed = true;
+    game.controls.use_presses = 1;
+    game.controls.attack_presses = 1;
     let join = JoinGameInfo {
         entity_id: 1,
         gamemode: 0,
@@ -245,7 +245,10 @@ fn joining_another_server_starts_without_the_old_clicks_and_item_use() {
         reduced_debug_info: false,
     };
     handle_net(&mut game, PlayEvent::JoinGame(join), &mut queue, &frames);
-    assert!(!game.controls.use_pressed && !game.controls.attack_pressed);
+    assert_eq!(
+        (game.controls.use_presses, game.controls.attack_presses),
+        (0, 0)
+    );
     assert!(!game.item_use.is_using());
     assert!(
         game.windows.view().container.is_none(),

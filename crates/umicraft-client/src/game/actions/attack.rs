@@ -49,11 +49,11 @@ fn swing_while_using(game: &mut Game) {
 /// `PlayerControllerMP.onPlayerDestroyBlock`; the server confirms or
 /// restores them with a block change.
 pub(in crate::game) fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
-    let pressed = std::mem::take(&mut game.controls.attack_pressed);
+    let presses = std::mem::take(&mut game.controls.attack_presses);
     // MCP `Minecraft.runTick` lines 2098-2121: the attack button does
     // nothing while an item is in use.
     if game.spectating() || game.dead() || game.item_use.is_using() {
-        if pressed {
+        if presses > 0 {
             tracing::debug!(
                 spectating = game.spectating(),
                 dead = game.dead(),
@@ -65,7 +65,7 @@ pub(in crate::game) fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
         return;
     }
     let pointed = combat::pointed(game);
-    if pressed {
+    if presses > 0 {
         combat::log_click(game, &pointed);
     }
     let target = pointed.block();
@@ -96,7 +96,7 @@ pub(in crate::game) fn run_attack(game: &mut Game, queue: &mut CommandQueue) {
     };
     let output = game.interaction.attack(&AttackTick {
         mode: game.gamemode,
-        pressed,
+        presses,
         held: game.controls.input.attack,
         target,
         entity,

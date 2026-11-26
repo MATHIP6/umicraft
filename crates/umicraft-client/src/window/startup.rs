@@ -253,8 +253,8 @@ impl App {
             presses: PendingPresses {
                 select_slot: None,
                 hotbar_keys: [0; 9],
-                break_block: false,
-                place_block: false,
+                attack_presses: 0,
+                use_presses: 0,
                 pick_block: false,
                 drop_item: None,
                 toggle_perspective: false,

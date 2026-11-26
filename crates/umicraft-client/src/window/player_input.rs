@@ -114,8 +114,8 @@ impl App {
             || pixels != (0, 0)
             || self.presses.select_slot.is_some()
             || self.presses.hotbar_keys != [0; 9]
-            || self.presses.break_block
-            || self.presses.place_block
+            || self.presses.attack_presses != 0
+            || self.presses.use_presses != 0
             || self.presses.pick_block
             || self.presses.drop_item.is_some()
             || self.presses.toggle_perspective;
@@ -129,8 +129,8 @@ impl App {
             look_pitch: player_turn.1,
             select_slot: self.presses.select_slot,
             hotbar_keys: self.presses.hotbar_keys,
-            break_block: self.presses.break_block,
-            place_block: self.presses.place_block,
+            attack_presses: self.presses.attack_presses,
+            use_presses: self.presses.use_presses,
             pick_block: self.presses.pick_block,
             drop_item: self.presses.drop_item,
             toggle_perspective: self.presses.toggle_perspective,
@@ -155,8 +155,8 @@ impl App {
             self.input.mouse.consume(pixels);
             self.presses.select_slot = None;
             self.presses.hotbar_keys = [0; 9];
-            self.presses.break_block = false;
-            self.presses.place_block = false;
+            self.presses.attack_presses = 0;
+            self.presses.use_presses = 0;
             self.presses.pick_block = false;
             self.presses.drop_item = None;
             self.presses.toggle_perspective = false;

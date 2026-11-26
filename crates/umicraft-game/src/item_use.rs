@@ -295,6 +295,10 @@ pub struct UseOutput {
     /// on the client), to write at once; the held stack loses one item
     /// outside creative.
     pub placed: Option<Placement>,
+    /// Whether a press reached `rightClickMouse`. It did not when an item in
+    /// use swallowed it, and then the other presses of the tick are
+    /// swallowed too (MCP `Minecraft.runTick` checks `isUsingItem` once).
+    pub clicked: bool,
 }
 
 /// The use state of the local player (MCP `EntityPlayer.itemInUse`).
@@ -367,7 +371,27 @@ impl ItemUse {
         }
         if tick.pressed || (tick.held && self.delay == 0) {
             self.click(interaction, tick, &mut output);
+            output.clicked = tick.pressed;
         }
+        output
+    }
+
+    /// Runs one more press of the tick that [`Self::tick`] began: MCP
+    /// `Minecraft.runTick` right-clicks once per press
+    /// (`while (keyBindUseItem.isPressed())`), whatever the repeat delay.
+    ///
+    /// The caller presses again only when the tick's own press clicked
+    /// ([`UseOutput::clicked`]).
+    pub fn press_again<W: BlockSource + ?Sized>(
+        &mut self,
+        interaction: &mut Interaction,
+        tick: &UseTick<'_, W>,
+    ) -> UseOutput {
+        let mut output = UseOutput {
+            clicked: true,
+            ..UseOutput::default()
+        };
+        self.click(interaction, tick, &mut output);
         output
     }
 

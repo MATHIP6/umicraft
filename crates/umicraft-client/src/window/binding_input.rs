@@ -50,8 +50,8 @@ impl App {
     pub(super) fn unpress_all(&mut self) {
         self.input.keys.clear();
         self.input.buttons.clear();
-        self.presses.break_block = false;
-        self.presses.place_block = false;
+        self.presses.attack_presses = 0;
+        self.presses.use_presses = 0;
         self.presses.pick_block = false;
         self.presses.hotbar_keys = [0; 9];
     }
@@ -79,8 +79,14 @@ impl App {
             Action::Chat => self.open_chat(""),
             Action::Command => self.open_chat("/"),
             Action::Inventory => self.open_inventory(),
-            Action::Attack => self.presses.break_block |= self.input.mouse_captured,
-            Action::Use => self.presses.place_block |= self.input.mouse_captured,
+            // One press more each time (`KeyBinding.onTick`): two clicks
+            // within one tick are two clicks, not one.
+            Action::Attack if self.input.mouse_captured => {
+                self.presses.attack_presses = self.presses.attack_presses.saturating_add(1);
+            }
+            Action::Use if self.input.mouse_captured => {
+                self.presses.use_presses = self.presses.use_presses.saturating_add(1);
+            }
             Action::PickBlock => self.presses.pick_block |= self.input.mouse_captured,
             Action::Drop if self.input.mouse_captured => {
                 self.presses.drop_item = Some(self.drop_kind())

@@ -562,7 +562,7 @@ fn test_c07_mining_pipeline_start_abort_and_finish() {
     // 1. Start destroy
     let tick_start = AttackTick {
         mode: GameMode::Survival,
-        pressed: true,
+        presses: 1,
         held: true,
         target: Some(hit),
         entity: None,
@@ -634,7 +634,7 @@ fn test_c07_stop_destroy_block_instant_creative_and_damage_completion() {
     // 1. Creative mode instant break
     let tick_creative = AttackTick {
         mode: GameMode::Creative,
-        pressed: true,
+        presses: 1,
         held: true,
         target: Some(hit),
         entity: None,
@@ -778,7 +778,7 @@ fn test_c07_switch_digging_target_aborts_previous() {
     // Tick 1: Start digging block 1 on Face::North
     let tick1 = AttackTick {
         mode: GameMode::Survival,
-        pressed: true,
+        presses: 1,
         held: true,
         target: Some(hit1),
         entity: None,
@@ -817,10 +817,10 @@ fn test_c07_switch_digging_target_aborts_previous() {
     assert_eq!(wire_start1[0], 0); // Status 0 = StartDestroyBlock
     assert_eq!(wire_start1[9], 2); // Face North = 2
 
-    // Tick 2: Player moves crosshair to block 2 with Face::East while holding attack button (pressed: false, held: true)
+    // Tick 2: Player moves crosshair to block 2 with Face::East while holding attack button (presses: 0, held: true)
     let tick2 = AttackTick {
         mode: GameMode::Survival,
-        pressed: false,
+        presses: 0,
         held: true,
         target: Some(hit2),
         entity: None,

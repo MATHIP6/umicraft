@@ -11,7 +11,7 @@ fn a_click_swings_the_hand_and_a_placement_swings_it_too() {
     let mut queue = CommandQueue::default();
     game.pitch = 85.9;
     game.controls.input.attack = true;
-    game.controls.attack_pressed = true;
+    game.controls.attack_presses = 1;
     run_attack(&mut game, &mut queue);
     tick_hand(&mut game);
     assert!(game.hand.pose().swing > 0.0 || game.hand.swing_progress(1.0) >= 0.0);
@@ -49,7 +49,7 @@ fn a_click_swings_the_hand_and_a_placement_swings_it_too() {
 
 fn click_attack(game: &mut Game, queue: &mut CommandQueue) {
     game.controls.input.attack = true;
-    game.controls.attack_pressed = true;
+    game.controls.attack_presses = 1;
     run_attack(game, queue);
 }
 
@@ -293,4 +293,76 @@ fn the_server_finishing_the_meal_ends_the_use() {
     );
     handle_net(&mut game, status, &mut queue, &frames);
     assert!(!game.item_use.is_using());
+}
+
+fn attacks_sent(queue: &CommandQueue) -> usize {
+    commands(queue)
+        .iter()
+        .filter(|command| {
+            matches!(
+                command,
+                ClientCommand::UseEntity {
+                    action: UseEntityAction::Attack,
+                    ..
+                }
+            )
+        })
+        .count()
+}
+
+/// Regression: the presses were a `bool`, so two clicks within one tick hit
+/// once. MCP `Minecraft.runTick` drains `keyBindAttack.isPressed()` in a loop.
+#[test]
+fn two_attack_presses_in_one_tick_hit_twice() {
+    let mut game = game_on_floor_with(BlockState::AIR);
+    let mut queue = CommandQueue::default();
+    spawn_ahead(&mut game, false);
+    for _ in 0..2 {
+        handle_input(
+            &mut game,
+            InputUpdate {
+                attack_presses: 1,
+                ..InputUpdate::default()
+            },
+            &mut queue,
+        );
+    }
+    assert_eq!(game.controls.attack_presses, 2);
+    run_attack(&mut game, &mut queue);
+    assert_eq!(attacks_sent(&queue), 2);
+    assert_eq!(
+        game.controls.attack_presses, 0,
+        "the tick drains every press"
+    );
+}
+
+#[test]
+fn a_miss_stops_the_other_presses_of_its_tick() {
+    let mut game = game_on_floor_with(BlockState::AIR);
+    let mut queue = CommandQueue::default();
+    // Straight ahead, over the floor: nothing is in reach.
+    game.pitch = 0.0;
+    game.controls.attack_presses = 3;
+    run_attack(&mut game, &mut queue);
+    let swings = commands(&queue)
+        .iter()
+        .filter(|command| matches!(command, ClientCommand::Swing))
+        .count();
+    // `clickMouse` sets `leftClickCounter` to 10 on a miss outside creative.
+    assert_eq!(swings, 1);
+}
+
+#[test]
+fn two_use_presses_in_one_tick_click_twice() {
+    let mut game = game_on_floor_with(BlockState::AIR);
+    let mut queue = CommandQueue::default();
+    game.pitch = 57.3;
+    game.windows.apply_set_slot(0, 36, wire_item(1, 0));
+    game.controls.use_presses = 2;
+    run_use(&mut game, &mut queue);
+    let placements = commands(&queue)
+        .iter()
+        .filter(|command| matches!(command, ClientCommand::PlayerBlockPlacement { .. }))
+        .count();
+    assert_eq!(placements, 2);
 }

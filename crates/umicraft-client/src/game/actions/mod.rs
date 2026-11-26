@@ -64,8 +64,11 @@ pub(super) fn handle_input(game: &mut Game, update: InputUpdate, _queue: &mut Co
     if update.toggle_perspective {
         game.controls.perspective_presses = game.controls.perspective_presses.saturating_add(1);
     }
-    game.controls.attack_pressed |= update.break_block;
-    game.controls.use_pressed |= update.place_block;
+    game.controls.attack_presses = game
+        .controls
+        .attack_presses
+        .saturating_add(update.attack_presses);
+    game.controls.use_presses = game.controls.use_presses.saturating_add(update.use_presses);
     if update.pick_block {
         game.hotbar.picks = game.hotbar.picks.saturating_add(1);
     }

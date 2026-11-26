@@ -229,8 +229,8 @@ pub(super) fn join_game(game: &mut Game, info: &JoinGameInfo, frames: &SyncSende
     // item use, pending click or open window survives a server switch.
     game.interaction = Interaction::new();
     game.item_use = ItemUse::new();
-    game.controls.attack_pressed = false;
-    game.controls.use_pressed = false;
+    game.controls.attack_presses = 0;
+    game.controls.use_presses = 0;
     game.pending_book = None;
     game.windows = WindowManager::new();
     // `handleJoinGame` makes a new `PlayerControllerMP`

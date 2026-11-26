@@ -4,12 +4,12 @@
 
 use umicraft_game::collision::Aabb;
 use umicraft_game::combat::body_size;
-use umicraft_game::combat::ClickViewer;
+use umicraft_game::combat::{ClickViewer, Pointed};
 use umicraft_game::editors::book::{WRITABLE_BOOK, WRITTEN_BOOK};
 use umicraft_game::entity::{EntityId, EntityKind, EntityRecord};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::interaction::Outgoing;
-use umicraft_game::item_use::{DoorToggle, UseTick};
+use umicraft_game::item_use::{DoorToggle, UseOutput, UseTick};
 use umicraft_game::placement::{Placement, Placer};
 
 use super::swing_effects;
@@ -21,23 +21,60 @@ use crate::network::ClientCommand;
 /// The arrow item id (MCP `Items.arrow`): a bow needs one to be drawn.
 const ARROW: i16 = 262;
 
-/// Runs one tick of the use button (`umicraft_game::item_use`): the click on
-/// a block or in the air, the held button and the release.
+/// Runs one tick of the use button (`umicraft_game::item_use`): the clicks
+/// on a block or in the air, the held button and the release.
+///
+/// MCP `Minecraft.runTick` right-clicks once per press
+/// (`while (keyBindUseItem.isPressed()) rightClickMouse()`), all against the
+/// `objectMouseOver` of the tick, unless an item was in use when the tick
+/// began: then the presses are drained without a click. Each click is
+/// applied before the next, which sees the block the first one placed.
 pub(in crate::game) fn run_use(game: &mut Game, queue: &mut CommandQueue) {
-    let pressed = std::mem::take(&mut game.controls.use_pressed);
+    let presses = std::mem::take(&mut game.controls.use_presses);
     if game.dead() {
         return;
     }
-    if pressed || game.controls.input.use_item {
+    if presses > 0 || game.controls.input.use_item {
         gather_blocking_entities(game);
     }
     let pointed = combat::pointed(game);
-    let target = pointed.block();
+    let Some(first) = use_click(
+        game,
+        &pointed,
+        UseStep::Tick {
+            pressed: presses > 0,
+        },
+    ) else {
+        return;
+    };
+    let clicks_again = first.clicked;
+    apply_use(game, queue, first);
+    if !clicks_again {
+        return;
+    }
+    for _ in 1..presses {
+        if let Some(output) = use_click(game, &pointed, UseStep::PressAgain) {
+            apply_use(game, queue, output);
+        }
+    }
+}
+
+/// Which part of the tick a call of [`use_click`] runs.
+#[derive(Clone, Copy)]
+enum UseStep {
+    /// The tick itself: the first press (if any), the held button or the release.
+    Tick { pressed: bool },
+    /// One more press of the same tick.
+    PressAgain,
+}
+
+/// Runs `step` of the use button against `pointed`; `None` without a world.
+fn use_click(game: &mut Game, pointed: &Pointed, step: UseStep) -> Option<UseOutput> {
     let entity = pointed
         .entity()
         .and_then(|hit| Some((game.entities.entities().get(&hit.id)?, hit)));
     let (Some(state), Some(world)) = (game.state.as_ref(), game.world.as_ref()) else {
-        return;
+        return None;
     };
     let item = game.windows.selected_item().cloned();
     let has_arrow = game
@@ -47,33 +84,38 @@ pub(in crate::game) fn run_use(game: &mut Game, queue: &mut CommandQueue) {
         .flatten()
         .any(|stack| stack.item_id == ARROW);
     let player = state.player();
-    let output = game.item_use.tick(
-        &mut game.interaction,
-        &UseTick {
-            mode: game.gamemode,
-            pressed,
-            held: game.controls.input.use_item,
-            target,
-            entity,
-            world,
-            player: Some(Placer {
-                position: player.position,
-                bounds: player.bounding_box(),
-                yaw: player.yaw,
-                sneaking: player.sneaking,
-                others: &game.blocking_entities,
-            }),
+    let tick = UseTick {
+        mode: game.gamemode,
+        pressed: matches!(step, UseStep::Tick { pressed: true }),
+        held: game.controls.input.use_item,
+        target: pointed.block(),
+        entity,
+        world,
+        player: Some(Placer {
+            position: player.position,
+            bounds: player.bounding_box(),
+            yaw: player.yaw,
             sneaking: player.sneaking,
-            slot: game.hotbar.selected,
-            item: item.as_ref(),
-            food: game.vitals.food as i32,
-            has_arrow,
-            viewer: ClickViewer {
-                id: EntityId(game.entity_id),
-                uuid: game.body.uuid.map(u128::from_be_bytes),
-            },
+            others: &game.blocking_entities,
+        }),
+        sneaking: player.sneaking,
+        slot: game.hotbar.selected,
+        item: item.as_ref(),
+        food: game.vitals.food as i32,
+        has_arrow,
+        viewer: ClickViewer {
+            id: EntityId(game.entity_id),
+            uuid: game.body.uuid.map(u128::from_be_bytes),
         },
-    );
+    };
+    Some(match step {
+        UseStep::Tick { .. } => game.item_use.tick(&mut game.interaction, &tick),
+        UseStep::PressAgain => game.item_use.press_again(&mut game.interaction, &tick),
+    })
+}
+
+/// Sends the packets of one use output and applies what it does locally.
+fn apply_use(game: &mut Game, queue: &mut CommandQueue, output: UseOutput) {
     for outgoing in output.packets {
         if let Outgoing::UseItem { item } = &outgoing {
             // MCP `ItemWritableBook` / `ItemEditableBook.onItemRightClick`

@@ -517,6 +517,12 @@ Reference: the behaviour of the Fabric mod "Capes" (LGPL-2.1, read only, no code
 | 2026-11-25 | Line of sight | MCP `EntityLivingBase.canEntityBeSeen` (one ray, eye to eye, `World.rayTraceBlocks`), `Entity.getEyeHeight` (`height * 0.85`) | The client tests three points (eye height, middle, just above the feet) so a partly covered entity counts as visible; the blocks that stop the ray are those the crosshair stops at. |
 | 2026-11-25 | Tab list facts | MCP `S38PacketPlayerListItem` (ping, game mode), `NetworkPlayerInfo` | Spectator from the game mode 3 of the entry; the UUID version is the high nibble of byte 6 (RFC 4122). |
 
+## Attack and use presses
+
+| Date | Area | Source | Notes |
+|---|---|---|---|
+| 2026-11-26 | Presses within one tick | MCP `KeyBinding.onTick` (`++pressTime`), `KeyBinding.isPressed` (`--pressTime`), `Minecraft.runTick` (`while (keyBindAttack.isPressed()) clickMouse()`, same for `keyBindUseItem` / `rightClickMouse`; drained without a click while `thePlayer.isUsingItem()`) | Every press of a tick clicks, against the `objectMouseOver` of that tick; a miss sets `leftClickCounter = 10` outside creative, so the attack presses after it do nothing. |
+
 ## Discord Rich Presence (ADR-0084)
 
 | Date | Area | Source | Notes |

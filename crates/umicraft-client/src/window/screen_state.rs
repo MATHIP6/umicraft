@@ -41,8 +41,8 @@ impl App {
         self.input.keys.clear();
         self.input.buttons.clear();
         self.presses.select_slot = None;
-        self.presses.break_block = false;
-        self.presses.place_block = false;
+        self.presses.attack_presses = 0;
+        self.presses.use_presses = 0;
         self.presses.pick_block = false;
         self.presses.drop_item = None;
         self.input.mouse.clear();
