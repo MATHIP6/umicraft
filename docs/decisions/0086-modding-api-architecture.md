@@ -170,3 +170,8 @@ screens, ECS components.
   registry keeps its direct calls instead of becoming a bus subscriber: as a handler
   it would have to live behind a lock that every HUD draw and menu call takes, for no
   gain on one thread. The key state stays out of `FRAME` (F3.4 amendment).
+- **2026-11-26, F3.4 amended — the attack and use bindings (ADR-0098).** A mod that
+  declared `input` receives, in the `INPUT` event, whether the attack and use bindings
+  are held and their pending presses, and may press them and turn the look through
+  the client's input path. Nothing else of the keyboard or mouse reaches a mod: not
+  which key a binding uses, not any other binding, not the typed text.

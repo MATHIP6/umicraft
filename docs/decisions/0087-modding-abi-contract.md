@@ -107,3 +107,7 @@ crates may use `unsafe`.
   (`world_entities_snapshot`): the host now records the `api_version` each library
   declares and writes rows of the size that version knows, so a 1.1 mod's buffer is
   never overrun. Any future growth of a struct passed as an array must do the same.
+- **2026-11-26 — 1.5 (ADR-0098).** Three host functions appended after
+  `world_highlight` (`input_press`, `input_clear_press`, `input_add_look`), event 16
+  (`INPUT`) with the new `UmiInput`, and the `input` permission. Only the `UmiHost`
+  size assertion changed.
