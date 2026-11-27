@@ -21,3 +21,6 @@ crate-type = ["cdylib", "rlib"]
 # The only dependency a mod needs. Outside the Umicraft repository, change the
 # path to where `crates/umicraft-modapi` lives on your disk.
 umicraft-modapi = { path = "../../crates/umicraft-modapi" }
+
+[lints]
+workspace = true

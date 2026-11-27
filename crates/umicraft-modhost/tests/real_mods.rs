@@ -8,7 +8,7 @@
 //!
 //! The libraries are built once per test binary with `cargo build --offline`. The
 //! target directory is `CARGO_TARGET_DIR` when set, otherwise it is derived from the
-//! test executable's location (`<target>/<profile>/deps/<test>`): that stays correct
+//! test executable's location (its nearest `debug` ancestor): that stays correct
 //! for custom profiles and avoids parsing `cargo metadata` output.
 #![cfg(any(target_os = "linux", target_os = "windows", target_os = "macos"))]
 
@@ -75,16 +75,20 @@ fn built_libraries() -> &'static Path {
 }
 
 /// `<target>/debug`, where `cargo build` (dev profile) puts the cdylibs.
+///
+/// Without `CARGO_TARGET_DIR` it is the nearest `debug` ancestor of the test
+/// executable: that holds for the classic `<target>/debug/deps/<test>` layout and
+/// for the newer one (`<target>/debug/build/<crate>/<hash>/out/<test>`), where a fixed
+/// number of `ancestors()` steps lands in the wrong directory.
 fn profile_dir() -> PathBuf {
-    let target = std::env::var_os("CARGO_TARGET_DIR").map_or_else(
-        || {
-            let exe = std::env::current_exe().unwrap();
-            // <target>/<profile>/deps/<test> -> <target>
-            exe.ancestors().nth(3).unwrap().to_path_buf()
-        },
-        PathBuf::from,
-    );
-    target.join("debug")
+    if let Some(target) = std::env::var_os("CARGO_TARGET_DIR") {
+        return PathBuf::from(target).join("debug");
+    }
+    let exe = std::env::current_exe().unwrap();
+    exe.ancestors()
+        .find(|dir| dir.file_name().is_some_and(|name| name == "debug"))
+        .expect("the test executable lives under a `debug` directory")
+        .to_path_buf()
 }
 
 /// A scratch mods directory removed on drop.
