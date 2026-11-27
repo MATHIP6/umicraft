@@ -96,6 +96,17 @@ pub(super) fn spawn_spawner_particles(game: &mut Game) {
     }
 }
 
+/// The particles of the thrown objects that met a block this tick (snowball
+/// puffs, egg pieces, pearl sparks).
+pub(super) fn spawn_impact_particles(game: &mut Game) {
+    let filter = particle_filter(game);
+    for impact in game.entities.drain_impacts() {
+        if let Some(filter) = &filter {
+            game.particles.spawn_impact(&impact, filter);
+        }
+    }
+}
+
 /// Creates the particles the mobs give off by themselves this tick (blaze
 /// smoke, enderman sparks, potion swirls...) and the puffs of the bodies whose
 /// death fall ended. Run after the entities moved and before the particles

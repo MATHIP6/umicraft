@@ -40,6 +40,16 @@ const LIVING_HEALTH: u8 = 6;
 /// (MCP `EntityLivingBase.handleStatusUpdate`, `limbSwingAmount = 1.5`).
 const HURT_LIMB_AMOUNT: f32 = 1.5;
 
+/// A thrown object that met a block: what it was and where it was before the
+/// step that crossed the block (MCP `onImpact` reads `posX`, `posY`, `posZ`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ObjectImpact {
+    /// The kind of the object (snowball, egg, pearl...).
+    pub kind: EntityKind,
+    /// Where it was.
+    pub position: DVec3,
+}
+
 /// The storage and simulation of non-local entities on the game thread.
 #[derive(Debug, Clone, Default)]
 pub struct EntityStore {
@@ -48,6 +58,8 @@ pub struct EntityStore {
     deaths: Vec<MobBody>,
     /// Where an ender dragon beat its wings in the last tick, for the sound.
     wing_beats: Vec<DVec3>,
+    /// The thrown objects that met a block in the last tick.
+    impacts: Vec<ObjectImpact>,
     /// The local player, whose body is not stored here, and its feet: what
     /// a mob that watches it looks at.
     viewer: Option<(EntityId, DVec3)>,
@@ -61,6 +73,7 @@ impl EntityStore {
             entities: BTreeMap::new(),
             deaths: Vec::new(),
             wing_beats: Vec::new(),
+            impacts: Vec::new(),
             viewer: None,
         }
     }
@@ -886,6 +899,12 @@ impl EntityStore {
         self.deaths.drain(..)
     }
 
+    /// Takes the impacts of thrown objects since the last call, for their
+    /// particles (`ParticleEngine::spawn_impact`).
+    pub fn drain_impacts(&mut self) -> std::vec::Drain<'_, ObjectImpact> {
+        self.impacts.drain(..)
+    }
+
     /// Advances the objects the client simulates (dropped items, falling
     /// blocks, arrows, projectiles) and the guardians' swimming, which needs
     /// the water, by one tick, with the collisions of `world`.
@@ -903,6 +922,12 @@ impl EntityStore {
                 vanished.push(entity.id);
             }
             swim_guardian(entity, world);
+            if let Some(position) = entity.impact.take() {
+                self.impacts.push(ObjectImpact {
+                    kind: entity.kind,
+                    position,
+                });
+            }
         }
         for id in vanished {
             self.entities.remove(&id);

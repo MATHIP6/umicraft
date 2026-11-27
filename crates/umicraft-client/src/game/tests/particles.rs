@@ -124,3 +124,25 @@ fn another_status_of_a_rocket_launches_nothing() {
     game.particles.tick(world);
     assert_eq!(game.particles.len(), 0);
 }
+
+#[test]
+fn a_snowball_landing_on_the_floor_puffs() {
+    // Regression: the impact particles of thrown objects were never made.
+    let mut game = game_on_floor_with(BlockState::AIR);
+    game.entities.spawn_object(
+        EntityId(11),
+        61,
+        DVec3::new(2.5, 64.6, 2.5),
+        0.0,
+        0.0,
+        glam::Vec3::new(0.0, -1.0, 0.0),
+        0,
+    );
+    let world = game.world.as_ref().expect("a world");
+    game.entities.tick_objects(world);
+    spawn_impact_particles(&mut game);
+    assert_eq!(game.particles.len(), 8);
+    // The impact is reported once.
+    spawn_impact_particles(&mut game);
+    assert_eq!(game.particles.len(), 8);
+}

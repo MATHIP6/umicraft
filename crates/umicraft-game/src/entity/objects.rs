@@ -278,13 +278,20 @@ fn drift(entity: &mut EntityRecord) {
 }
 
 /// `EntityThrowable.onUpdate`: it moves, slows by 1 percent (20 percent in
-/// water) and drops by the gravity of its class. Hitting a block or an
-/// entity has no effect on the client (see [`drift`]).
+/// water) and drops by the gravity of its class. Meeting a block records the
+/// impact for the particles (`EntityRecord::impact`); nothing else happens on
+/// the client (see [`drift`]).
 fn thrown<S: BlockSource + ?Sized>(entity: &mut EntityRecord, world: &S, gravity: f32) {
     if entity.velocity == Vec3::ZERO {
         return;
     }
     let wet = object_liquid::handle_water(entity, world, Scan::Shrunk);
+    // `rayTraceBlocks` along this tick's motion: `onImpact` runs on the client
+    // too, where it only makes particles (the rest is `!isRemote`).
+    let motion = entity.velocity.as_dvec3();
+    if raycast(entity.position, motion, motion.length(), world).is_some() {
+        entity.impact = Some(entity.position);
+    }
     drift(entity);
     entity.velocity *= if wet { 0.8 } else { 0.99 };
     entity.velocity.y -= gravity;
@@ -407,6 +414,27 @@ mod tests {
         let at = arrow.position;
         step(&mut arrow, &Flat, &[]);
         assert_eq!(arrow.position, at);
+    }
+
+    /// Regression (P8): the client never noticed a snowball landing, so its
+    /// puffs (`EntitySnowball.onImpact`) were never drawn.
+    #[test]
+    fn a_thrown_object_records_where_it_meets_a_block() {
+        let mut ball = object(
+            EntityKind::Snowball,
+            DVec3::new(0.5, 64.5, 0.5),
+            Vec3::new(0.0, -1.0, 0.0),
+        );
+        step(&mut ball, &Flat, &[]);
+        assert_eq!(ball.impact, Some(DVec3::new(0.5, 64.5, 0.5)));
+        // In the open air nothing is recorded.
+        let mut high = object(
+            EntityKind::Snowball,
+            DVec3::new(0.5, 90.0, 0.5),
+            Vec3::new(0.0, 0.0, 1.0),
+        );
+        step(&mut high, &Flat, &[]);
+        assert_eq!(high.impact, None);
     }
 
     #[test]

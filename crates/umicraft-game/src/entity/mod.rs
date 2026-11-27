@@ -54,3 +54,4 @@ pub use profile::PlayerProfile;
 pub use record::EntityRecord;
 pub use snapshot::{EntityFrameData, EntityRenderSnapshot};
 pub use store::EntityStore;
+pub use store::ObjectImpact;

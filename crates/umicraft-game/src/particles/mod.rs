@@ -31,6 +31,7 @@ mod engine;
 mod explosion;
 mod filter;
 mod firework_show;
+mod impacts;
 mod kind;
 mod mobs;
 mod particle;

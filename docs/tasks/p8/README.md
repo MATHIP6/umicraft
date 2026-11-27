@@ -93,6 +93,16 @@ checks beyond what `Weather` answers.
   the far/near variant uses the viewer at launch, and the shell's random draws
   come from the engine generator rather than its own.
 
+## Thrown objects (fix, 2026-11-26)
+
+`EntityThrowable.onUpdate` ray-traces blocks on the client and calls
+`onImpact`, which spawns the particles before its `!isRemote` branch. The
+client entity now records the block it meets (`EntityRecord::impact`,
+`EntityStore::drain_impacts`) and `ParticleEngine::spawn_impact` makes 8
+snowball puffs, 8 egg pieces or 32 portal sparks. Before, the entity flew on
+through the block and nothing was drawn. Potions and bottles make theirs from
+the `Effect` packet.
+
 ## Not done
 
 - Comparison with vanilla on a screen (checklist in `docs/parity.md`).

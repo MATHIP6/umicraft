@@ -129,6 +129,10 @@ pub struct EntityRecord {
     pub health: Option<f32>,
     /// Remaining interpolation ticks for position/rotation smoothing (vanilla: 3).
     pub interpolation_steps: u8,
+    /// Where a thrown object met a block on its last tick (MCP
+    /// `EntityThrowable.onImpact`, which runs on the client too), until the
+    /// store reports it.
+    pub impact: Option<DVec3>,
 }
 
 /// An entity flying to the one that picked it up: it covers the distance in
@@ -307,6 +311,7 @@ impl EntityRecord {
             flags: EntityFlags::default(),
             health: None,
             interpolation_steps: 0,
+            impact: None,
         }
     }
 }
