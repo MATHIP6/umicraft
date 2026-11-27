@@ -45,6 +45,10 @@ pub struct SkyTextures {
     pub snow: Option<SkyImage>,
     /// `textures/particle/particles.png`, the 16 x 16 sheet of the particles.
     pub particles: Option<SkyImage>,
+    /// `textures/particle/footprint.png`, the picture of a footprint.
+    pub footprint: Option<SkyImage>,
+    /// `textures/entity/explosion.png`, the 16 frames of the large explosion.
+    pub explosion: Option<SkyImage>,
     /// `textures/misc/underwater.png`, the veil seen from below the water.
     pub underwater: Option<SkyImage>,
     /// `textures/misc/pumpkinblur.png`, the pumpkin on the head.

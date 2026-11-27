@@ -6,6 +6,8 @@
 use glam::DVec3;
 use umicraft_game::combat::HitStar;
 use umicraft_game::entity::{EntityFlags, EntityId, EntityItem, EntityKind, EntityStore};
+use umicraft_game::nbt::Nbt;
+use umicraft_game::particles::FireworkExplosion;
 use umicraft_protocol::packets::play::clientbound::{
     Animation, AttachEntity, CollectItem, DestroyEntities, EntityEquipment, EntityHeadLook,
     EntityLook, EntityLookMove, EntityMetadata, EntityRelativeMove, EntityStatus, EntityTeleport,
@@ -36,6 +38,10 @@ pub(in crate::game) const DROPPED_ITEM_WATCHER: u8 = 10;
 /// Data watcher of the stack inside an item frame (MCP `EntityItemFrame`, 8).
 pub(in crate::game) const FRAME_ITEM_WATCHER: u8 = 8;
 
+/// Data watcher of the rocket item of a firework (MCP `EntityFireworkRocket`,
+/// watcher 8), whose `Fireworks` NBT lists the explosions.
+pub(in crate::game) const ROCKET_ITEM_WATCHER: u8 = 8;
+
 /// Data watcher of the rotation step inside an item frame (MCP
 /// `EntityItemFrame`, 9); only the low three bits are meaningful.
 pub(in crate::game) const FRAME_ROTATION_WATCHER: u8 = 9;
@@ -58,6 +64,11 @@ pub(in crate::game) fn apply_item_metadata(
             }
             if let Some(rotation) = metadata.get_byte(FRAME_ROTATION_WATCHER) {
                 entities.set_frame_rotation(id, rotation);
+            }
+        }
+        Some(EntityKind::FireworkRocket) => {
+            if let Some(stack) = metadata.get_item_stack(ROCKET_ITEM_WATCHER) {
+                entities.set_item(id, EntityItem::from_stack(&stack));
             }
         }
         _ => {}
@@ -420,8 +431,39 @@ pub(super) fn apply_entity_status(game: &mut Game, packet: &EntityStatus) {
         }
     }
     spawn_status_particles(game, EntityId(packet.entity_id), packet.status);
+    if packet.status == ROCKET_BURST_STATUS {
+        launch_firework(game, EntityId(packet.entity_id));
+    }
     game.entities
         .status(EntityId(packet.entity_id), packet.status);
+}
+
+/// `Entity Status` of a firework rocket that explodes (MCP
+/// `EntityFireworkRocket.handleStatusUpdate`).
+const ROCKET_BURST_STATUS: i8 = 17;
+
+/// MCP `EntityFireworkRocket.handleStatusUpdate(17)`: leaves a shell at the
+/// rocket that throws the explosions of its `Fireworks` tag.
+fn launch_firework(game: &mut Game, id: EntityId) {
+    let (Some(viewer), Some(rocket)) = (
+        game.state.as_ref().map(|state| state.position()),
+        game.entities.entities().get(&id),
+    ) else {
+        return;
+    };
+    if rocket.kind != EntityKind::FireworkRocket {
+        return;
+    }
+    let explosions = rocket
+        .item
+        .as_ref()
+        .and_then(|item| item.nbt.as_deref())
+        .and_then(|bytes| Nbt::parse(bytes).ok())
+        .and_then(|root| root.get("Fireworks").map(FireworkExplosion::list_from_nbt))
+        .unwrap_or_default();
+    let (position, motion) = (rocket.position, rocket.velocity.as_dvec3());
+    game.particles
+        .launch_firework(position, motion, explosions, viewer);
 }
 
 /// `Animation`: swings, hurts and the stars of a critical hit.

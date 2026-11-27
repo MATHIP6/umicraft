@@ -277,6 +277,10 @@ pub(super) fn tick(
     if let Some(world) = game.world.as_ref() {
         game.particles.tick(world);
     }
+    let sounds = game.particles.drain_sounds();
+    if let Some(state) = game.state.as_mut().filter(|_| !sounds.is_empty()) {
+        state.queue_sound_cues(sounds);
+    }
     combat::tick_emitters(game);
     spawn_ambient_particles(game);
     game.server.tick();

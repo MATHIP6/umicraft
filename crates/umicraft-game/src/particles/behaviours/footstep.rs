@@ -18,10 +18,16 @@ use glam::DVec3;
 use umicraft_core::java_random::JavaRandom;
 
 use super::Behaviour;
-use crate::particles::particle::{Layer, Lighting, Particle};
+use crate::particles::particle::{Layer, Lighting, Particle, Texture};
 
 /// The life of a footprint in ticks, MCP `EntityFootStepFX.java:24`.
 const LIFE: u32 = 200;
+/// The picture of a footprint in the user's resources, MCP
+/// `EntityFootStepFX.java:12`; the renderer binds it for the whole quad.
+pub const FOOTPRINT_TEXTURE: &str = "textures/particle/footprint";
+/// Half the side of the quad in blocks, MCP `EntityFootStepFX.java:46`
+/// (`0.125F`), as the scale the quad's `0.1 * scale` half side comes from.
+pub(super) const RENDER_SCALE: f32 = 1.25;
 /// The peak opacity of a footprint, MCP `EntityFootStepFX.java:42`.
 const PEAK_ALPHA: f32 = 0.2;
 
@@ -35,6 +41,9 @@ pub(super) fn create(position: DVec3, rng: &mut JavaRandom) -> Particle {
     particle.max_age = LIFE;
     particle.layer = Layer::Lit;
     particle.lighting = Lighting::BlockBrightness;
+    particle.texture = Texture::Sprite {
+        name: FOOTPRINT_TEXTURE,
+    };
     particle.behaviour = Behaviour::Footstep;
     particle
 }
@@ -75,6 +84,14 @@ mod tests {
         assert_eq!(particle.max_age, 200);
         assert_eq!(particle.motion, DVec3::ZERO);
         assert_eq!(particle.lighting, Lighting::BlockBrightness);
+        assert_eq!(
+            particle.texture,
+            Texture::Sprite {
+                name: FOOTPRINT_TEXTURE
+            }
+        );
+        // The quad is 0.25 blocks wide: half side 0.1 * scale = 0.125.
+        assert!((0.1 * RENDER_SCALE - 0.125).abs() < 1e-6);
     }
 
     #[test]

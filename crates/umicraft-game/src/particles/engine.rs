@@ -6,8 +6,10 @@ use umicraft_core::java_random::JavaRandom;
 
 use super::behaviours::TickContext;
 use super::filter::ParticleFilter;
+use super::firework_show::FireworkShow;
 use super::particle::{Layer, Particle};
 use crate::shapes::BlockSource;
+use crate::sound::cue::SoundCue;
 
 /// The most particles one layer and pass keeps; adding one more drops the
 /// oldest (MCP `EffectRenderer.addEffect`, line 140).
@@ -24,6 +26,10 @@ pub struct ParticleEngine {
     /// other pass; kept to reuse its allocation.
     migrating: Vec<Particle>,
     spawned: Vec<Particle>,
+    /// The shells of the fireworks that are going off.
+    shows: Vec<FireworkShow>,
+    /// The sounds the shells made, until the client takes them.
+    sounds: Vec<SoundCue>,
     rng: JavaRandom,
     categories: ParticleFilter,
 }
@@ -41,6 +47,8 @@ impl ParticleEngine {
             buckets: Default::default(),
             migrating: Vec::new(),
             spawned: Vec::new(),
+            shows: Vec::new(),
+            sounds: Vec::new(),
             rng: JavaRandom::new(seed),
             categories: ParticleFilter::default(),
         }
@@ -79,6 +87,10 @@ impl ParticleEngine {
     /// Advances every particle by one tick, drops the dead ones and moves the
     /// ones whose opacity changed to the other pass.
     pub fn tick<S: BlockSource + ?Sized>(&mut self, world: &S) {
+        for show in &mut self.shows {
+            show.tick(&mut self.rng, &mut self.spawned, &mut self.sounds);
+        }
+        self.shows.retain(|show| !show.finished());
         for index in 0..BUCKETS {
             let bucket = &mut self.buckets[index];
             let mut context = TickContext {
@@ -108,6 +120,17 @@ impl ParticleEngine {
         }
     }
 
+    /// Queues a firework shell (see [`Self::launch_firework`]).
+    pub(super) fn add_show(&mut self, show: FireworkShow) {
+        self.shows.push(show);
+    }
+
+    /// Takes the sounds the engine made since the last call (the blast and
+    /// twinkle of fireworks), for the audio.
+    pub fn drain_sounds(&mut self) -> Vec<SoundCue> {
+        std::mem::take(&mut self.sounds)
+    }
+
     /// The particles of one layer and pass, oldest first.
     #[must_use]
     pub fn particles(&self, layer: Layer, translucent: bool) -> &[Particle] {
@@ -129,6 +152,7 @@ impl ParticleEngine {
     /// Drops every particle (a world change).
     pub fn clear(&mut self) {
         self.buckets.iter_mut().for_each(Vec::clear);
+        self.shows.clear();
     }
 }
 

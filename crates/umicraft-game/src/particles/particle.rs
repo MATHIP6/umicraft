@@ -112,6 +112,14 @@ pub enum Texture {
         /// Its damage value (the metadata of items with subtypes).
         damage: u16,
     },
+    /// A rectangle of `particles.png`, in `0..=1` of the sheet (the flash of a
+    /// firework spans several cells).
+    Region {
+        /// The top-left corner.
+        min: [f32; 2],
+        /// The bottom-right corner.
+        max: [f32; 2],
+    },
     /// A sprite named by its path (a picture beside `particles.png`).
     Sprite {
         /// The atlas path, e.g. `blocks/stone`.

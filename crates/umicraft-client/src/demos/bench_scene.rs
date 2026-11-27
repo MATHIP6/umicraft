@@ -602,6 +602,7 @@ fn measure(
                             color: [1.0, 0.85, 0.1, 1.0],
                             light: [15.0, 15.0],
                             flat: false,
+                            sheet: umicraft_render::ParticleSheet::Particles,
                         });
                     }
                     renderer.set_particles(&context.particles);
@@ -1129,6 +1130,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                     color: [1.0, 0.8, 0.2, 0.9],
                     light: [15.0, 15.0],
                     flat: false,
+                    sheet: umicraft_render::ParticleSheet::Particles,
                 });
             }
         }
@@ -1165,6 +1167,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                     color: [0.8, 0.9, 1.0, 0.8],
                     light: [15.0, 15.0],
                     flat: false,
+                    sheet: umicraft_render::ParticleSheet::Particles,
                 });
             }
         }
@@ -1234,6 +1237,7 @@ pub fn run(args: &Args) -> Result<(), ClientError> {
                     color: [0.2, 0.6, 1.0, 0.8],
                     light: [15.0, 15.0],
                     flat: false,
+                    sheet: umicraft_render::ParticleSheet::Particles,
                 });
             }
         }

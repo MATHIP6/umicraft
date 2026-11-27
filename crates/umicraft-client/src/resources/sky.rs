@@ -52,6 +52,11 @@ const SNOW: &str = "assets/minecraft/textures/environment/snow.png";
 /// Jar path of the particle sheet.
 const PARTICLES: &str = "assets/minecraft/textures/particle/particles.png";
 
+/// Jar path of the footprint picture.
+const FOOTPRINT: &str = "assets/minecraft/textures/particle/footprint.png";
+/// Jar path of the large explosion frames.
+const EXPLOSION: &str = "assets/minecraft/textures/entity/explosion.png";
+
 /// Jar path of the veil seen under water.
 const UNDERWATER: &str = "assets/minecraft/textures/misc/underwater.png";
 /// Jar path of the pumpkin worn on the head.
@@ -71,6 +76,8 @@ pub fn load_sky_textures(files: &GameFiles) -> SkyTextures {
         rain: read(RAIN),
         snow: read(SNOW),
         particles: read(PARTICLES),
+        footprint: read(FOOTPRINT),
+        explosion: read(EXPLOSION),
         underwater: read(UNDERWATER),
         pumpkin_blur: read(PUMPKIN_BLUR),
         vignette: read(VIGNETTE),

@@ -520,10 +520,9 @@ agreed threshold; the frame-time benchmark exists.
 
 ### P8 — Particles & visual effects
 
-**Status (2026-11-22): implemented, with gaps.** Not done yet: `iconcrack` and
-the item-sprite breaking particles, `ItemTake`, `MobAppearance`, and the
-firework `StarterFX` and overlay. Nothing is compared with vanilla on screen
-(`docs/tasks/p8/README.md`).
+**Status (2026-11-26): code complete.** Item-sprite pieces, the footprint and
+large explosion pictures, and the firework shell with its flash are done; what
+is left is the comparison with vanilla on a screen (`docs/tasks/p8/README.md`).
 
 **Features**
 - Particle engine (billboards, physics, lighting, the particle setting).

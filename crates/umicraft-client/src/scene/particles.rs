@@ -8,10 +8,13 @@
 //! and never reads the world (as for the weather, ADR-0031).
 
 use glam::DVec3;
+use umicraft_game::particles::behaviours::{
+    large_explode_quad, FOOTPRINT_TEXTURE, LARGE_EXPLODE_FRAME_SPAN, LARGE_EXPLODE_TEXTURE,
+};
 use umicraft_game::particles::{Behaviour, Layer, Particle, ParticleEngine, Texture};
 use umicraft_mesh::tint::{fixed_color, tint_class};
 use umicraft_mesh::ModelMeshContext;
-use umicraft_render::ParticleSprite;
+use umicraft_render::{ParticleSheet, ParticleSprite};
 use umicraft_world::{BlockPos, BlockState, World};
 
 /// Cells per side of `particles.png`.
@@ -146,7 +149,8 @@ pub fn sprite(
             let v0 = particle.jitter_v / 4.0;
             ([u0, v0], [u0 + 0.25, v0 + 0.25], Some(layer), [1.0; 3])
         }
-        Texture::Sprite { .. } => return None,
+        Texture::Region { min, max } => (min, max, None, [1.0; 3]),
+        Texture::Sprite { name } => return named_sprite(draw, name, partial_ticks, origin),
     };
     let (block, sky) = particle.light(
         draw.block_light.saturating_mul(16),
@@ -156,6 +160,7 @@ pub fn sprite(
     let [red, green, blue] = particle.color;
     let behaviour = particle.behaviour;
     Some(ParticleSprite {
+        sheet: ParticleSheet::Particles,
         // Subtracted in f64: an absolute f32 centre jitters far from the
         // world origin (F2-1b).
         center: (particle.interpolated_position(partial_ticks) - origin).as_vec3(),
@@ -170,8 +175,67 @@ pub fn sprite(
             behaviour.render_alpha(particle, partial_ticks),
         ],
         light: [f32::from(block) / 16.0, f32::from(sky) / 16.0],
-        flat: matches!(behaviour, Behaviour::Footstep),
+        flat: false,
     })
+}
+
+/// The quad of a particle that brings its own picture beside `particles.png`:
+/// the footprint (`EntityFootStepFX`) and the large explosion
+/// (`EntityLargeExplodeFX`). `None` for any other name, and for an explosion
+/// past its 16th frame.
+fn named_sprite(
+    draw: &ParticleDraw,
+    name: &str,
+    partial_ticks: f32,
+    origin: DVec3,
+) -> Option<ParticleSprite> {
+    let particle = &draw.particle;
+    let center = (particle.interpolated_position(partial_ticks) - origin).as_vec3();
+    let [red, green, blue] = particle.color;
+    match name {
+        FOOTPRINT_TEXTURE => {
+            let (block, sky) = particle.light(
+                draw.block_light.saturating_mul(16),
+                draw.sky_light.saturating_mul(16),
+                partial_ticks,
+            );
+            Some(ParticleSprite {
+                center,
+                half_size: 0.1 * particle.behaviour.render_scale(particle, partial_ticks),
+                uv_min: [0.0, 0.0],
+                uv_max: [1.0, 1.0],
+                atlas_layer: None,
+                sheet: ParticleSheet::Footprint,
+                color: [
+                    red,
+                    green,
+                    blue,
+                    particle.behaviour.render_alpha(particle, partial_ticks),
+                ],
+                light: [f32::from(block) / 16.0, f32::from(sky) / 16.0],
+                flat: true,
+            })
+        }
+        LARGE_EXPLODE_TEXTURE => {
+            let frame = large_explode_quad(particle, partial_ticks)?;
+            Some(ParticleSprite {
+                center,
+                half_size: frame.half_extent,
+                uv_min: [frame.u, frame.v],
+                uv_max: [
+                    frame.u + LARGE_EXPLODE_FRAME_SPAN,
+                    frame.v + LARGE_EXPLODE_FRAME_SPAN,
+                ],
+                atlas_layer: None,
+                sheet: ParticleSheet::Explosion,
+                color: [red, green, blue, 1.0],
+                // `lightmap(0, 240)`: no block light, full sky light.
+                light: [0.0, 15.0],
+                flat: false,
+            })
+        }
+        _ => None,
+    }
 }
 
 /// How far through its life the elder guardian apparition is among `draws`,
@@ -299,6 +363,77 @@ mod tests {
             sky_light: 15,
         };
         assert!(sprite(&draw, 0.0, DVec3::ZERO, &no_pictures()).is_none());
+    }
+
+    fn created(kind: ParticleKind) -> ParticleDraw {
+        let mut engine = ParticleEngine::new(1);
+        let particle = create(kind, DVec3::new(2.0, 64.0, 2.0), DVec3::ZERO, engine.rng())
+            .expect("the kind is ported");
+        ParticleDraw {
+            particle,
+            block_light: 0,
+            sky_light: 15,
+        }
+    }
+
+    #[test]
+    fn a_footprint_is_a_flat_quarter_block_with_the_whole_picture() {
+        let draw = created(ParticleKind::Footstep);
+        let sprite = sprite(&draw, 0.0, DVec3::ZERO, &no_pictures()).expect("a footprint");
+        assert_eq!(sprite.sheet, ParticleSheet::Footprint);
+        assert!(sprite.flat);
+        assert_eq!((sprite.uv_min, sprite.uv_max), ([0.0, 0.0], [1.0, 1.0]));
+        // MCP `EntityFootStepFX`: half a side of 0.125, peak opacity 0.2.
+        assert!((sprite.half_size - 0.125).abs() < 1e-6);
+        assert!((sprite.color[3] - 0.2).abs() < 1e-6);
+    }
+
+    #[test]
+    fn the_large_explosion_walks_its_sheet_and_ends_after_the_last_frame() {
+        let mut draw = created(ParticleKind::LargeExplode);
+        draw.particle.max_age = 8;
+        let first = sprite(&draw, 0.0, DVec3::ZERO, &no_pictures()).expect("frame 0");
+        assert_eq!(first.sheet, ParticleSheet::Explosion);
+        assert_eq!(first.uv_min, [0.0, 0.0]);
+        assert_eq!(first.light, [0.0, 15.0]);
+        // Age 4 of 8: frame 7 is column 3 of row 1.
+        draw.particle.age = 4;
+        let middle = sprite(&draw, 0.0, DVec3::ZERO, &no_pictures()).expect("frame 7");
+        assert_eq!(middle.uv_min, [0.75, 0.25]);
+        assert!((middle.uv_max[0] - 0.99975).abs() < 1e-6);
+        // Past the 16th frame nothing is drawn.
+        draw.particle.age = 9;
+        assert!(sprite(&draw, 0.0, DVec3::ZERO, &no_pictures()).is_none());
+    }
+
+    #[test]
+    fn the_firework_flash_is_a_four_cell_region_that_swells_with_its_age() {
+        let mut engine = ParticleEngine::new(1);
+        engine.launch_firework(
+            DVec3::new(0.5, 90.0, 0.5),
+            DVec3::ZERO,
+            vec![umicraft_game::particles::FireworkExplosion {
+                shape: 4,
+                trail: false,
+                flicker: false,
+                colors: vec![0xFF0000],
+                fades: Vec::new(),
+            }],
+            DVec3::ZERO,
+        );
+        engine.tick(&umicraft_world::World::new(0));
+        let draws = collect(&engine, None);
+        let flash = draws
+            .iter()
+            .find(|draw| draw.particle.behaviour == Behaviour::FireworkFlash)
+            .expect("the shell threw a flash");
+        // Age 0 at partial 2: sin((0 + 2 - 1) * pi / 4) * 7.1 blocks.
+        let quad = sprite(flash, 2.0, DVec3::ZERO, &no_pictures()).expect("a region");
+        assert_eq!(quad.uv_min, [0.25, 0.125]);
+        assert_eq!(quad.uv_max, [0.5, 0.375]);
+        assert!((quad.half_size - 7.1 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-4);
+        assert_eq!(quad.color[..3], [1.0, 0.0, 0.0]);
+        assert!(quad.atlas_layer.is_none() && !quad.flat);
     }
 
     #[test]

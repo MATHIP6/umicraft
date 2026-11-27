@@ -86,7 +86,7 @@ pub use nametag::Nametag;
 pub use outline::{edge_vertices, DebugLine, OutlineBox, MAX_DEBUG_LINES, OUTLINE_GROWTH};
 pub use overlay::{Overlay, OverlayVertex};
 pub use overlays::{Portal, ScreenOverlays, Underwater};
-pub use particles::{ParticleSprite, MAX_SPRITES};
+pub use particles::{ParticleSheet, ParticleSprite, MAX_SPRITES};
 pub use renderer::{Image, Renderer};
 pub use sky::{SkyImage, SkyState, SkyTextures};
 pub use texture::{fallback_texture_data, LAYER_BYTES, TEXTURE_SIZE};

@@ -1,6 +1,6 @@
 # P8 — Particles & visual effects: plan and architecture
 
-Status: **P8 is implemented except the pieces listed under "Not done"**, and nothing has been compared with vanilla on a screen yet (unit tests, ignored GPU tests and a headless build only). Decision:
+Status: **P8 is code complete (2026-11-26)**; what is left is the comparison with vanilla on a screen (unit tests, ignored GPU tests and a headless build only). Decision:
 `docs/decisions/0035-p8-particles.md`. Roadmap entry: `ROADMAP.md` §P8.
 
 Rule (as in P5 to P7): a step adds a module, existing big files only get
@@ -23,8 +23,8 @@ umicraft-client/src/particle_view.rs  setting, packets, spawn sources, Frame
 | P8-0 | `ParticleKind`, `Particle`, `ParticleEngine`, `Behaviour`, `create` | done |
 | P8-a | `ParticleRenderer`: billboards, flat footprints, `particles.png` sheet or block atlas layer, tint x light x fog | done |
 | P8-b | water, drips, explosion and large explosion (simulation) | simulation done |
-| P8-b2 | block break and hit fragments, `blockcrack`/`blockdust`, `Effect` 2001 | done (blocks); `iconcrack`, sprint and rain splash remain (iconcrack) |
-| P8-e | `HugeExplosion` emitter, fireworks, `MobAppearance`, `ItemTake`, `Snowball`/`Slime` (breaking), full `Effect` packet | simulation done for `HugeExplosion`, `explode`, `Effect` 2000/2002-2005 and `FireworksSpark`; `FireworksSpark` `StarterFX`/overlay, `ItemTake`, `MobAppearance`, breaking (item sprites) and `iconcrack` remain; wired: `Effect` and `Explosion` packets |
+| P8-b2 | block break and hit fragments, `blockcrack`/`blockdust`, `Effect` 2001, `iconcrack` | done |
+| P8-e | `HugeExplosion` emitter, fireworks, `MobAppearance`, `ItemTake`, `Snowball`/`Slime` (breaking), full `Effect` packet | done: the shell and flash of a firework (`firework_show`), item-sprite pieces, the large explosion and the footprint with their own pictures; `MobAppearance` is the entity of `scene/entity/appearance.rs`; `ItemTake` is the P5 pickup flight |
 | P8-c | flame, smoke, lava, portal, redstone, footstep (drips: with P8-b water) | simulation done |
 | P8-c2 | ambient block particles (`randomDisplayTick`), 1000-block sampling, rain splashes, sprint dust (`particles::ambient`) | done, wired in `particle_ambient` |
 | P8-d | spells and potions, crit, hearts, notes, enchantment | simulation done |
@@ -49,8 +49,6 @@ checks beyond what `Weather` answers.
   fragments (`blockcrack`, `blockdust`) use white like `getRenderColor` would for
   untinted blocks.
 - Opaque particles do not write depth (see `umicraft_render::particles`).
-- Item sprites (`iconcrack`), `footprint.png` and the large explosion sheet are
-  not drawn; their particles are simulated but skipped by `particle_view`.
 - `Effect` 2002 (potion splash) passes no potion colour yet (the item tables of
   `ItemPotion.getColorFromDamage` are not ported), so its spell sparks are black.
 - The ambient rain splashes assume fancy graphics (the video options live on
@@ -75,14 +73,26 @@ checks beyond what `Weather` answers.
   terrain has none, so they are skipped there. Sleeping and `hideGUI` (F1, not
   implemented) do not hide the overlays.
 
+## Own pictures and fireworks (P8 close-out)
+
+- `footprint.png` and `entity/explosion.png` are two more textures of the
+  particle pass (`ParticleSheet`, bind group 1 bindings 2 and 3, negative vertex
+  layers -2 and -3). The client resolves `Texture::Sprite` names in
+  `scene::particles::named_sprite`: the footprint is a flat quad (half side
+  0.125, opacity from `EntityFootStepFX`), the large explosion walks the 4 x 4
+  frames of `large_explode_quad` with `lightmap(0, 240)`. Missing pictures fall
+  back to original generated ones (spec section 3).
+- `particles::firework_show` ports `EntityFirework.StarterFX`: the engine keeps
+  the shells (`launch_firework`), every second tick a shell throws the sparks of
+  the next explosion (ball, large ball, star, creeper, burst) and a flash
+  (`Behaviour::FireworkFlash`, `Texture::Region` of `particles.png`). The client
+  launches one on `Entity Status` 17 of a rocket, reading `Fireworks` from the
+  rocket item (watcher 8, now stored on the entity). The blast and twinkle
+  sounds are `SoundCue`s drained by the client every tick.
+- Deviations: the sounds have no `distanceDelay` (the cue has no delay field),
+  the far/near variant uses the viewer at launch, and the shell's random draws
+  come from the engine generator rather than its own.
+
 ## Not done
 
-- Item sprites: `iconcrack`, `Snowball`, `Slime` and the 8 flakes of `Effect`
-  2002/2003 (needs an item variant of `Texture` and the item layers).
-- `footprint.png` and the large-explosion sheet (their particles are
-  simulated but not drawn).
-- `ItemTake`, `MobAppearance`, the firework shell and flash.
-- Potion swirls from entity metadata and critical-hit stars from `Animation`
-  packets (the particles exist; no code reads the metadata or animation to
-  spawn them yet).
 - Comparison with vanilla on a screen (checklist in `docs/parity.md`).

@@ -60,8 +60,15 @@ impl Renderer {
         self.clouds
             .set_texture(&self.device, &self.queue, textures.clouds.as_ref());
         self.set_weather_textures(textures);
-        self.particles
-            .set_sheet(&self.device, &self.queue, textures.particles.as_ref());
+        self.particles.set_sheets(
+            &self.device,
+            &self.queue,
+            [
+                textures.particles.as_ref(),
+                textures.footprint.as_ref(),
+                textures.explosion.as_ref(),
+            ],
+        );
         self.screen.set_pictures(
             &self.device,
             &self.queue,

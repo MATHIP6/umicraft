@@ -28,6 +28,7 @@ mod portal;
 mod redstone;
 mod smoke;
 
+use super::firework_show;
 use super::kind::ParticleKind;
 use super::particle::Particle;
 use crate::shapes::BlockSource;
@@ -47,6 +48,7 @@ pub use explode::{
     large_explode_quad, LargeExplodeQuad, LARGE_EXPLODE_FRAME_SPAN, LARGE_EXPLODE_TEXTURE,
 };
 pub use firework::{spark as firework_spark, SparkStyle};
+pub use footstep::FOOTPRINT_TEXTURE;
 
 /// What a behaviour may read and do during a tick.
 pub struct TickContext<'a, S: BlockSource + ?Sized> {
@@ -153,6 +155,9 @@ pub enum Behaviour {
     /// `MobAppearance`: the elder guardian curse, a 30-tick clock the client
     /// draws a guardian model from; it makes no quad of its own.
     MobAppearance,
+    /// `EntityFirework.OverlayFX`: the flash of a burst (see
+    /// [`crate::particles::FireworkExplosion`]); it ages like a plain particle.
+    FireworkFlash,
 }
 
 impl Behaviour {
@@ -164,7 +169,7 @@ impl Behaviour {
         context: &mut TickContext<'_, S>,
     ) {
         match self {
-            Self::Plain | Self::MobAppearance => particle.tick(context.world),
+            Self::Plain | Self::MobAppearance | Self::FireworkFlash => particle.tick(context.world),
             Self::Flame { .. } => flame::update(particle, context),
             Self::Smoke { .. } => smoke::update(particle, context),
             Self::Lava { .. } => lava::update(particle, context),
@@ -213,6 +218,8 @@ impl Behaviour {
             Self::Crit | Self::Heart | Self::Note | Self::Cloud | Self::SnowShovel => {
                 particle.scale * common::growth(particle, partial_ticks)
             }
+            Self::Footstep => footstep::RENDER_SCALE,
+            Self::FireworkFlash => 10.0 * firework_show::flash_half_extent(particle, partial_ticks),
             Self::HugeExplosion { .. } | Self::MobAppearance => 0.0,
             Self::Spark(style) => firework::render_scale(style, particle),
             _ => particle.scale,
@@ -225,6 +232,7 @@ impl Behaviour {
     pub fn render_alpha(self, particle: &Particle, partial_ticks: f32) -> f32 {
         match self {
             Self::Footstep => footstep::alpha(particle, partial_ticks),
+            Self::FireworkFlash => firework_show::flash_alpha(particle, partial_ticks),
             Self::HugeExplosion { .. } | Self::MobAppearance => 0.0,
             _ => particle.alpha,
         }

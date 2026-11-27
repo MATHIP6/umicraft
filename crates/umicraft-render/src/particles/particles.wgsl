@@ -2,7 +2,8 @@
 //
 // Particle pass (P8-a): billboards lit and fogged like the terrain. The
 // shader is original. Group 0 is the terrain's (camera, block atlas array,
-// sampler); group 1 holds the `particles.png` sheet. The fog falloff comes
+// sampler); group 1 holds the `particles.png` sheet, the footprint and the
+// large explosion pictures. The fog falloff comes
 // from fog.wgsl, concatenated in front.
 
 struct Camera {
@@ -29,11 +30,14 @@ struct Camera {
 @group(0) @binding(2) var block_sampler: sampler;
 @group(1) @binding(0) var sheet_texture: texture_2d<f32>;
 @group(1) @binding(1) var sheet_sampler: sampler;
+@group(1) @binding(2) var footprint_texture: texture_2d<f32>;
+@group(1) @binding(3) var explosion_texture: texture_2d<f32>;
 
 struct VertexIn {
     @location(0) position: vec3<f32>,
     @location(1) uv: vec2<f32>,
-    // Block atlas layer, or a negative value for the sheet.
+    // Block atlas layer, or a negative value for a sheet: -1 particles.png,
+    // -2 the footprint, -3 the large explosion.
     @location(2) layer: f32,
     @location(3) color: vec4<f32>,
     // Block and sky light, each 0..=15.
@@ -65,7 +69,14 @@ fn vs_main(in: VertexIn) -> VertexOut {
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
     // Both samples are taken outside any branch: the derivatives need
     // uniform control flow.
-    let sheet = textureSample(sheet_texture, sheet_sampler, in.uv);
+    var sheet = textureSample(sheet_texture, sheet_sampler, in.uv);
+    let footprint = textureSample(footprint_texture, sheet_sampler, in.uv);
+    let explosion = textureSample(explosion_texture, sheet_sampler, in.uv);
+    if (in.layer < -2.5) {
+        sheet = explosion;
+    } else if (in.layer < -1.5) {
+        sheet = footprint;
+    }
     let layer = u32(max(in.layer, 0.0));
     let atlas = textureSample(block_textures, block_sampler, in.uv, layer);
     var texel = sheet;

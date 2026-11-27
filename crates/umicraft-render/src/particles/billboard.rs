@@ -13,7 +13,8 @@ pub(super) struct ParticleVertex {
     pub position: [f32; 3],
     /// Texture coordinate inside the sheet or the atlas layer.
     pub uv: [f32; 2],
-    /// Layer of the block atlas, or `-1.0` for the `particles.png` sheet.
+    /// Layer of the block atlas, or a negative [`ParticleSheet::code`] for one
+    /// of the sheets.
     pub layer: f32,
     /// Tint and opacity (`color(r, g, b, a)` of the reference).
     pub color: [f32; 4],
@@ -28,7 +29,33 @@ impl ParticleVertex {
     ];
 }
 
+/// The picture a sprite samples when it is not a layer of the block atlas.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ParticleSheet {
+    /// `textures/particle/particles.png`, the 16 x 16 grid of cells.
+    #[default]
+    Particles,
+    /// `textures/particle/footprint.png`, the whole picture of a footprint
+    /// (`EntityFootStepFX`).
+    Footprint,
+    /// `textures/entity/explosion.png`, the 4 x 4 frames of the large
+    /// explosion (`EntityLargeExplodeFX`).
+    Explosion,
+}
+
+impl ParticleSheet {
+    /// The negative vertex layer that selects the sheet in the shader.
+    fn code(self) -> f32 {
+        match self {
+            Self::Particles => -1.0,
+            Self::Footprint => -2.0,
+            Self::Explosion => -3.0,
+        }
+    }
+}
+
 /// The layer value that selects the `particles.png` sheet.
+#[cfg(test)]
 pub(super) const SHEET_LAYER: f32 = -1.0;
 
 /// A particle ready to draw, resolved by the client from the simulation.
@@ -48,8 +75,10 @@ pub struct ParticleSprite {
     pub uv_min: [f32; 2],
     /// Bottom-right corner of the picture.
     pub uv_max: [f32; 2],
-    /// Layer of the block atlas, or `None` for the `particles.png` sheet.
+    /// Layer of the block atlas, or `None` for the `sheet`.
     pub atlas_layer: Option<u32>,
+    /// The sheet sampled when `atlas_layer` is `None`.
+    pub sheet: ParticleSheet,
     /// Red, green, blue and alpha factors.
     pub color: [f32; 4],
     /// Block and sky light, each `0.0..=15.0`.
@@ -76,7 +105,9 @@ pub(super) fn quad(sprite: &ParticleSprite, right: Vec3, up: Vec3) -> [ParticleV
     } else {
         (right, up)
     };
-    let layer = sprite.atlas_layer.map_or(SHEET_LAYER, |layer| layer as f32);
+    let layer = sprite
+        .atlas_layer
+        .map_or(sprite.sheet.code(), |layer| layer as f32);
     let [u0, v0] = sprite.uv_min;
     let [u1, v1] = sprite.uv_max;
     let half = sprite.half_size;
@@ -115,6 +146,7 @@ mod tests {
             uv_min: [0.25, 0.5],
             uv_max: [0.5, 0.75],
             atlas_layer: None,
+            sheet: ParticleSheet::Particles,
             color: [1.0; 4],
             light: [15.0, 0.0],
             flat: false,
@@ -145,6 +177,21 @@ mod tests {
         assert_eq!(vertices[0].uv, [0.25, 0.75]);
         assert_eq!(vertices[2].uv, [0.5, 0.5]);
         assert_eq!(vertices[0].layer, SHEET_LAYER);
+    }
+
+    #[test]
+    fn each_sheet_has_its_own_negative_layer_code() {
+        let mut other = sprite();
+        let mut codes = Vec::new();
+        for sheet in [
+            ParticleSheet::Particles,
+            ParticleSheet::Footprint,
+            ParticleSheet::Explosion,
+        ] {
+            other.sheet = sheet;
+            codes.push(quad(&other, Vec3::X, Vec3::Y)[0].layer);
+        }
+        assert_eq!(codes, [-1.0, -2.0, -3.0]);
     }
 
     #[test]

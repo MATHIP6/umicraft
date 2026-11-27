@@ -5,7 +5,7 @@
 //! | Module | Owns |
 //! |---|---|
 //! | `billboard` | [`ParticleSprite`], the screen axes and the quads |
-//! | `texture` | the original stand-in for `particles.png` |
+//! | `texture` | the original stand-ins for `particles.png`, the footprint and the large explosion |
 //!
 //! # Draw order
 //!
@@ -28,8 +28,8 @@ use bytemuck::cast_slice;
 
 use crate::sky::{self, SkyImage};
 use crate::Camera;
-pub use billboard::ParticleSprite;
 use billboard::{quad, screen_axes, ParticleVertex};
+pub use billboard::{ParticleSheet, ParticleSprite};
 
 /// The most particles a frame draws: the 4000 of each of the 8 buckets of the
 /// engine.
@@ -43,6 +43,9 @@ pub(crate) struct ParticleRenderer {
     sheet_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     sheet: wgpu::BindGroup,
+    /// The pictures the sheet group holds, kept to rebuild it when one of
+    /// them is replaced.
+    pictures: SheetImages,
     vertex_buffer: wgpu::Buffer,
     vertices: Vec<ParticleVertex>,
 }
@@ -82,8 +85,9 @@ impl ParticleRenderer {
                 queue,
                 &sheet_layout,
                 &sampler,
-                &texture::fallback_sheet(),
+                &SheetImages::default(),
             ),
+            pictures: SheetImages::default(),
             sheet_layout,
             sampler,
             vertex_buffer,
@@ -91,19 +95,22 @@ impl ParticleRenderer {
         }
     }
 
-    /// Replaces `particles.png`; `None` or a malformed image restores the
-    /// original fallback.
-    pub(crate) fn set_sheet(
+    /// Replaces `particles.png`, the footprint and the large explosion
+    /// pictures; a `None` or malformed one restores its original fallback.
+    pub(crate) fn set_sheets(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        image: Option<&SkyImage>,
+        images: [Option<&SkyImage>; 3],
     ) {
-        let image = match image {
-            Some(image) if image.is_valid() => image.clone(),
-            _ => texture::fallback_sheet(),
-        };
-        self.sheet = sheet(device, queue, &self.sheet_layout, &self.sampler, &image);
+        self.pictures = SheetImages::from_options(images);
+        self.sheet = sheet(
+            device,
+            queue,
+            &self.sheet_layout,
+            &self.sampler,
+            &self.pictures,
+        );
     }
 
     /// Builds and uploads the quads of the frame; anything past
@@ -147,27 +154,58 @@ const SHADER: &str = concat!(
     include_str!("particles.wgsl")
 );
 
-/// The bind layout of the sheet: texture and sampler.
+/// The three pictures of the sheet group, in the shader's binding order
+/// (`particles.png`, footprint, large explosion).
+#[derive(Clone)]
+struct SheetImages([SkyImage; 3]);
+
+impl Default for SheetImages {
+    fn default() -> Self {
+        Self::from_options([None; 3])
+    }
+}
+
+impl SheetImages {
+    /// Each valid image, or the original fallback of its slot.
+    fn from_options(images: [Option<&SkyImage>; 3]) -> Self {
+        let fallbacks = [
+            texture::fallback_sheet as fn() -> SkyImage,
+            texture::fallback_footprint,
+            texture::fallback_explosion,
+        ];
+        let [particles, footprint, explosion] = std::array::from_fn(|slot| match images[slot] {
+            Some(image) if image.is_valid() => image.clone(),
+            _ => fallbacks[slot](),
+        });
+        Self([particles, footprint, explosion])
+    }
+}
+
+/// The bind layout of the sheet group: three textures and one sampler (the
+/// sampler is binding 1, the pictures are 0, 2 and 3).
 fn sheet_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    let texture = |binding| wgpu::BindGroupLayoutEntry {
+        binding,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2,
+            multisampled: false,
+        },
+        count: None,
+    };
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("particle sheet layout"),
         entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
+            texture(0),
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
             },
+            texture(2),
+            texture(3),
         ],
     })
 }
@@ -177,20 +215,31 @@ fn sheet(
     queue: &wgpu::Queue,
     layout: &wgpu::BindGroupLayout,
     sampler: &wgpu::Sampler,
-    image: &SkyImage,
+    images: &SheetImages,
 ) -> wgpu::BindGroup {
-    let view = sky::upload(device, queue, image);
+    let [particles, footprint, explosion] = images
+        .0
+        .each_ref()
+        .map(|image| sky::upload(device, queue, image));
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("particle sheet"),
         layout,
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::TextureView(&view),
+                resource: wgpu::BindingResource::TextureView(&particles),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: wgpu::BindingResource::Sampler(sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::TextureView(&footprint),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: wgpu::BindingResource::TextureView(&explosion),
             },
         ],
     })

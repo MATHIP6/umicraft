@@ -23,6 +23,7 @@ fn sprite(color: [f32; 4]) -> ParticleSprite {
         color,
         light: [15.0, 15.0],
         flat: false,
+        sheet: umicraft_render::ParticleSheet::Particles,
     }
 }
 
