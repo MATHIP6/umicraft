@@ -52,14 +52,11 @@ rest has not been seen on a screen.
 
 ### What remains
 
-**P7h (not started)**
+**P7h (code done 2026-11-26; the screenshot set is open)**
 
-- Frame-time benchmark (criterion), numbers in `docs/perf-log.md` (the M6
-  criterion was never measured).
-- Check the animated textures against vanilla (water, lava, fire, portal;
-  `texture_animator`, ADR-0023), including the clock and compass.
-- Backlog item of the roadmap: liquid corners on a diagonal chunk boundary.
-- Final `docs/parity.md` rows and the reference screenshot set (village, Nether,
+Done: the frame-time benchmark is the F2 scene (`docs/perf-log.md`); the animation timeline is tested tick by tick against a port of the reference; the liquid corner on a diagonal chunk boundary is fixed (`World::dirty_for_edges` marks the diagonal chunk of a corner block); the stale `official_1_8_8_counts` constant is refreshed. Still open:
+
+- The reference screenshot set (village, Nether,
   End, rain, night, redstone, fences, panes and walls, chests and signs) compared
   with the agreed threshold. The references stay outside the repository (spec §3).
 
@@ -137,7 +134,7 @@ documents are baked).
 | P7f | weather: rain, snow, darkening, lightning flash (`umicraft-render/src/weather/`) | done in code, not checked in game |
 | P7g | world border (`umicraft-render/src/border/`), fog parity (`umicraft-render/src/fog/`, `fog.wgsl`) | done in code, checked offscreen, not in game |
 | P7-colour | colour arithmetic on the stored values (ADR-0033): grass, leaves, GUI block icons | done, checked by the owner against vanilla |
-| P7h | animated texture check, frame-time benchmark, parity rows | not started |
+| P7h | animated texture check, frame-time benchmark, parity rows | code done 2026-11-26; the reference screenshot set is the owner's |
 
 ## Sky (P7e)
 

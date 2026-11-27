@@ -421,6 +421,20 @@ impl World {
                 &mut dirty,
             );
         }
+        // A corner block is read by the diagonal chunk too: its mesher takes a
+        // 3x3 snapshot, and a liquid corner height or an ambient-occlusion
+        // sample averages the columns that touch the corner.
+        for (x_edge, dx) in [(west, -1), (east, 1)] {
+            for (z_edge, dz) in [(north, -1), (south, 1)] {
+                if x_edge && z_edge {
+                    push_if_loaded(
+                        &self.chunks,
+                        ChunkPos::new(chunk.x + dx, chunk.z + dz),
+                        &mut dirty,
+                    );
+                }
+            }
+        }
         dirty.sort_unstable();
         dirty.dedup();
         dirty
@@ -482,6 +496,30 @@ mod tests {
             .apply_chunk(pos, payload(&flat_payload(0x20)))
             .unwrap();
         world
+    }
+
+    /// Regression (P7h): a liquid corner on a diagonal chunk boundary stayed
+    /// stale because only the four edge neighbours were marked dirty.
+    #[test]
+    fn a_corner_block_dirties_the_diagonal_chunk() {
+        let mut world = World::new(0);
+        for (x, z) in [(0, 0), (-1, 0), (0, -1), (-1, -1), (1, 1)] {
+            world
+                .apply_chunk(ChunkPos::new(x, z), payload(&flat_payload(0x20)))
+                .unwrap();
+        }
+        let state = BlockState::new(1, 0);
+        let dirty = world.apply_block_change(BlockPos::new(0, 3, 0), state);
+        for expected in [(0, 0), (-1, 0), (0, -1), (-1, -1)] {
+            assert!(
+                dirty.contains(&ChunkPos::new(expected.0, expected.1)),
+                "{expected:?}"
+            );
+        }
+        assert!(!dirty.contains(&ChunkPos::new(1, 1)));
+        // An edge block that is not a corner leaves the diagonals alone.
+        let dirty = world.apply_block_change(BlockPos::new(0, 3, 5), BlockState::new(3, 0));
+        assert!(!dirty.contains(&ChunkPos::new(-1, -1)));
     }
 
     #[test]

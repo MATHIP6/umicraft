@@ -17,14 +17,6 @@ picked up, and delete it when it is done.
   skips every key outside `blocks/`.
 - **Milestone:** P3 (item models).
 
-### Liquid corners at a diagonal chunk boundary
-- **Problem:** a liquid corner height averages the four columns that share the
-  corner (`fluid_height` in `crates/umicraft-mesh/src/fluid.rs`). A level change
-  re-meshes the chunks that share a face with the block only, so a corner on a
-  diagonal chunk boundary can stay stale until that chunk re-meshes.
-- **Where:** `dirty_for_block` / `dirty_for_edges` in
-  `crates/umicraft-world/src/world.rs`.
-
 ### UI vertex colours are not linearised for the sRGB target
 - **Problem:** `gui_overlay.wgsl` returns `texel * vertex_color` and the render
   target is sRGB (`Rgba8UnormSrgb` headless, the adapter default on a window),

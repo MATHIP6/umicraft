@@ -49,9 +49,9 @@ First assessed on `main` at `27838a4` (details in `docs/roadmap-review.md`
 | M2 World data & first pixels | Done | — |
 | M3 Movement & interaction | Vanilla traffic (P1), hold-to-break, respawn, knockback, effects and gamemodes (P2) are code complete; the live survival session is open | P1, P2 |
 | M4 Interface foundation | Done | — |
-| M5 Model system & atlas | Partial — neighbour-dependent states and block entities done in P7 (not all checked in game); animated textures to verify (P7h) | P7 |
-| M6 Lighting, sky, fog, transparency | Partial — vanilla sky, clouds, weather, fog and border done in P7 (not all checked in game); frame time measured by the F2 benchmark scene (`docs/perf-log.md`), the P7 screenshot set is open (P7h) | P7 |
-| M7 First-run assets & resource packs | **Done** (confirmed by the owner); language files used since P9/P10, animated textures to verify (P7h) | P7 |
+| M5 Model system & atlas | Partial — neighbour-dependent states and block entities done in P7 (not all checked in game); animated texture timeline checked (P7h) | P7 |
+| M6 Lighting, sky, fog, transparency | Partial — vanilla sky, clouds, weather, fog and border done in P7 (not all checked in game); frame time measured by the F2 benchmark scene (`docs/perf-log.md`), the P7 screenshot set is open (owner) | P7 |
+| M7 First-run assets & resource packs | **Done** (confirmed by the owner); language files used since P9/P10, animated texture timeline checked in P7h | P7 |
 | M8 Entities | P5 code complete (2026-11-24); owner comparison with vanilla open | P5 |
 | M9 Inventory & containers | **Done** in P3 and P4 (validated by the owner on 2026-11-22) | — |
 | M10 Chat, scoreboard, settings, keybinds | P9 implemented except italic shear, tab-list heads, heart flash in the tab list, achievement hover, Tab-completion replace and chat-scroll keep; not compared with vanilla on screen yet. Settings, keybinds and every options page done in P10 (code complete, owner validation open; Smooth Camera, Super Secret Settings, Force Unicode Font and pack icons are out) | P9, P10 |
@@ -483,9 +483,8 @@ session on a public 1.8 network (after P12) raises no anti-cheat flag.
 
 ### P7 — World rendering (finishes M5 and M6)
 
-**Status (2026-11-22):** P7-0 to P7g are done (partly checked in game). P7h,
-not started, is still open: the animated texture check, the parity rows and the
-reference screenshot set. The frame-time benchmark now exists as the F2
+**Status (2026-11-22):** P7-0 to P7g are done (partly checked in game). P7h is
+code complete (2026-11-26: animation timeline checked against the reference, diagonal liquid corner fixed); the reference screenshot set is the owner's. The frame-time benchmark now exists as the F2
 benchmark scene (`docs/perf-log.md`). The detail is in `docs/tasks/p7/README.md`.
 
 **Features**

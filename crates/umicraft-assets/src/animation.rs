@@ -401,4 +401,125 @@ mod tests {
         // Tick 4 changes the frame outright.
         assert_eq!(animation.tick(), Some(&[0, 0, 100, 10][..]));
     }
+    /// A literal port of `TextureAtlasSprite.updateAnimation` and
+    /// `updateAnimationInterpolated` (1.8.8): `frame_counter` indexes the
+    /// timeline, `tick_counter` counts the ticks the entry has been shown.
+    struct Vanilla {
+        /// `(index, time)` of each listed frame; empty = every frame in order.
+        listed: Vec<(usize, u32)>,
+        frame_time: u32,
+        interpolate: bool,
+        textures: Vec<[u8; 4]>,
+        frame_counter: usize,
+        tick_counter: u32,
+    }
+
+    impl Vanilla {
+        fn index(&self, counter: usize) -> usize {
+            self.listed.get(counter).map_or(counter, |entry| entry.0)
+        }
+
+        fn time(&self, counter: usize) -> u32 {
+            self.listed
+                .get(counter)
+                .map_or(self.frame_time, |entry| entry.1)
+        }
+
+        fn count(&self) -> usize {
+            if self.listed.is_empty() {
+                self.textures.len()
+            } else {
+                self.listed.len()
+            }
+        }
+
+        /// The pixel the sprite uploads this tick, if it uploads one.
+        fn update(&mut self) -> Option<[u8; 4]> {
+            self.tick_counter += 1;
+            if self.tick_counter >= self.time(self.frame_counter) {
+                let before = self.index(self.frame_counter);
+                self.frame_counter = (self.frame_counter + 1) % self.count();
+                self.tick_counter = 0;
+                let after = self.index(self.frame_counter);
+                return (before != after && after < self.textures.len())
+                    .then(|| self.textures[after]);
+            }
+            if !self.interpolate {
+                return None;
+            }
+            let weight =
+                1.0 - f64::from(self.tick_counter) / f64::from(self.time(self.frame_counter));
+            let current = self.index(self.frame_counter);
+            let next = self.index((self.frame_counter + 1) % self.count());
+            if current == next || next >= self.textures.len() {
+                return None;
+            }
+            let (a, b) = (self.textures[current], self.textures[next]);
+            let mix =
+                |i: usize| (f64::from(a[i]) * weight + f64::from(b[i]) * (1.0 - weight)) as u8;
+            Some([mix(0), mix(1), mix(2), a[3]])
+        }
+    }
+
+    /// The timeline of every `.mcmeta` shape of the 1.8 jar (default order,
+    /// `frametime`, listed indices, timed objects, `interpolate`) gives the
+    /// same upload on every tick as the reference, over several loops.
+    #[test]
+    fn the_timeline_matches_the_reference_tick_by_tick() {
+        let textures: Vec<[u8; 4]> = (0..5u8)
+            .map(|i| [40 * i, 200 - 30 * i, 7 * i, 255 - i])
+            .collect();
+        let cases = [
+            (r#"{"animation": {}}"#, vec![], 1, false),
+            (r#"{"animation": {"frametime": 3}}"#, vec![], 3, false),
+            (
+                r#"{"animation": {"frametime": 4, "interpolate": true}}"#,
+                vec![],
+                4,
+                true,
+            ),
+            (
+                r#"{"animation": {"frametime": 2, "frames": [0, 1, 2, 3, 4, 3, 2, 1]}}"#,
+                vec![
+                    (0, 2),
+                    (1, 2),
+                    (2, 2),
+                    (3, 2),
+                    (4, 2),
+                    (3, 2),
+                    (2, 2),
+                    (1, 2),
+                ],
+                2,
+                false,
+            ),
+            (
+                r#"{"animation": {"frames": [{"index": 1, "time": 3}, {"index": 1, "time": 2}, {"index": 4, "time": 5}], "interpolate": true}}"#,
+                vec![(1, 3), (1, 2), (4, 5)],
+                1,
+                true,
+            ),
+        ];
+        for (json, listed, frame_time, interpolate) in cases {
+            let frames: Vec<Vec<u8>> = textures.iter().map(|t| t.to_vec()).collect();
+            let mut ours = TextureAnimation::from_mcmeta(0, frames, json.as_bytes())
+                .expect("the timeline animates");
+            let mut reference = Vanilla {
+                listed,
+                frame_time,
+                interpolate,
+                textures: textures.clone(),
+                frame_counter: 0,
+                tick_counter: 0,
+            };
+            for tick in 0..400 {
+                let expected = reference.update();
+                assert_eq!(
+                    ours.tick().map(|p| [p[0], p[1], p[2], p[3]]),
+                    expected,
+                    "{json} tick {tick}"
+                );
+            }
+        }
+    }
 }

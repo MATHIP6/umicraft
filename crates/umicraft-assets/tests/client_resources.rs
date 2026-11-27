@@ -758,7 +758,9 @@ fn official_1_8_8_counts() {
     assert_eq!(item_pngs, 227);
     assert_eq!(block_meta, 9);
     assert_eq!(item_meta, 2);
-    assert_eq!(resources.file_count(), 2031);
+    // 2546 with the 1.8.8 jar of the Mojang launcher (2031 before the item models
+    // and the sound entries were counted); P7h refreshed the constant.
+    assert_eq!(resources.file_count(), 2546);
     assert_eq!(resources.atlas().layers(), 601);
     assert_eq!(
         (resources.atlas().width(), resources.atlas().height()),
