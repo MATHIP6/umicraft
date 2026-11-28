@@ -3,6 +3,7 @@
 //! What a frame gathers from the world view before drawing it; the buffers
 //! are kept between frames so the hot path does not allocate.
 
+use std::time::Instant;
 use umicraft_render::HudState;
 
 use crate::options::{self};
@@ -31,4 +32,7 @@ pub(in crate::window) struct FrameScratch {
     pub(in crate::window) moving_blocks_mesh: umicraft_mesh::Mesh,
     /// The pose of the hand in the last frame, to tell the motion blur when it moves.
     pub(in crate::window) last_hand: Option<umicraft_game::hand::HandPose>,
+    /// The damage flash of the hearts in the tab list, and the instant its
+    /// clock (milliseconds, and ticks of 50 ms) counts from.
+    pub(in crate::window) tab_hearts: (umicraft_game::hud::tab_hearts::TabHearts, Instant),
 }

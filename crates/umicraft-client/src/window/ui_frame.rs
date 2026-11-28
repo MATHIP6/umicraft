@@ -7,10 +7,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use umicraft_game::inventory::HOTBAR_START;
-use umicraft_render::HudSheets;
 use umicraft_render::{
     chat_input_hit, chat_run_at, chat_scroll_after, gui_scale, ChatInputView, HudState,
 };
+use umicraft_render::{HeartsFlashView, HudSheets, TabValueStyle};
 use umicraft_ui::menus::ConnectStage;
 use umicraft_ui::widgets::{death_screen, DeathAction};
 use umicraft_ui::FontAtlas;
@@ -34,6 +34,8 @@ use crate::world_view::WorldView;
 
 /// The `HAT` bit of the skin parts (`EnumPlayerModelParts.HAT`).
 const HAT_PART: u8 = 0x40;
+/// `EnumPlayerModelParts.CAPE` in the skin parts byte.
+const CAPE_PART: u8 = 0x01;
 
 /// The widget data of the nine hotbar slots, for the textured HUD.
 fn hotbar_slot_items(
@@ -169,6 +171,8 @@ impl App {
         // The faces of the skins are only looked up while the tab list shows.
         // As in `GuiPlayerTabOverlay`, the hat layer is drawn only for a player
         // that is in the world and wears it.
+        let now_ms = self.frame.tab_hearts.1.elapsed().as_millis() as u64;
+        self.frame.tab_hearts.0.set_shown(show_tab_list, now_ms);
         if show_tab_list {
             if let (Some(tab), Some(textures), Some(world)) = (
                 self.frame.hud.tab_list.as_mut(),
@@ -178,16 +182,30 @@ impl App {
                 // The local player is always in the world for the reference, but
                 // the entity list leaves it out in the first person.
                 let local = world.local_body();
-                let hats: std::collections::HashSet<u128> = self
-                    .frame
-                    .entities
-                    .iter()
-                    .chain(local.as_ref())
-                    .filter(|entity| entity.flags.skin_parts & HAT_PART != 0)
-                    .filter_map(|entity| entity.uuid.map(u128::from_be_bytes))
-                    .collect();
+                let wearing = |part: u8| -> std::collections::HashSet<u128> {
+                    self.frame
+                        .entities
+                        .iter()
+                        .chain(local.as_ref())
+                        .filter(|entity| entity.flags.skin_parts & part != 0)
+                        .filter_map(|entity| entity.uuid.map(u128::from_be_bytes))
+                        .collect()
+                };
+                let (hats, capes) = (wearing(HAT_PART), wearing(CAPE_PART));
+                let hearts = &mut self.frame.tab_hearts.0;
                 for entry in &mut tab.entries {
                     let hat = hats.contains(&entry.uuid);
+                    entry.upside_down &= capes.contains(&entry.uuid);
+                    entry.hearts = match (tab.value_style, entry.score) {
+                        (Some(TabValueStyle::Hearts), Some(score)) => {
+                            let flash = hearts.flash(entry.uuid, score, now_ms, now_ms / 50);
+                            Some(HeartsFlashView {
+                                display: flash.display,
+                                blink: flash.blink,
+                            })
+                        }
+                        _ => None,
+                    };
                     entry.face = entry
                         .skin_url
                         .as_deref()

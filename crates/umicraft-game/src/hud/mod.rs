@@ -22,6 +22,7 @@ pub mod flash;
 pub mod held_name;
 pub mod mount;
 pub mod sidebar;
+pub mod tab_hearts;
 pub mod tab_list;
 pub mod team_names;
 pub mod titles;

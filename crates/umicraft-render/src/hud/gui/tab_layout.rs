@@ -7,6 +7,8 @@
 //! (integer maths, as the reference), kept apart from the drawing so the
 //! numbers are tested without a font.
 
+use crate::hud::HeartsFlashView;
+
 /// A tab list shows at most this many players.
 pub(super) const MAX_VISIBLE: usize = 80;
 /// At most this many players share a column before another column starts.
@@ -130,15 +132,22 @@ pub(super) enum HeartsPlan {
 }
 
 /// The hearts for `value` in a column from `start` to `end`
-/// (`drawScoreboardValues`, without the damage flash).
+/// (`drawScoreboardValues`).
 ///
-/// `None` for a value of zero or less, which draws nothing.
-pub(super) fn hearts_plan(value: i32, start: i32, end: i32) -> Option<HeartsPlan> {
-    let full = (value + 1).div_euclid(2).max(0);
+/// `flash` is the damage flash: the value the lost hearts are measured
+/// against and whether the containers use the flash frame. `None` when
+/// neither the value nor the flash has a heart to draw.
+pub(super) fn hearts_plan(
+    value: i32,
+    flash: HeartsFlashView,
+    (start, end): (i32, i32),
+) -> Option<HeartsPlan> {
+    let display = flash.display;
+    let full = (value.max(display) + 1).div_euclid(2).max(0);
     if full <= 0 {
         return None;
     }
-    let slots = (value / 2).max(10);
+    let slots = (value / 2).max(display / 2).max(10);
     let step = ((end - start - 4) as f32 / slots as f32).min(9.0);
     if step <= 3.0 {
         let fraction = (value as f32 / 20.0).clamp(0.0, 1.0);
@@ -151,10 +160,21 @@ pub(super) fn hearts_plan(value: i32, start: i32, end: i32) -> Option<HeartsPlan
             ],
         });
     }
-    let mut icons: Vec<(f32, u32)> = (full..slots).map(|i| (i as f32 * step, 16)).collect();
+    let container = if flash.blink { 25 } else { 16 };
+    let mut icons: Vec<(f32, u32)> = (full..slots)
+        .map(|i| (i as f32 * step, container))
+        .collect();
     for index in 0..full {
         let x = index as f32 * step;
-        icons.push((x, 16));
+        icons.push((x, container));
+        if flash.blink {
+            if index * 2 + 1 < display {
+                icons.push((x, 70));
+            }
+            if index * 2 + 1 == display {
+                icons.push((x, 79));
+            }
+        }
         if index * 2 + 1 < value {
             icons.push((x, if index >= 10 { 160 } else { 52 }));
         }
@@ -168,6 +188,46 @@ pub(super) fn hearts_plan(value: i32, start: i32, end: i32) -> Option<HeartsPlan
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A value with no flash going on.
+    fn calm(value: i32) -> HeartsFlashView {
+        HeartsFlashView {
+            display: value,
+            blink: false,
+        }
+    }
+
+    /// `drawScoreboardValues`: while the flash is on, the containers use the
+    /// flash frame and the hearts lost since the old value are drawn white.
+    #[test]
+    fn a_blinking_loss_draws_flash_containers_and_the_lost_hearts() {
+        let flash = HeartsFlashView {
+            display: 8,
+            blink: true,
+        };
+        let Some(HeartsPlan::Icons(icons)) = hearts_plan(5, flash, (0, 90)) else {
+            panic!("icons expected");
+        };
+        assert!(icons.iter().all(|(_, u)| ![16].contains(u)));
+        // The old value 8 is four full hearts drawn white (no half one, 8 is
+        // even); the new value 5 fills two and a half of them in red.
+        assert_eq!(icons.iter().filter(|(_, u)| *u == 70).count(), 4);
+        assert_eq!(icons.iter().filter(|(_, u)| *u == 52).count(), 2);
+        assert_eq!(icons.iter().filter(|(_, u)| *u == 61).count(), 1);
+    }
+
+    #[test]
+    fn a_loss_that_is_not_blinking_keeps_the_room_of_the_lost_hearts() {
+        let flash = HeartsFlashView {
+            display: 20,
+            blink: false,
+        };
+        let Some(HeartsPlan::Icons(icons)) = hearts_plan(5, flash, (0, 90)) else {
+            panic!("icons expected");
+        };
+        // Ten containers for the old value, none of them flash frames.
+        assert_eq!(icons.iter().filter(|(_, u)| *u == 16).count(), 10);
+    }
 
     #[test]
     fn twenty_players_fit_one_column() {
@@ -230,13 +290,13 @@ mod tests {
 
     #[test]
     fn zero_or_negative_hearts_draw_nothing() {
-        assert_eq!(hearts_plan(0, 0, 90), None);
-        assert_eq!(hearts_plan(-4, 0, 90), None);
+        assert_eq!(hearts_plan(0, calm(0), (0, 90)), None);
+        assert_eq!(hearts_plan(-4, calm(-4), (0, 90)), None);
     }
 
     #[test]
     fn seven_hearts_points_draw_ten_containers_three_and_a_half_hearts() {
-        let Some(HeartsPlan::Icons(icons)) = hearts_plan(7, 0, 90) else {
+        let Some(HeartsPlan::Icons(icons)) = hearts_plan(7, calm(7), (0, 90)) else {
             panic!("icons expected");
         };
         // Slots: ten. Empty containers for 4..10, then 4 containers with
@@ -251,7 +311,7 @@ mod tests {
 
     #[test]
     fn hearts_past_ten_use_the_golden_sprites() {
-        let Some(HeartsPlan::Icons(icons)) = hearts_plan(24, 0, 200) else {
+        let Some(HeartsPlan::Icons(icons)) = hearts_plan(24, calm(24), (0, 200)) else {
             panic!("icons expected");
         };
         assert!(icons.iter().any(|(_, u)| *u == 160));
@@ -260,12 +320,12 @@ mod tests {
 
     #[test]
     fn a_narrow_column_shows_the_value_as_coloured_text() {
-        let Some(HeartsPlan::Text { half_hearts, rgb }) = hearts_plan(15, 0, 30) else {
+        let Some(HeartsPlan::Text { half_hearts, rgb }) = hearts_plan(15, calm(15), (0, 30)) else {
             panic!("text expected");
         };
         assert_eq!(half_hearts, "7.5");
         assert_eq!(rgb, [63, 191, 0]);
-        let Some(HeartsPlan::Text { half_hearts, .. }) = hearts_plan(20, 0, 30) else {
+        let Some(HeartsPlan::Text { half_hearts, .. }) = hearts_plan(20, calm(20), (0, 30)) else {
             panic!("text expected");
         };
         assert_eq!(half_hearts, "10.0");

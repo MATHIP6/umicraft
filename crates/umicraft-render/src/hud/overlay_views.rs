@@ -94,6 +94,21 @@ pub struct TabEntryView {
     /// The face of the skin once it is downloaded: 8x8 RGBA pixels (256 bytes),
     /// row by row, with the hat layer already over it.
     pub face: Option<Arc<[u8]>>,
+    /// Draw the face upside down: the player is named `Dinnerbone` or `Grumm`
+    /// and wears the cape part (`GuiPlayerTabOverlay`).
+    pub upside_down: bool,
+    /// The damage flash of the hearts of a `hearts` list objective.
+    pub hearts: Option<HeartsFlashView>,
+}
+
+/// The damage flash of one player's hearts in the tab list
+/// (`GuiPlayerTabOverlay.drawScoreboardValues`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HeartsFlashView {
+    /// The value the lost hearts are measured against (`displayHealth`).
+    pub display: i32,
+    /// The containers are drawn with the flash frame.
+    pub blink: bool,
 }
 
 /// The tab list in display order, with its header and footer.

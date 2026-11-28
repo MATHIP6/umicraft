@@ -93,6 +93,8 @@ fn populated_hud_state() -> HudState {
             has_skin: false,
             skin_url: None,
             face: None,
+            upside_down: false,
+            hearts: None,
         })
         .collect();
     HudState {

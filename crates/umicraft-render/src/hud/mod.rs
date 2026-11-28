@@ -33,8 +33,8 @@ mod state;
 
 pub use gui::{chat_input_hit, chat_run_at, chat_scroll_after, draw_hud_gui, HudSheets, InputHit};
 pub use overlay_views::{
-    plain_text, ActionBarView, BossView, SidebarLineView, SidebarView, TabEntryView, TabListView,
-    TabValueStyle, TitleView,
+    plain_text, ActionBarView, BossView, HeartsFlashView, SidebarLineView, SidebarView,
+    TabEntryView, TabListView, TabValueStyle, TitleView,
 };
 pub use state::{
     ChatInputView, ChatLineView, ChatRunView, ChatStyle, DebugF3View, HudState, LagometerView,

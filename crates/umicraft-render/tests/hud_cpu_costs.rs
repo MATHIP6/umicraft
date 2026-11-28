@@ -72,6 +72,8 @@ fn tab_list() -> TabListView {
                 has_skin: true,
                 skin_url: None,
                 face: None,
+                upside_down: false,
+                hearts: None,
             })
             .collect(),
         value_style: None,

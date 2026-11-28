@@ -37,6 +37,9 @@ pub struct TabRow {
     pub score: Option<i32>,
     /// The base64 `textures` property, which carries the skin of the head.
     pub textures: Option<String>,
+    /// The profile name is `Dinnerbone` or `Grumm`, whose head is drawn
+    /// upside down when the cape part is worn (`GuiPlayerTabOverlay`).
+    pub flips_head: bool,
 }
 
 /// The tab list to draw.
@@ -83,6 +86,7 @@ pub fn tab_list_frame(
             spectator: entry.game_mode == SPECTATOR,
             score: objective.map(|objective| scoreboard.score(&objective.name, &entry.name)),
             textures: entry.textures.clone(),
+            flips_head: matches!(entry.name.as_str(), "Dinnerbone" | "Grumm"),
         })
         .collect();
     Some(TabListFrame {
@@ -134,6 +138,29 @@ mod tests {
 
     fn frame(list: &PlayerList, board: &Scoreboard) -> TabListFrame {
         tab_list_frame(list, board, &LangTable::builtin()).expect("listed")
+    }
+
+    #[test]
+    fn only_dinnerbone_and_grumm_flip_their_heads() {
+        let players = list(vec![
+            add(1, "Dinnerbone", 0),
+            add(2, "Grumm", 0),
+            add(3, "Steve", 0),
+        ]);
+        let frame = frame(&players, &Scoreboard::default());
+        let flips: Vec<(String, bool)> = frame
+            .rows
+            .iter()
+            .map(|row| (plain(&row.name), row.flips_head))
+            .collect();
+        assert_eq!(
+            flips,
+            [
+                ("Dinnerbone".to_string(), true),
+                ("Grumm".to_string(), true),
+                ("Steve".to_string(), false)
+            ]
+        );
     }
 
     fn names(frame: &TabListFrame) -> Vec<String> {

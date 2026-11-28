@@ -17,7 +17,9 @@ use super::runs::{draw_runs, obfuscation_tick, styled, width, wrap};
 use super::tab_layout::{
     hearts_plan, ping_row, HeartsPlan, TabLayout, ValueColumn, HEAD_WIDTH, MAX_VISIBLE, ROW_HEIGHT,
 };
-use crate::hud::{ChatRunView, HudState, TabEntryView, TabListView, TabValueStyle};
+use crate::hud::{
+    ChatRunView, HeartsFlashView, HudState, TabEntryView, TabListView, TabValueStyle,
+};
 use umicraft_ui::styled_text::draw_styled;
 
 /// `Integer.MIN_VALUE`, the `0x80000000` band: black at half opacity.
@@ -188,7 +190,7 @@ fn draw_entry(
     let mut name_x = x;
     if tab.show_heads {
         match entry.face.as_deref() {
-            Some(face) => draw_face(list, pen, face, [x, y]),
+            Some(face) => draw_face(list, pen, face, [x, y], entry.upside_down),
             None => pen.rect(list, [x, y, x + 8, y + 8], head_color(entry)),
         }
         name_x += HEAD_WIDTH;
@@ -206,7 +208,14 @@ fn draw_entry(
     let end = start + layout.value_width;
     if let (Some(score), false) = (entry.score, entry.spectator) {
         if end - start > 5 {
-            draw_value(list, pen, tab.value_style, score, [start, end, y], icons);
+            draw_value(
+                list,
+                pen,
+                tab.value_style,
+                (score, entry.hearts),
+                [start, end, y],
+                icons,
+            );
         }
     }
     if let Some(icons) = icons {
@@ -223,12 +232,16 @@ fn draw_entry(
 }
 
 /// The 8x8 `face` (RGBA, row by row) at `[x, y]`, one rectangle per run of
-/// equal pixels in a row; transparent pixels are skipped.
-fn draw_face(list: &mut DrawList, pen: &Pen, face: &[u8], [x, y]: [i32; 2]) {
+/// equal pixels in a row; transparent pixels are skipped. `upside_down` draws
+/// the rows bottom to top (`drawScaledCustomSizeModalRect` with a height of -8).
+fn draw_face(list: &mut DrawList, pen: &Pen, face: &[u8], [x, y]: [i32; 2], upside_down: bool) {
     if face.len() != 8 * 8 * 4 {
         return;
     }
-    let pixel = |column: usize, row: usize| &face[(row * 8 + column) * 4..][..4];
+    let pixel = |column: usize, row: usize| {
+        let source = if upside_down { 7 - row } else { row };
+        &face[(source * 8 + column) * 4..][..4]
+    };
     for row in 0..8 {
         let mut start = 0;
         while start < 8 {
@@ -264,12 +277,16 @@ fn draw_value(
     list: &mut DrawList,
     pen: &Pen,
     style: Option<TabValueStyle>,
-    score: i32,
+    (score, flash): (i32, Option<HeartsFlashView>),
     [start, end, y]: [i32; 3],
     icons: Option<&SpriteSheet>,
 ) {
     if style == Some(TabValueStyle::Hearts) {
-        match hearts_plan(score, start, end) {
+        let flash = flash.unwrap_or(HeartsFlashView {
+            display: score,
+            blink: false,
+        });
+        match hearts_plan(score, flash, (start, end)) {
             Some(HeartsPlan::Icons(sprites)) => {
                 let Some(icons) = icons else { return };
                 for (offset, u) in sprites {
@@ -318,6 +335,8 @@ mod tests {
             has_skin: false,
             skin_url: None,
             face: None,
+            upside_down: false,
+            hearts: None,
         }
     }
 
@@ -449,6 +468,42 @@ mod tests {
                 "{expected} in {names:?}"
             );
         }
+    }
+
+    /// `GuiPlayerTabOverlay`: Dinnerbone and Grumm are drawn upside down.
+    #[test]
+    fn an_upside_down_face_draws_its_rows_bottom_to_top() {
+        let mut flipped = entry("Dinnerbone", None, false);
+        // The top row is red, the others blue.
+        let face: Vec<u8> = (0..64)
+            .flat_map(|i| {
+                if i < 8 {
+                    [255, 0, 0, 255]
+                } else {
+                    [0, 0, 255, 255]
+                }
+            })
+            .collect();
+        flipped.face = Some(face.into());
+        let mut tab = view(vec![flipped.clone()]);
+        tab.show_heads = true;
+        let red_row = |tab: &TabListView| {
+            let rows: Vec<f32> = draw(tab)
+                .commands()
+                .iter()
+                .filter_map(|command| match command {
+                    DrawCommand::Rect { rect, color } if *color == [1.0, 0.0, 0.0, 1.0] => {
+                        Some(rect.y)
+                    }
+                    _ => None,
+                })
+                .collect();
+            rows[0]
+        };
+        let upright = red_row(&tab);
+        flipped.upside_down = true;
+        tab.entries = vec![flipped];
+        assert!(red_row(&tab) > upright, "the red row moves to the bottom");
     }
 
     #[test]

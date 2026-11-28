@@ -328,6 +328,7 @@ impl App {
                 placed_tags: Vec::new(),
                 moving_blocks_mesh: umicraft_mesh::Mesh::default(),
                 last_hand: None,
+                tab_hearts: (Default::default(), Instant::now()),
             },
             cpu: CpuSplit::default(),
             zoom: Zoom::default(),

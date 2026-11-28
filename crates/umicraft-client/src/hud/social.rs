@@ -76,6 +76,8 @@ pub(crate) fn tab_list_view(
                     .and_then(|textures| textures.skin)
                     .map(Into::into),
                 face: None,
+                upside_down: row.flips_head,
+                hearts: None,
             })
             .collect(),
         value_style: frame.value_style.map(|style| match style {
