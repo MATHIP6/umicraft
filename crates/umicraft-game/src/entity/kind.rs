@@ -194,6 +194,41 @@ impl EntityKind {
         }
     }
 
+    /// The base `generic.maxHealth` the entity class registers in
+    /// `applyEntityAttributes`, which is what the client shows until an
+    /// `Entity Properties` packet replaces it (the HUD mount hearts).
+    ///
+    /// Classes that register nothing inherit the 20 of `EntityLivingBase`.
+    /// A horse registers 53 (a donkey or mule gets 15 and a bred or spawned
+    /// horse a random value, all of which the server sends); a wolf is wild
+    /// (8) until it is tamed (20); slimes depend on their size and are not
+    /// listed.
+    #[must_use]
+    pub const fn default_max_health(self) -> f32 {
+        match self {
+            Self::Chicken | Self::Snowman => 4.0,
+            Self::Bat => 6.0,
+            Self::Sheep | Self::Wolf | Self::Silverfish | Self::Endermite => 8.0,
+            Self::Pig
+            | Self::Cow
+            | Self::Mooshroom
+            | Self::Squid
+            | Self::Ocelot
+            | Self::Rabbit
+            | Self::Ghast => 10.0,
+            Self::CaveSpider => 12.0,
+            Self::Spider => 16.0,
+            Self::Witch => 26.0,
+            Self::Guardian => 30.0,
+            Self::Enderman => 40.0,
+            Self::Horse => 53.0,
+            Self::IronGolem | Self::Giant => 100.0,
+            Self::Dragon => 200.0,
+            Self::Wither => 300.0,
+            _ => 20.0,
+        }
+    }
+
     /// True for living entities, which have a body yaw and swing their limbs;
     /// false for the objects (dropped items, arrows, item frames).
     #[must_use]
@@ -302,6 +337,14 @@ impl EntityKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_max_health_follows_the_entity_class() {
+        assert_eq!(EntityKind::Pig.default_max_health(), 10.0);
+        assert_eq!(EntityKind::Horse.default_max_health(), 53.0);
+        assert_eq!(EntityKind::Zombie.default_max_health(), 20.0);
+        assert_eq!(EntityKind::Wither.default_max_health(), 300.0);
+    }
 
     #[test]
     fn heights_put_the_tag_above_the_head() {

@@ -12,6 +12,7 @@
 use umicraft_game::debug_f3::biomes::biome_name;
 use umicraft_game::debug_f3::difficulty::local_difficulty;
 use umicraft_game::debug_f3::{DebugLocation, LookedAtBlock, PropertyValue};
+use umicraft_mesh::{actual_state_properties, BlockSource};
 use umicraft_model::registry::definition;
 use umicraft_world::{BlockPos, BlockState, World};
 
@@ -108,7 +109,9 @@ pub fn collect(world: &World, inputs: &DebugInputs) -> DebugWorld {
         chunk_cache: (columns, columns),
         feet: inputs.feet,
         location: location(world, feet, inputs),
-        looking_at: inputs.target.map(|pos| looked_at(pos, world.block(pos))),
+        looking_at: inputs
+            .target
+            .map(|pos| looked_at(world, pos, world.block(pos))),
         tick_micros: inputs.tick_micros,
         net_event_micros: inputs.net_event_micros,
         input_processing_micros: inputs.input_processing_micros,
@@ -143,9 +146,11 @@ fn location(world: &World, pos: BlockPos, inputs: &DebugInputs) -> Option<DebugL
 /// (`facing=north,half=upper`), which lists the actual-state properties in the
 /// reference's alphabetical order. A key of `normal` has none, except that a
 /// document named differently from the block (`granite` for `stone`) is the
-/// `variant` property. Connections the world would add (fences, panes) are
-/// not computed: this is an approximation of `getActualState`.
-fn looked_at(pos: BlockPos, state: BlockState) -> LookedAtBlock {
+/// `variant` property. The connections of fences, panes and walls come from
+/// the neighbours in `world` (`umicraft_mesh::actual_state_properties`, the
+/// mesher's own `getActualState`), so they also override the registry's
+/// `false`.
+fn looked_at(world: &dyn BlockSource, pos: BlockPos, state: BlockState) -> LookedAtBlock {
     let definition = definition(state.id());
     let name = definition.map_or("air", |definition| definition.name);
     let rule = definition.and_then(|definition| definition.state(state.metadata()));
@@ -162,6 +167,8 @@ fn looked_at(pos: BlockPos, state: BlockState) -> LookedAtBlock {
             properties.extend(rule.variant.split(',').filter_map(property));
         }
     }
+    let actual = actual_state_properties(world, [pos.x, pos.y, pos.z], state);
+    merge_actual_state(&mut properties, actual);
     LookedAtBlock {
         pos: [pos.x, pos.y, pos.z],
         name: format!("minecraft:{name}"),
@@ -169,15 +176,36 @@ fn looked_at(pos: BlockPos, state: BlockState) -> LookedAtBlock {
     }
 }
 
-/// One `key=value` pair of a variant key.
-fn property(pair: &str) -> Option<(String, PropertyValue)> {
-    let (key, value) = pair.split_once('=')?;
-    let value = match value {
+/// Applies the neighbour-dependent `actual` values over `properties`, adding
+/// the ones the registry key lacks, and keeps the reference's alphabetical
+/// order (`BlockState` sorts its properties by name).
+fn merge_actual_state(
+    properties: &mut Vec<(String, PropertyValue)>,
+    actual: Vec<(&'static str, &'static str)>,
+) {
+    for (name, value) in actual {
+        let value = property_value(value);
+        match properties.iter_mut().find(|(key, _)| key == name) {
+            Some(entry) => entry.1 = value,
+            None => properties.push((name.to_owned(), value)),
+        }
+    }
+    properties.sort_by(|a, b| a.0.cmp(&b.0));
+}
+
+/// A property value from its blockstate text.
+fn property_value(value: &str) -> PropertyValue {
+    match value {
         "true" => PropertyValue::Bool(true),
         "false" => PropertyValue::Bool(false),
         other => PropertyValue::Text(other.to_owned()),
-    };
-    Some((key.to_owned(), value))
+    }
+}
+
+/// One `key=value` pair of a variant key.
+fn property(pair: &str) -> Option<(String, PropertyValue)> {
+    let (key, value) = pair.split_once('=')?;
+    Some((key.to_owned(), property_value(value)))
 }
 
 #[cfg(test)]
@@ -185,7 +213,33 @@ mod tests {
     use super::*;
 
     fn at(state: BlockState) -> LookedAtBlock {
-        looked_at(BlockPos::new(1, 2, 3), state)
+        looked_at(&World::default(), BlockPos::new(1, 2, 3), state)
+    }
+
+    #[test]
+    fn a_fence_next_to_stone_reads_as_connected() {
+        let fence = BlockState::new(85, 0);
+        let block = looked_at(&TwoBlocks(fence), BlockPos::new(0, 0, 0), fence);
+        assert_eq!(block.name, "minecraft:fence");
+        assert!(block
+            .properties
+            .contains(&("east".to_owned(), PropertyValue::Bool(true))));
+        assert!(block
+            .properties
+            .contains(&("west".to_owned(), PropertyValue::Bool(false))));
+    }
+
+    /// A fence at the origin with stone to its east.
+    struct TwoBlocks(BlockState);
+
+    impl BlockSource for TwoBlocks {
+        fn block(&self, x: i32, y: i32, z: i32) -> BlockState {
+            match (x, y, z) {
+                (0, 0, 0) => self.0,
+                (1, 0, 0) => BlockState::new(1, 0),
+                _ => BlockState::AIR,
+            }
+        }
     }
 
     #[test]

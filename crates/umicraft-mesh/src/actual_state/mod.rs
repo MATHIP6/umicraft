@@ -112,6 +112,38 @@ pub(crate) fn model_for<'a>(
     models.model_by_key(document, &key)
 }
 
+/// The neighbour-dependent properties of `state` at `position`, as
+/// `(name, value)` pairs (`north` -> `true`).
+///
+/// The same computation as [`model_for`], without the model lookup, so the F3
+/// screen can print `getActualState` for fences, panes, walls, stairs, redstone
+/// and the like. Empty when the block does not depend on its neighbours.
+#[must_use]
+pub fn properties_for(
+    source: &dyn BlockSource,
+    position: [i32; 3],
+    state: BlockState,
+) -> Vec<(&'static str, &'static str)> {
+    let Some(family) = family_of(state) else {
+        return Vec::new();
+    };
+    let Some(rule) =
+        definition(state.id()).and_then(|definition| definition.state(state.metadata()))
+    else {
+        return Vec::new();
+    };
+    let base = parse_key(rule.variant);
+    let context = Context {
+        source,
+        position,
+        state,
+        base: &base,
+    };
+    (family.overrides)(&context)
+        .map(|overrides| overrides.as_slice().to_vec())
+        .unwrap_or_default()
+}
+
 /// What a family needs to compute the properties of one block.
 pub(crate) struct Context<'a> {
     /// The surroundings.
@@ -218,6 +250,20 @@ mod tests {
         let base = parse_key("facing=south,open=false");
         let key = merge_key(&base, &[("in_wall", "true")]);
         assert_eq!(key, "facing=south,in_wall=true,open=false");
+    }
+
+    #[test]
+    fn properties_for_reports_the_fence_connections() {
+        let source = test_support::Grid::default().with([1, 0, 0], 1, 0);
+        let properties = properties_for(&source, [0, 0, 0], BlockState::new(85, 0));
+        assert!(properties.contains(&("east", "true")));
+        assert!(properties.contains(&("west", "false")));
+    }
+
+    #[test]
+    fn properties_for_is_empty_without_a_family() {
+        let source = test_support::Grid::default();
+        assert!(properties_for(&source, [0, 0, 0], BlockState::new(1, 0)).is_empty());
     }
 
     #[test]
