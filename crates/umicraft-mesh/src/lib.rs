@@ -83,6 +83,7 @@ pub mod tint;
 mod vertex;
 pub mod visibility;
 
+pub use actual_state::properties_for as actual_state_properties;
 pub use block_entity::{BlockEntityKind, BlockEntityRef, SameNeighbours};
 pub use face::Face;
 pub use flower_pot::push_flower_pot_plant;

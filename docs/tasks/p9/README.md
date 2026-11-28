@@ -57,7 +57,9 @@ umicraft-client/src/hud_view.rs
 - F3 data: `client::debug_world` collects entities, particles, chunk cache,
   biome (`umicraft_game::debug_f3::biomes`), light, local difficulty
   (`debug_f3::difficulty`), feet position and the looking-at block on the game
-  thread and sends them in the `Frame`; `Renderer::adapter()` gives the
+  thread and sends them in the `Frame` (the looking-at properties get the
+  mesher's `getActualState` on top, so fences, panes and walls show their
+  connections); `Renderer::adapter()` gives the
   `AdapterSummary` and `client::process_memory` the memory line.
 - `Riding Jump` is sent from `HudTracker::take_jump` as `ClientCommand::RidingJump`.
 - GUI scale: the HUD always uses the auto scale. `render::hud::gui::scale_tests`
@@ -74,6 +76,10 @@ umicraft-client/src/hud_view.rs
 - The chat scroll position is not kept when new lines arrive.
 - The GUI-scale video option (1 to 4, auto) is not wired: needs an options
   field, the options screen and passing `ScaledResolution` to every HUD module.
+- F3 `B:` (hidden entities) stays 0: the entity cull is a distance and
+  behind-the-camera test (`scene::entity::cull`), not a frustum count.
+- Mount hearts of a donkey, mule or bred horse need the `Entity Properties`
+  packet (the client default is the horse class base, 53).
 - Per-zone dirty flags: the single `hud_dirty` boolean stays, see ADR-0036.
 - No comparison with vanilla on screen (screenshots at scales 1 to 4, chat and
   scoreboard on a real server) has been done.

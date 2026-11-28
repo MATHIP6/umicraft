@@ -43,8 +43,9 @@ const ABSORPTION_WATCHER: u8 = 17;
 const STATUS_HURT: i8 = 2;
 /// The attribute behind `getMaxHealth`.
 const MAX_HEALTH: &str = "generic.maxHealth";
-/// The default `getMaxHealth` of a living entity.
-const DEFAULT_MAX_HEALTH: f32 = 20.0;
+/// The `getMaxHealth` of the local player before its attributes arrive
+/// (`EntityLivingBase` registers 20; a mount uses its own class default).
+const PLAYER_MAX_HEALTH: f32 = 20.0;
 
 /// Potion ids (MCP `Potion`).
 const REGENERATION: u8 = 10;
@@ -276,7 +277,7 @@ impl HudTracker {
             max_health: facts
                 .attributes
                 .value(MAX_HEALTH)
-                .map_or(DEFAULT_MAX_HEALTH, |value| value as f32),
+                .map_or(PLAYER_MAX_HEALTH, |value| value as f32),
             absorption: self.absorption,
             armor: facts.armor as i32,
             food: facts.food as i32,
@@ -323,7 +324,10 @@ fn riding_of(facts: &HudFacts<'_>, max_health: &BTreeMap<i32, f32>) -> Riding {
         .get(&umicraft_game::entity::EntityId(id));
     match record {
         Some(record) if record.kind.is_living() => {
-            let max = max_health.get(&id).copied().unwrap_or(DEFAULT_MAX_HEALTH);
+            let max = max_health
+                .get(&id)
+                .copied()
+                .unwrap_or_else(|| record.kind.default_max_health());
             Riding::Mob {
                 health: record.health.unwrap_or(max),
                 max_health: max,
@@ -552,6 +556,22 @@ mod tests {
         // Five ticks of charge are 0.5 of the bar: `(int)(0.5 * 100)`.
         assert_eq!(tick(false), Some(50));
         assert_eq!(tick(false), None, "the strength is sent once");
+    }
+
+    #[test]
+    fn a_mount_without_properties_uses_its_class_max_health() {
+        let world = saddled_horse_world();
+        let mut facts = world.facts(GameMode::Survival, 20.0);
+        facts.vehicle = Some(9);
+        let Riding::Mob { max_health, .. } = riding_of(&facts, &BTreeMap::new()) else {
+            panic!("a horse is a mob");
+        };
+        assert_eq!(max_health, 53.0);
+        let known = BTreeMap::from([(9, 30.0)]);
+        let Riding::Mob { max_health, .. } = riding_of(&facts, &known) else {
+            panic!("a horse is a mob");
+        };
+        assert_eq!(max_health, 30.0, "the properties packet wins");
     }
 
     #[test]
