@@ -8,7 +8,9 @@ use std::time::Instant;
 
 use umicraft_game::inventory::HOTBAR_START;
 use umicraft_render::HudSheets;
-use umicraft_render::{chat_input_hit, chat_run_at, gui_scale, ChatInputView, HudState};
+use umicraft_render::{
+    chat_input_hit, chat_run_at, chat_scroll_after, gui_scale, ChatInputView, HudState,
+};
 use umicraft_ui::menus::ConnectStage;
 use umicraft_ui::widgets::{death_screen, DeathAction};
 use umicraft_ui::FontAtlas;
@@ -218,6 +220,12 @@ impl App {
         });
         self.frame.hud.debug_f3 = debug_f3;
         self.frame.hud.chat_open = chatting;
+        (self.chat.scroll, self.chat.newest_seen) = chat_scroll_after(
+            &self.frame.hud,
+            atlas,
+            self.chat.scroll,
+            self.chat.newest_seen,
+        );
         self.frame.hud.chat_scroll = self.chat.scroll;
         self.frame.hud.chat_input = chatting.then(|| ChatInputView {
             text: self.chat.input.text(),

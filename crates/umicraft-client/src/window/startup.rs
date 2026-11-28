@@ -311,6 +311,7 @@ impl App {
                 input: ChatInput::new(""),
                 sent: SentHistory::new(),
                 scroll: 0,
+                newest_seen: None,
                 opened: Instant::now(),
                 seen_completions: 0,
                 hover: None,

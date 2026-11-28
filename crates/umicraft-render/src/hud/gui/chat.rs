@@ -7,6 +7,8 @@
 //! [`umicraft_game::chat::wrap`], the text is drawn with
 //! [`umicraft_ui::styled_text::draw_styled`].
 
+use std::time::Instant;
+
 use umicraft_game::chat::wrap::{self, ChatGeometry, Piece};
 use umicraft_ui::screens::gui_scale;
 use umicraft_ui::styled_text::{draw_styled, StyledRun};
@@ -44,6 +46,11 @@ struct ChatRow {
     alpha: f32,
 }
 
+/// The width a message is wrapped to: `floor(chatWidth / chatScale)`.
+fn wrap_width(state: &HudState) -> f32 {
+    (state.chat_style.width_px() as f32 / state.chat_style.scale).floor()
+}
+
 /// The wrapped rows of the log, oldest first, at most [`MAX_ROWS`].
 ///
 /// `GuiNewChat.setChatLine` wraps every message to `floor(chatWidth /
@@ -54,7 +61,7 @@ struct ChatRow {
 /// rows returned are the newest ones, so the slice a window shows is the same.
 fn chat_rows(state: &HudState, font: &FontAtlas, wanted: Option<usize>) -> Vec<ChatRow> {
     let opacity = state.chat_style.opacity * 0.9 + 0.1;
-    let max_width = (state.chat_style.width_px() as f32 / state.chat_style.scale).floor();
+    let max_width = wrap_width(state);
     let advance = |character: char| font.advance(character, 1.0);
     let wanted = wanted.map_or(usize::MAX, |wanted| wanted.min(MAX_ROWS));
     // Newest first, so the walk can stop; reversed at the end.
@@ -78,6 +85,43 @@ fn chat_rows(state: &HudState, font: &FontAtlas, wanted: Option<usize>) -> Vec<C
     rows
 }
 
+/// The scroll of the open chat after the messages that arrived since `seen`.
+///
+/// `GuiNewChat.setChatLine` moves a scrolled-back chat up by one row for every
+/// row it adds (`isScrolled`, `scroll(1)`), so the rows being read stay where
+/// they are; `scroll` then stops at `rows - visible` (`scroll`). Returns the new
+/// scroll and the arrival time of the newest message, to pass as `seen` next
+/// time. Only a chat that is open and scrolled back is moved; the window
+/// resets the scroll when it opens.
+#[must_use]
+pub fn chat_scroll_after(
+    state: &HudState,
+    font: &FontAtlas,
+    scroll: usize,
+    seen: Option<Instant>,
+) -> (usize, Option<Instant>) {
+    let newest = state.chat.last().map(|line| line.received);
+    let Some(seen) = seen.filter(|_| state.chat_open && scroll > 0) else {
+        return (scroll, newest);
+    };
+    let max_width = wrap_width(state);
+    let advance = |character: char| font.advance(character, 1.0);
+    let added: usize = state
+        .chat
+        .iter()
+        .filter(|line| line.received > seen)
+        .map(|line| wrap::wrap(&line.runs, max_width, &advance).len())
+        .sum();
+    if added == 0 {
+        return (scroll, newest);
+    }
+    let total = chat_rows(state, font, None).len();
+    (
+        (scroll + added).min(total.saturating_sub(visible_rows(state))),
+        newest,
+    )
+}
+
 /// How many rows the window of `state` can show when it is closed: the rows the
 /// closed chat needs, and no more.
 fn rows_needed(state: &HudState) -> Option<usize> {
@@ -87,16 +131,21 @@ fn rows_needed(state: &HudState) -> Option<usize> {
     Some((state.chat_style.height_unfocused_px() / 9).max(0) as usize)
 }
 
-/// The slice of rows the chat shows (`first..end`) and how far it is
-/// scrolled back, for `total` wrapped rows.
-fn visible_window(state: &HudState, total: usize) -> (usize, usize, usize) {
+/// How many rows fit in the chat window, open or closed (`getLineCount`).
+fn visible_rows(state: &HudState) -> usize {
     let style = state.chat_style;
     let height = if state.chat_open {
         style.height_focused_px()
     } else {
         style.height_unfocused_px()
     };
-    let limit = (height / 9).max(0) as usize;
+    (height / 9).max(0) as usize
+}
+
+/// The slice of rows the chat shows (`first..end`) and how far it is
+/// scrolled back, for `total` wrapped rows.
+fn visible_window(state: &HudState, total: usize) -> (usize, usize, usize) {
+    let limit = visible_rows(state);
     let scroll = if state.chat_open {
         state.chat_scroll.min(total.saturating_sub(limit))
     } else {
@@ -359,6 +408,52 @@ mod tests {
             runs: vec![run(text)],
             received: Instant::now(),
         }
+    }
+
+    fn at(text: &str, received: Instant) -> ChatLineView {
+        ChatLineView {
+            received,
+            ..line(text)
+        }
+    }
+
+    /// Regression: a scrolled-back chat kept its row offset, so every new
+    /// message pushed the text being read down (`GuiNewChat.setChatLine`).
+    #[test]
+    fn a_scrolled_chat_follows_the_rows_it_reads() {
+        let font = FontAtlas::fallback();
+        let start = Instant::now();
+        let mut lines: Vec<ChatLineView> = (0..40).map(|n| at(&format!("m{n}"), start)).collect();
+        let seen = Some(start);
+        let later = start + std::time::Duration::from_millis(5);
+        lines.push(at("fresh", later));
+        let state = state_with(lines);
+        let (scroll, newest) = chat_scroll_after(&state, &font, 3, seen);
+        assert_eq!(scroll, 4);
+        assert_eq!(newest, Some(later));
+        assert_eq!(chat_scroll_after(&state, &font, 3, newest).0, 3);
+    }
+
+    #[test]
+    fn a_chat_at_the_bottom_or_closed_does_not_move() {
+        let font = FontAtlas::fallback();
+        let start = Instant::now();
+        let later = start + std::time::Duration::from_millis(5);
+        let mut state = state_with(vec![at("old", start), at("new", later)]);
+        assert_eq!(chat_scroll_after(&state, &font, 0, Some(start)).0, 0);
+        state.chat_open = false;
+        assert_eq!(chat_scroll_after(&state, &font, 3, Some(start)).0, 3);
+    }
+
+    #[test]
+    fn the_followed_scroll_stops_at_the_oldest_row() {
+        let font = FontAtlas::fallback();
+        let start = Instant::now();
+        let later = start + std::time::Duration::from_millis(5);
+        let lines = vec![at("a", start), at("b", later)];
+        let state = state_with(lines);
+        // Two rows fit in the window: nothing to scroll back to.
+        assert_eq!(chat_scroll_after(&state, &font, 1, Some(start)).0, 0);
     }
 
     #[test]

@@ -16,6 +16,9 @@ pub(in crate::window) struct ChatUi {
     pub(in crate::window) sent: SentHistory,
     /// How many rows the open chat is scrolled up.
     pub(in crate::window) scroll: usize,
+    /// When the newest message the scroll already accounted for arrived
+    /// (`GuiNewChat` keeps a scrolled-back chat on the rows being read).
+    pub(in crate::window) newest_seen: Option<Instant>,
     /// When the chat opened; the caret blinks from here.
     pub(in crate::window) opened: Instant,
     /// The completion answer the chat already handled.

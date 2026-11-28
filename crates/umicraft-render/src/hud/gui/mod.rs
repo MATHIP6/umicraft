@@ -34,7 +34,7 @@ use umicraft_ui::{DrawList, FontAtlas, SpriteSheet};
 use action_bar::draw_action_bar;
 use boss_bar::draw_boss_bar;
 use chat::draw_chat;
-pub use chat::{chat_input_hit, chat_run_at, InputHit};
+pub use chat::{chat_input_hit, chat_run_at, chat_scroll_after, InputHit};
 use debug_f3::{draw_debug_f3, draw_fps_line, draw_lagometer};
 use held_name::draw_held_name;
 use hotbar::draw_hotbar;
