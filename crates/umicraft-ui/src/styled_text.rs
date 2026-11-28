@@ -7,11 +7,8 @@
 //! This is the single implementation shared by the chat and any other
 //! formatted-text consumer of the HUD.
 //!
-//! # Limitation
-//!
-//! Italic is accepted but drawn upright. Vanilla shears the glyph quad by one
-//! pixel at the top, and [`DrawCommand::Text`] only describes axis-aligned
-//! strings, so a faithful shear needs a skewed-quad command in the draw list.
+//! Italic is carried by [`TextStyle::italic`]: the renderer shears each glyph
+//! quad by one GUI unit, as `FontRenderer.renderChar` does.
 
 use std::borrow::Cow;
 
@@ -33,7 +30,7 @@ pub struct StyledRun {
     pub color: Color,
     /// Draw each glyph twice, one unit apart, and widen it by one unit.
     pub bold: bool,
-    /// Requested italic; currently drawn upright (see the module docs).
+    /// Shear the glyphs one unit at the top and bottom.
     pub italic: bool,
     /// Draw a line under the run.
     pub underlined: bool,
@@ -166,7 +163,7 @@ fn draw_run(
     } else {
         Cow::Borrowed(&run.text)
     };
-    let style = TextStyle::new(scale, color);
+    let style = TextStyle::new(scale, color).with_italic(run.italic);
     let shadow = pass == Pass::Shadow;
     // The glyphs of the shadow are one unit down and right, except the
     // Unicode ones, which `renderStringAtPos` pulls back onto the glyph.
@@ -328,6 +325,28 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    #[test]
+    fn an_italic_run_is_drawn_sheared_and_a_plain_one_upright() {
+        let font = FontAtlas::fallback();
+        let flags = |italic: bool| {
+            let mut list = DrawList::new();
+            let run = StyledRun {
+                italic,
+                ..StyledRun::plain("hi", WHITE)
+            };
+            draw_styled(&mut list, &font, [0.0, 0.0], &[run], 1.0, false, 0);
+            list.commands()
+                .iter()
+                .filter_map(|command| match command {
+                    DrawCommand::Text { style, .. } => Some(style.italic),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(flags(true), [true]);
+        assert_eq!(flags(false), [false]);
     }
 
     #[test]

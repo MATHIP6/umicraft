@@ -101,6 +101,10 @@ pub struct TextStyle {
     pub rotation: f32,
     /// The typeface; [`FontFace::Game`] by default.
     pub face: FontFace,
+    /// Shear every glyph one GUI unit at the top and bottom, as the italic
+    /// style of `FontRenderer.renderChar` does: the top edge moves right
+    /// and the bottom edge left by `scale` pixels.
+    pub italic: bool,
 }
 
 impl TextStyle {
@@ -112,7 +116,15 @@ impl TextStyle {
             color,
             rotation: 0.0,
             face: FontFace::Game,
+            italic: false,
         }
+    }
+
+    /// The same style sheared like vanilla italic text when `italic`.
+    #[must_use]
+    pub const fn with_italic(mut self, italic: bool) -> Self {
+        self.italic = italic;
+        self
     }
 
     /// The same style turned by `radians` around the text origin.

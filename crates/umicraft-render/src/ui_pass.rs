@@ -699,8 +699,9 @@ impl UiPass {
                 continue;
             };
             let quad = glyph_quad(cursor, glyph, atlas, scale);
-            if style.rotation != 0.0 {
-                self.push_turned_glyph(quad, (position, style.rotation), glyph, color, clip);
+            if style.rotation != 0.0 || style.italic {
+                let corners = glyph_corners(quad, style, position);
+                self.push_corner_glyph(corners, glyph, color, clip);
                 cursor[0] += glyph.pen.trunc() * scale;
                 continue;
             }
@@ -719,18 +720,16 @@ impl UiPass {
         }
     }
 
-    /// A glyph of turned text: its quad turned around the text origin. The
+    /// A glyph of turned or sheared text, given by its four corners. The
     /// clip only culls glyphs whose bounding box is outside it; a glyph that
     /// straddles the clip edge is drawn whole.
-    fn push_turned_glyph(
+    fn push_corner_glyph(
         &mut self,
-        quad: Rect,
-        (origin, radians): ([f32; 2], f32),
+        corners: [[f32; 2]; 4],
         glyph: &Glyph,
         color: [f32; 4],
         clip: Rect,
     ) {
-        let corners = turned_corners(quad, origin, radians);
         let xs = corners.map(|c| c[0]);
         let ys = corners.map(|c| c[1]);
         let low = |v: [f32; 4]| v.into_iter().fold(f32::INFINITY, f32::min);
@@ -937,15 +936,19 @@ fn glyph_quad(cursor: [f32; 2], glyph: &Glyph, atlas: &FontAtlas, scale: f32) ->
     )
 }
 
-/// The corners of `quad` (top-left first, clockwise) turned by `radians`
-/// around `origin`.
-fn turned_corners(quad: Rect, origin: [f32; 2], radians: f32) -> [[f32; 2]; 4] {
-    let (sin, cos) = radians.sin_cos();
+/// The corners of a glyph `quad` (top-left first, clockwise) after the
+/// italic shear and the turn of `style` around `origin`.
+///
+/// Source: `FontRenderer.renderChar` moves the top corners one unit right and
+/// the bottom corners one unit left for an italic glyph.
+fn glyph_corners(quad: Rect, style: &TextStyle, origin: [f32; 2]) -> [[f32; 2]; 4] {
+    let shear = if style.italic { style.scale } else { 0.0 };
+    let (sin, cos) = style.rotation.sin_cos();
     [
-        [quad.x, quad.y],
-        [quad.right(), quad.y],
-        [quad.right(), quad.bottom()],
-        [quad.x, quad.bottom()],
+        [quad.x + shear, quad.y],
+        [quad.right() + shear, quad.y],
+        [quad.right() - shear, quad.bottom()],
+        [quad.x - shear, quad.bottom()],
     ]
     .map(|[x, y]| {
         let (dx, dy) = (x - origin[0], y - origin[1]);
@@ -989,11 +992,46 @@ mod tests {
     #[test]
     fn a_quarter_turn_swaps_the_axes_of_a_quad() {
         let quad = umicraft_ui::Rect::new(10.0, 10.0, 8.0, 4.0);
-        let corners = turned_corners(quad, [10.0, 10.0], std::f32::consts::FRAC_PI_2);
+        let style = TextStyle::new(1.0, COLOR).rotated(std::f32::consts::FRAC_PI_2);
+        let corners = glyph_corners(quad, &style, [10.0, 10.0]);
         // The top-right corner (+8, 0) goes to (0, +8): text turned
         // clockwise on a y-down screen runs downwards.
         assert!((corners[1][0] - 10.0).abs() < 1e-4 && (corners[1][1] - 18.0).abs() < 1e-4);
         assert!((corners[3][0] - 6.0).abs() < 1e-4 && (corners[3][1] - 10.0).abs() < 1e-4);
+    }
+
+    /// `FontRenderer.renderChar`: an italic glyph leans right, the top edge
+    /// one unit right and the bottom edge one unit left of an upright one.
+    #[test]
+    fn an_italic_glyph_leans_one_unit_each_way() {
+        let quad = umicraft_ui::Rect::new(10.0, 10.0, 8.0, 8.0);
+        let style = TextStyle::new(2.0, COLOR).with_italic(true);
+        let corners = glyph_corners(quad, &style, [10.0, 10.0]);
+        assert_eq!(corners[0], [12.0, 10.0]);
+        assert_eq!(corners[1], [20.0, 10.0]);
+        assert_eq!(corners[2], [16.0, 18.0]);
+        assert_eq!(corners[3], [8.0, 18.0]);
+    }
+
+    #[test]
+    fn italic_text_is_drawn_and_wider_than_upright_text() {
+        let span = |italic: bool| {
+            let mut list = DrawList::new();
+            let style = TextStyle::new(2.0, COLOR).with_italic(italic);
+            list.text([10.0, 40.0], "IIII", style);
+            let mut pass = UiPass::new(128, 128);
+            pass.rebuild(&list, &atlas());
+            let xs: Vec<f32> = pass
+                .overlay
+                .vertices()
+                .iter()
+                .map(|v| v.position[0])
+                .collect();
+            let low = xs.iter().copied().fold(f32::INFINITY, f32::min);
+            let high = xs.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            high - low
+        };
+        assert!(span(true) > span(false));
     }
 
     #[test]
