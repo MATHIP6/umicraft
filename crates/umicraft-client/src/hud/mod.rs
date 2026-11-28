@@ -5,6 +5,7 @@
 
 pub mod cache;
 pub(crate) mod chat;
+pub(crate) mod chat_stat;
 pub(crate) mod dials;
 pub(crate) mod player;
 pub(crate) mod social;

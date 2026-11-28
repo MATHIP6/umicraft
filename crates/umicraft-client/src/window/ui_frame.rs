@@ -275,6 +275,7 @@ impl App {
             // The selection follows the pointer while the button is held.
             self.chat.input.drag_to(hit.index);
         }
+        let inventory_key = self.options.keys.get(Action::Inventory).label(&self.lang);
         let rows = self
             .chat
             .hover
@@ -285,6 +286,7 @@ impl App {
                     hover,
                     self.options.controls.advanced_tooltips,
                     self.world.as_ref().map(|world| world.maps().as_ref()),
+                    (atlas, &inventory_key),
                 )
             })
             .unwrap_or_default();

@@ -5,6 +5,7 @@ umicraft.resourcePack.defaultDescription=The default look of Minecraft
 umicraft.resourcePack.missingMetadata=Missing pack.mcmeta :(
 umicraft.resourcePack.parentFolder=Back to the parent folder
 umicraft.hover.invalidItem=Invalid Item!
+umicraft.hover.invalidStat=Invalid statistic/achievement!
 umicraft.hover.invalidEntity=Invalid Entity!
 umicraft.server.pinging=Pinging...
 umicraft.server.noConnection=(no connection)

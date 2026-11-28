@@ -18,8 +18,11 @@ use umicraft_game::server::maps::MapStore;
 use umicraft_protocol::packets::play::ItemStack;
 use umicraft_render::{ChatLineView, ChatRunView};
 use umicraft_ui::widgets::tooltip::TooltipRow;
+use umicraft_ui::FontAtlas;
 
 use crate::screens::tooltip;
+
+use super::chat_stat::stat_rows;
 
 /// The colour of the "Invalid Item!" line (`EnumChatFormatting.RED`).
 const RED: u32 = 0x00FF_5555;
@@ -82,12 +85,13 @@ fn run_view(run: &Run) -> ChatRunView {
 ///
 /// `show_text` is one row per line of the text; `show_item` is the item
 /// tooltip, or a red `umicraft.hover.invalidItem`; `show_entity` shows only with advanced
-/// tooltips on. `show_achievement` needs the statistics list, which the
-/// client does not have, so it shows nothing.
+/// tooltips on. `show_achievement` is the statistic tooltip of
+/// [`super::chat_stat`].
 pub(crate) fn hover_rows(
     hover: &HoverEvent,
     advanced: bool,
     maps: Option<&MapStore>,
+    stat: (&FontAtlas, &str),
 ) -> Vec<TooltipRow> {
     match hover {
         HoverEvent::ShowText(runs) => text_rows(runs),
@@ -96,7 +100,8 @@ pub(crate) fn hover_rows(
             || vec![row(lang().tr("umicraft.hover.invalidEntity"), RED)],
             |lines| lines.into_iter().map(|line| row(&line, WHITE)).collect(),
         ),
-        HoverEvent::ShowEntity(_) | HoverEvent::ShowAchievement(_) => Vec::new(),
+        HoverEvent::ShowAchievement(id) => stat_rows(id, &lang(), stat.0, stat.1),
+        HoverEvent::ShowEntity(_) => Vec::new(),
     }
 }
 
@@ -222,7 +227,10 @@ mod tests {
     #[test]
     fn show_entity_needs_advanced_tooltips() {
         let hover = HoverEvent::ShowEntity(r#"{id:"x",name:"Pig"}"#.to_string());
-        assert!(hover_rows(&hover, false, None).is_empty());
-        assert_eq!(hover_rows(&hover, true, None)[0].text, "Pig");
+        assert!(hover_rows(&hover, false, None, (&FontAtlas::fallback(), "")).is_empty());
+        assert_eq!(
+            hover_rows(&hover, true, None, (&FontAtlas::fallback(), ""))[0].text,
+            "Pig"
+        );
     }
 }
