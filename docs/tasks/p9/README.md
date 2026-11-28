@@ -74,8 +74,8 @@ umicraft-client/src/hud_view.rs
   hotbar pop-up bounce, the spectator crosshair, `heldItemTooltips`, F3
   `getActualState` properties and the mount max health. Tab completion already
   cycled in place, and the GUI scale option came with P10.
-- F3 `B:` (hidden entities) stays 0: the entity cull is a distance and
-  behind-the-camera test (`scene::entity::cull`), not a frustum count.
+- F3 `B:` counts the entities of `scene::entity::cull` (distance and behind the
+  camera), not the frustum and occlusion tests of the reference.
 - Mount hearts of a donkey, mule or bred horse need the `Entity Properties`
   packet (the client default is the horse class base, 53).
 - Per-zone dirty flags: the single `hud_dirty` boolean stays, see ADR-0036.

@@ -80,6 +80,8 @@ pub struct F3Frame<'a> {
     pub world: &'a DebugWorld,
     /// Entities and particles drawn in that frame.
     pub drawn: (usize, usize),
+    /// Entities the mesher left out of view (`B:`).
+    pub hidden: usize,
     /// The GPU adapter.
     pub adapter: &'a AdapterSummary,
     /// The process memory.
@@ -133,6 +135,8 @@ pub struct Live<'a> {
     pub camera: &'a Camera,
     /// Detailed latency metrics for the input subsystem.
     pub input_latency: InputLatencyMetrics,
+    /// Entities the mesher leaves out of view this frame (`B:` of F3).
+    pub hidden_entities: usize,
 }
 
 /// Builds the F3 columns from the live renderer and world, falling back to
@@ -154,6 +158,7 @@ pub fn build_live(
         camera: live.camera,
         world: world.map_or(&no_world, WorldView::debug_world),
         drawn: world.map_or((0, 0), WorldView::drawn_counts),
+        hidden: live.hidden_entities,
         adapter: renderer.map_or(&no_adapter, Renderer::adapter),
         memory: crate::debug::process_memory::read(),
         gpu: GpuReading::of(renderer),
@@ -198,9 +203,9 @@ pub fn build(frame: &F3Frame<'_>) -> DebugF3View {
         chunks_rendered: frame.chunk_meshes,
         chunks_total: frame.chunk_meshes,
         render_distance: u32::from(frame.video.render_distance),
-        entities_rendered: frame.drawn.0,
+        entities_rendered: frame.drawn.0.saturating_sub(frame.hidden),
         entities_total: frame.world.loaded_entities,
-        entities_hidden: 0,
+        entities_hidden: frame.hidden,
         particles: frame.drawn.1,
         loaded_entities: frame.world.loaded_entities,
         chunk_cache: frame.world.chunk_cache,
@@ -303,6 +308,7 @@ mod tests {
             camera,
             world,
             drawn: (4, 17),
+            hidden: 0,
             adapter,
             memory: MemoryUse {
                 used: 300 * 1024 * 1024,
@@ -373,6 +379,21 @@ mod tests {
         assert!(view
             .left
             .contains(&"XYZ: 1.500 / 64.00000 / -2.000".to_owned()));
+    }
+
+    #[test]
+    fn hidden_entities_leave_the_rendered_count_and_fill_b() {
+        let world = DebugWorld {
+            loaded_entities: 9,
+            ..DebugWorld::default()
+        };
+        let camera = Camera::default();
+        let video = VideoOptions::default();
+        let adapter = AdapterSummary::default();
+        let mut frame = frame(&camera, &video, &world, &adapter);
+        frame.hidden = 3;
+        let left = build(&frame).left.join("\n");
+        assert!(left.contains("E: 1/9, B: 3"), "{left}");
     }
 
     #[test]

@@ -649,3 +649,57 @@ fn a_click_that_only_swings_does_not_sync_the_slot() {
     run_ticks(&mut game, &mut queue, 1);
     assert_eq!(tags(&queue), ["slot2", "move"], "the next updateController");
 }
+
+fn stack(item_id: i16, count: i8) -> WireItemStack {
+    WireItemStack {
+        item_id,
+        stack_size: count,
+        damage: 0,
+        nbt: None,
+    }
+}
+
+fn set_hotbar_slot(game: &mut Game, index: i16, item: WireItemStack) {
+    use umicraft_protocol::packets::play::clientbound::SetSlot;
+
+    let mut queue = CommandQueue::default();
+    let (frames, _received) = mpsc::sync_channel(16);
+    let packet = SetSlot {
+        window_id: 0,
+        slot: 36 + index,
+        item,
+    };
+    handle_net(game, PlayEvent::SetSlot(packet), &mut queue, &frames);
+}
+
+/// `handleSetSlot` starts the bounce of a hotbar stack that is new or bigger,
+/// and the HUD shows it until it runs out.
+#[test]
+fn a_new_or_bigger_hotbar_stack_bounces_in_the_hud() {
+    let mut game = placed_game();
+    set_hotbar_slot(&mut game, 2, stack(1, 3));
+    assert!(game.hud().hotbar_popups[2] > 0, "a new stack bounces");
+    assert!(game.hud_dirty, "the HUD is built again");
+    let mut queue = CommandQueue::default();
+    run_ticks(&mut game, &mut queue, 6);
+    assert_eq!(game.hud().hotbar_popups[2], 0, "the bounce ends");
+
+    set_hotbar_slot(&mut game, 2, stack(1, 2));
+    assert_eq!(game.hud().hotbar_popups[2], 0, "a smaller stack does not");
+    set_hotbar_slot(&mut game, 2, stack(1, 5));
+    assert!(game.hud().hotbar_popups[2] > 0, "a bigger one does");
+}
+
+/// `GuiIngame.showCrosshair`: a spectator sees the crosshair only on an
+/// entity or a container; every other mode always does.
+#[test]
+fn a_spectator_sees_the_crosshair_only_on_something_to_open() {
+    let mut game = placed_game();
+    assert!(game.hud().crosshair);
+    game.gamemode = GameMode::Spectator;
+    game.pitch = -89.0;
+    assert!(
+        !game.hud().crosshair,
+        "the sky is neither an entity nor a container"
+    );
+}

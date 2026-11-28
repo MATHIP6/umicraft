@@ -54,7 +54,7 @@ First assessed on `main` at `27838a4` (details in `docs/roadmap-review.md`
 | M7 First-run assets & resource packs | **Done** (confirmed by the owner); language files used since P9/P10, animated texture timeline checked in P7h | P7 |
 | M8 Entities | P5 code complete (2026-11-24); owner comparison with vanilla open | P5 |
 | M9 Inventory & containers | **Done** in P3 and P4 (validated by the owner on 2026-11-22) | — |
-| M10 Chat, scoreboard, settings, keybinds | P9 code complete (F3 `B:` count left); not compared with vanilla on screen yet. Settings, keybinds and every options page done in P10 (code complete, owner validation open; Smooth Camera, Super Secret Settings, Force Unicode Font and pack icons are out) | P9, P10 |
+| M10 Chat, scoreboard, settings, keybinds | P9 code complete; not compared with vanilla on screen yet. Settings, keybinds and every options page done in P10 (code complete, owner validation open; Smooth Camera, Super Secret Settings, Force Unicode Font and pack icons are out) | P9, P10 |
 | M11 Audio | Partial — code complete (index, engine, cues, packets, GUI clicks, volumes, music, non-blocking measured); owner validation by ear open | P11 |
 | M12 Accounts & main menu | Title, server list, connecting, disconnected, statistics and achievements screens done in P10 (code complete, owner validation open; Realms, LAN and SRV are out); account manager and chooser code complete in F1 (ADR-0067/0068) | P10 (rest of menus), F1 (accounts) |
 | M13 Premium authentication | Session join and encryption done in P12 (launcher session, ADR-0053/0054; tested against a fake server, owner check with a real token open); Microsoft login, keychain and isolation code complete in F1, not tried against real Microsoft servers | P12, F1 |
@@ -542,7 +542,7 @@ breaking, explosions, potions and rain match vanilla on the checklist.
 ### P9 — HUD, chat & social
 
 **Status (2026-11-27): code complete, owner validation open.** The gaps of
-2026-11-22 are closed; left are the F3 `B:` count (no frustum count yet), the
+2026-11-22 are closed; left are the F3 `B:` count (cull-based, not the reference frustum), the
 mount hearts of a donkey, mule or bred horse without an `Entity Properties`
 packet, and the comparison with vanilla on screen (`docs/tasks/p9/README.md`).
 

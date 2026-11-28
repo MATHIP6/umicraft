@@ -6,6 +6,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::scene::entity::cull::{self, CullView};
 use umicraft_game::inventory::HOTBAR_START;
 use umicraft_render::{
     chat_input_hit, chat_run_at, chat_scroll_after, gui_scale, ChatInputView, HudState,
@@ -214,6 +215,19 @@ impl App {
             }
         }
         let chatting = self.screen == Screen::Chat;
+        let hidden_entities = if self.show_f3 {
+            let view = CullView {
+                eye: self.camera.relative_eye(),
+                forward: self.camera.forward(),
+            };
+            self.frame
+                .entities
+                .iter()
+                .filter(|entity| cull::out_of_view(entity, view))
+                .count()
+        } else {
+            0
+        };
         let debug_f3 = self.show_f3.then(|| {
             let (mean_allocs, mean_bytes) = self.clock.metrics_window.mean_allocs_per_frame();
             crate::debug::f3::build_live(
@@ -229,6 +243,7 @@ impl App {
                     display: (width, height),
                     camera: &self.camera,
                     input_latency: self.clock.metrics_window.input_latency(),
+                    hidden_entities,
                 },
             )
         });
