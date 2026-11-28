@@ -27,7 +27,7 @@ umicraft-client/src/hud_view.rs
 | P9-b | Hotbar with item icons, crosshair, XP, held-item name | done |
 | P9-c | Vitals: hearts (styles, absorption, flash, effects), food, armour, air, mount health, jump bar | done |
 | P9-d | Chat: `game/chat/`, `.lang` files, full styles, history, Tab, commands, click/hover | done |
-| P9-e | Tab list (header/footer, ping, heads), sidebar, teams, below-name and list objectives | done (head skins and heart flash pending) |
+| P9-e | Tab list (header/footer, ping, heads), sidebar, teams, below-name and list objectives | done |
 | P9-f | Titles, subtitles, action bar, boss bar | done |
 | P9-g | Vanilla F3, Umicraft debug on F4 (approved 2026-11-02) | done |
 | P9-h | Delete legacy HUD, F3 data feed, `Riding Jump`, scale 1-4 tests, parity rows, sources | done (see "Not done") |
@@ -68,14 +68,12 @@ umicraft-client/src/hud_view.rs
 
 ## Not done
 
-- Italic shear of chat, held-item name and titles (italic text is upright).
-- Player heads in the tab list (needs skins) and the heart flash of the list
-  objective.
-- Achievement hover in chat.
-- Tab completion replaces the word instead of cycling in place.
-- The chat scroll position is not kept when new lines arrive.
-- The GUI-scale video option (1 to 4, auto) is not wired: needs an options
-  field, the options screen and passing `ScaledResolution` to every HUD module.
+- Done in the close-out (2026-11-27): italic shear, tab-list heads (with the
+  upside-down `Dinnerbone` and `Grumm`) and the list hearts flash, the
+  achievement and statistic hover, the chat scroll that follows new lines, the
+  hotbar pop-up bounce, the spectator crosshair, `heldItemTooltips`, F3
+  `getActualState` properties and the mount max health. Tab completion already
+  cycled in place, and the GUI scale option came with P10.
 - F3 `B:` (hidden entities) stays 0: the entity cull is a distance and
   behind-the-camera test (`scene::entity::cull`), not a frustum count.
 - Mount hearts of a donkey, mule or bred horse need the `Entity Properties`
