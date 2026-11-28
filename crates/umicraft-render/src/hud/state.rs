@@ -39,6 +39,8 @@ pub struct HudState {
     pub selected_slot: u8,
     /// Whether the crosshair is drawn.
     pub crosshair: bool,
+    /// Ticks left of the pop-up bounce of each hotbar item, `0` for none.
+    pub hotbar_popups: [u8; HOTBAR_SLOTS],
     /// The items of the nine hotbar slots, with their counts and durability.
     pub hotbar_items: [Option<SlotItem>; HOTBAR_SLOTS],
     /// The hearts, armour, food, mount hearts and air; `None` hides them
@@ -239,6 +241,7 @@ impl Default for HudState {
             selected_slot: 0,
             crosshair: true,
             hotbar_items: Default::default(),
+            hotbar_popups: [0; HOTBAR_SLOTS],
             vitals: Some(vitals_view(&VitalsInput::default())),
             bar: BottomBar::Experience {
                 fill: 0,

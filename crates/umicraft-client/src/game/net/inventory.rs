@@ -5,7 +5,7 @@
 use std::sync::mpsc::SyncSender;
 
 use umicraft_game::entity::EntityId;
-use umicraft_game::inventory::{HorseWindow, WindowKind};
+use umicraft_game::inventory::{HorseWindow, WindowKind, HOTBAR_START};
 use umicraft_protocol::packets::play::clientbound::{
     ConfirmTransaction, OpenWindow, SetSlot, WindowItems, WindowProperty,
 };
@@ -74,10 +74,28 @@ pub(super) fn close_window(game: &mut Game, window_id: u8, frames: &SyncSender<R
 
 /// `Set Slot`.
 pub(super) fn set_slot(game: &mut Game, packet: SetSlot, frames: &SyncSender<RenderEvent>) {
+    if packet.window_id == 0 {
+        note_popup(game, &packet);
+    }
     game.windows
         .apply_set_slot(packet.window_id, packet.slot, packet.item);
     sync_armor(game);
     publish_inventory(game, frames);
+}
+
+/// Starts the bounce of a hotbar item the server gave
+/// (`NetHandlerPlayClient.handleSetSlot`).
+fn note_popup(game: &mut Game, packet: &SetSlot) {
+    let Ok(slot) = usize::try_from(packet.slot) else {
+        return;
+    };
+    let old = slot
+        .checked_sub(HOTBAR_START)
+        .and_then(|index| game.windows.hotbar().get(index).cloned().flatten())
+        .map(|stack| stack.stack_size);
+    let new = (packet.item.item_id >= 0).then_some(packet.item.stack_size);
+    game.hotbar.popups.on_set_slot(slot, old, new);
+    game.hud_dirty = true;
 }
 
 /// `Window Items`: every slot of a window.

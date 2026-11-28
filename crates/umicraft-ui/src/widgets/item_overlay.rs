@@ -73,11 +73,18 @@ pub fn durability_bar(damage: i16, max_durability: i16) -> Option<DurabilityBar>
 ///
 /// `cell` is the 16x16 GUI-pixel item area already scaled to physical pixels;
 /// every offset below scales with `cell.width / 16`. Commands are emitted in
-/// this order: the [`crate::DrawCommand::Item`] icon, the count (shadow first)
-/// when `item.count > 1`, then the durability bar when the item is damaged.
+/// this order: the [`crate::DrawCommand::Item`] icon, then the overlays of
+/// [`draw_item_overlays`].
 pub fn draw_item(draw: &mut DrawList, atlas: &FontAtlas, cell: Rect, item: &SlotItem) {
-    let scale = cell.width / ITEM_GUI_SIZE;
     draw.item(item.key, cell, item.glint);
+    draw_item_overlays(draw, atlas, cell, item);
+}
+
+/// Draws the stack count and the durability bar of an item without its icon
+/// (`RenderItem.renderItemOverlays`), for callers that place the icon
+/// themselves, like the bouncing hotbar item.
+pub fn draw_item_overlays(draw: &mut DrawList, atlas: &FontAtlas, cell: Rect, item: &SlotItem) {
+    let scale = cell.width / ITEM_GUI_SIZE;
     if item.count > 1 {
         draw_count(draw, atlas, cell, scale, item.count);
     }

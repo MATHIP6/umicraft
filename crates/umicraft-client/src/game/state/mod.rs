@@ -9,6 +9,7 @@ use umicraft_assets::profile_textures::{AccountSkinFetcher, ProfileTextures};
 use umicraft_game::entity::{EntityId, EntityKind, EntityRecord, EntityStore};
 use umicraft_game::gamemode::GameMode;
 use umicraft_game::hand::HandState;
+use umicraft_game::hud::crosshair::spectator_crosshair;
 use umicraft_game::interaction::Interaction;
 use umicraft_game::inventory::creative::CreativeScreen;
 use umicraft_game::inventory::WindowManager;
@@ -274,6 +275,20 @@ impl Game {
         look_direction(self.yaw.to_radians(), self.pitch.to_radians())
     }
 
+    /// Whether the crosshair is drawn: always, except in spectator mode,
+    /// where only an entity or a container block shows it
+    /// (MCP `GuiIngame.showCrosshair`).
+    fn crosshair_shown(&self) -> bool {
+        if self.gamemode != GameMode::Spectator {
+            return true;
+        }
+        let pointed = combat::pointed(self);
+        let block_id = pointed
+            .block()
+            .and_then(|hit| self.world.as_ref().map(|world| world.block(hit.block).id()));
+        spectator_crosshair(pointed.entity().is_some(), block_id)
+    }
+
     /// The block the crosshair points at, entities aside.
     pub(super) fn block_target(&self) -> Option<RayHit> {
         let eye = self.eye()?;
@@ -371,7 +386,8 @@ impl Game {
             level: self.vitals.level,
             score: self.vitals.score,
             selected_slot: self.hotbar.selected,
-            crosshair: true,
+            crosshair: self.crosshair_shown(),
+            hotbar_popups: self.hotbar.popups.remaining(),
             chat: self.chat.lines.iter().cloned().collect(),
             action_bar: social_view::action_bar_view(&self.social.action_bar),
             title: social_view::title_view(&self.social.title),

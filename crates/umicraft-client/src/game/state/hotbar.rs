@@ -3,6 +3,7 @@
 //! The hotbar: the selected slot, its sync with the server and the presses of
 //! the slot, drop and pick-block keys between two ticks.
 
+use umicraft_game::hud::HotbarPopups;
 use umicraft_game::item_use::DropKind;
 
 /// The selected hotbar slot and the presses the next tick takes.
@@ -23,6 +24,8 @@ pub(in crate::game) struct Hotbar {
     pub(in crate::game) drops: Vec<DropKind>,
     /// The pick-block presses since the last tick.
     pub(in crate::game) picks: u32,
+    /// The bounce of the items the server just gave.
+    pub(in crate::game) popups: HotbarPopups,
 }
 
 impl Hotbar {
