@@ -14,12 +14,16 @@
 //! - [`air`]: the air bubbles;
 //! - [`mount`]: the health of a ridden mob and the horse jump power;
 //! - [`xp`]: the experience bar, its level and the jump bar that replaces it;
-//! - [`held_name`]: the name that fades in above the hotbar.
+//! - [`held_name`]: the name that fades in above the hotbar;
+//! - [`hotbar_popup`]: the bounce of a picked-up hotbar item;
+//! - [`crosshair`]: when a spectator sees the crosshair.
 
 pub mod air;
 pub mod boss_bar;
+pub mod crosshair;
 pub mod flash;
 pub mod held_name;
+pub mod hotbar_popup;
 pub mod mount;
 pub mod sidebar;
 pub mod tab_hearts;
@@ -32,6 +36,7 @@ pub mod xp;
 pub use air::{air_view, AirView};
 pub use flash::{FlashFrame, HealthFlash, HurtResistance};
 pub use held_name::{HeldIdentity, HeldNameTracker, HeldNameView};
+pub use hotbar_popup::HotbarPopups;
 pub use mount::{HorseJump, MountHeartView, Riding};
 pub use vitals::{
     vitals_view, ArmorView, Fill, FoodIconView, HeartBody, HeartStyle, HeartView, VitalsInput,

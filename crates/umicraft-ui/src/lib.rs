@@ -64,4 +64,4 @@ pub use screens::{
 };
 pub use text::{FontAtlas, FontError, Glyph};
 pub use theme::{Theme, ThemeId};
-pub use widgets::{draw_item, SlotItem};
+pub use widgets::{draw_item, draw_item_overlays, SlotItem};

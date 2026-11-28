@@ -64,6 +64,9 @@ pub struct ChatOptions {
     pub width: f32,
     /// `reducedDebugInfo`.
     pub reduced_debug: bool,
+    /// `heldItemTooltips`: whether the name of the held item shows above the
+    /// hotbar. Vanilla has no screen for it, only the options file.
+    pub held_item_tooltips: bool,
 }
 
 impl Default for ChatOptions {
@@ -79,6 +82,7 @@ impl Default for ChatOptions {
             height_unfocused: 0.444_444_45,
             width: 1.0,
             reduced_debug: false,
+            held_item_tooltips: true,
         }
     }
 }
@@ -95,6 +99,9 @@ impl ChatOptions {
             height_focused: self.height_focused,
             height_unfocused: self.height_unfocused,
         };
+        if !self.held_item_tooltips {
+            hud.held_name = None;
+        }
         if self.visibility == ChatVisibility::Hidden {
             hud.chat.clear();
         }
@@ -171,6 +178,28 @@ mod tests {
         assert!(!run.bold && !run.italic && !run.underlined);
         assert!(!run.strikethrough && !run.obfuscated);
         assert_eq!(run.text, "hi", "the text itself is kept");
+    }
+
+    #[test]
+    fn held_item_tooltips_off_hides_the_held_name() {
+        let held = |hud: &mut HudState| {
+            hud.held_name = Some(umicraft_game::hud::HeldNameView {
+                text: "Stone".to_owned(),
+                italic: false,
+                alpha: 255,
+                dy: 0,
+            });
+        };
+        let mut hud = HudState::default();
+        held(&mut hud);
+        ChatOptions::default().apply(&mut hud);
+        assert!(hud.held_name.is_some(), "on by default");
+        let options = ChatOptions {
+            held_item_tooltips: false,
+            ..ChatOptions::default()
+        };
+        options.apply(&mut hud);
+        assert!(hud.held_name.is_none());
     }
 
     #[test]

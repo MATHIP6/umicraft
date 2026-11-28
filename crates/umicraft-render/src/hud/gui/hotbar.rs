@@ -4,7 +4,7 @@
 //! counts and durability bars (MCP `GuiIngame.renderTooltip`,
 //! `renderHotbarItem`).
 
-use umicraft_ui::{draw_item, FontAtlas, Rect, SpriteSheet};
+use umicraft_ui::{draw_item_overlays, FontAtlas, Rect, SpriteSheet};
 
 use super::icons::{Canvas, Region};
 use crate::hud::{HudState, HOTBAR_SLOTS};
@@ -49,8 +49,30 @@ pub(super) fn draw_hotbar(
             16.0 * scale,
             16.0 * scale,
         );
-        draw_item(canvas.list(), font, cell, item);
+        let icon = popup_rect(cell, state.hotbar_popups[index], scale);
+        canvas.list().item(item.key, icon, item.glint);
+        draw_item_overlays(canvas.list(), font, cell, item);
     }
+}
+
+/// The icon rectangle of a bouncing item (`GuiIngame.renderHotbarItem`): with
+/// `f` ticks left, the icon is scaled by `1 / (1 + f / 5)` across and
+/// `(2 + f / 5) / 2` up, around `(x + 8, y + 12)` so it stays on the slot's
+/// floor. Only the icon bounces; count and durability bar stay put. The HUD
+/// is rebuilt once per tick, so `partialTicks` is taken as 0.
+fn popup_rect(cell: Rect, ticks_left: u8, scale: f32) -> Rect {
+    if ticks_left == 0 {
+        return cell;
+    }
+    let stretch = 1.0 + f32::from(ticks_left) / 5.0;
+    let (width, height) = (cell.width / stretch, cell.height * (stretch + 1.0) / 2.0);
+    let (pivot_x, pivot_y) = (cell.x + 8.0 * scale, cell.y + 12.0 * scale);
+    Rect::new(
+        pivot_x + (cell.x - pivot_x) / stretch,
+        pivot_y + (cell.y - pivot_y) * (stretch + 1.0) / 2.0,
+        width,
+        height,
+    )
 }
 
 #[cfg(test)]
@@ -109,6 +131,37 @@ mod tests {
         });
         // 160 - 90 + 40 + 2 = 112 units, 240 - 19 = 221 units.
         assert_eq!(item, Some(Rect::new(224.0, 442.0, 32.0, 32.0)));
+        let count = list
+            .commands()
+            .iter()
+            .any(|c| matches!(c, DrawCommand::Text { text, .. } if text == "5"));
+        assert!(count);
+    }
+
+    #[test]
+    fn a_bouncing_item_is_squeezed_across_and_stretched_up_around_its_floor() {
+        let cell = Rect::new(224.0, 442.0, 32.0, 32.0);
+        assert_eq!(popup_rect(cell, 0, 2.0), cell);
+        // Five ticks left: stretch 2, so half as wide and 1.5 times as high,
+        // pivoting on (cell.x + 16, cell.y + 24).
+        let rect = popup_rect(cell, 5, 2.0);
+        assert_eq!(rect, Rect::new(232.0, 442.0 + 24.0 - 36.0, 16.0, 48.0));
+    }
+
+    #[test]
+    fn the_count_of_a_bouncing_item_is_not_squeezed() {
+        let mut list = DrawList::new();
+        let sheet = SpriteSheet::new(0.0, 0.0, 1.0, 1.0, 256, 256);
+        let mut state = HudState::default();
+        state.hotbar_items[2] = Some(stone());
+        state.hotbar_popups[2] = 5;
+        let mut canvas = Canvas::new(&mut list, (640, 480));
+        draw_hotbar(&mut canvas, &state, &FontAtlas::fallback(), &sheet);
+        let icon = list.commands().iter().find_map(|c| match c {
+            DrawCommand::Item { dst, .. } => Some(*dst),
+            _ => None,
+        });
+        assert_eq!(icon.map(|r| r.width), Some(16.0));
         let count = list
             .commands()
             .iter()

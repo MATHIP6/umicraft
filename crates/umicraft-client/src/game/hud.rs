@@ -61,7 +61,8 @@ pub(super) fn tick_hud_view(game: &mut Game) {
         held: game.windows.selected_item(),
         jump: game.controls.input.jump,
     };
-    if game.hud_view.tick(&facts) {
+    let bouncing = game.hotbar.popups.tick();
+    if game.hud_view.tick(&facts) || bouncing {
         game.hud_dirty = true;
     }
 }
